@@ -7,13 +7,29 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
-add_subdirectory(ide-log-agent-device)
-add_subdirectory(ide-log-agent-host)
 add_subdirectory(slog)
-add_subdirectory(msnpureport)
 add_subdirectory(common)
 add_subdirectory(alog)
 add_subdirectory(ep)
+add_subdirectory(iam)
 add_subdirectory(rc)
-add_subdirectory(mdc)
-add_subdirectory(stackcore)
+
+set(SLOG_UT_TARGETS
+    log_slogd_utest
+    log_common_utest
+    log_libalog_utest
+    ep_alog_host_utest
+    ep_log_daemon_utest
+    ep_slogd_utest
+    ep_slogd_milan_utest
+    ep_stackcore_utest
+    iam_slog_utest
+    iam_app_slog_utest
+    iam_slogd_utest
+    mergeslog_coverage_utest
+    log_proxy_coverage_utest
+    hardware_zip_coverage_utest
+    rc_alog_utest
+)
+
+add_custom_target(slog_ut DEPENDS ${SLOG_UT_TARGETS})

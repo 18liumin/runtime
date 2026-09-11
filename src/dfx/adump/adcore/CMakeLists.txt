@@ -11,6 +11,7 @@
 set(adcoreHeaders
     ${CMAKE_CURRENT_LIST_DIR}/../external
     ${CMAKE_CURRENT_LIST_DIR}/../inc/adump
+    ${CMAKE_CURRENT_LIST_DIR}/../../../../pkg_inc/dump
     ${CMAKE_CURRENT_LIST_DIR}/
     ${CMAKE_CURRENT_LIST_DIR}/epoll
     ${CMAKE_CURRENT_LIST_DIR}/commopts
@@ -22,11 +23,10 @@ set(adcoreHeaders
     ${CMAKE_CURRENT_LIST_DIR}/hdc
 
     ${LIBC_SEC_HEADER}
-    ${PROJECT_TOP_DIR}/include/driver
+    ${PROJECT_TOP_DIR}/pkg_inc/driver
 )
 
 set(adcoreSrcList
-    ${CMAKE_CURRENT_LIST_DIR}/hdc/hdc_api.cpp
     ${CMAKE_CURRENT_LIST_DIR}/adcore_api.cpp
     ${CMAKE_CURRENT_LIST_DIR}/device/adx_dsmi.cpp
     ${CMAKE_CURRENT_LIST_DIR}/device/adx_device.cpp
@@ -47,6 +47,16 @@ set(adcoreSrcList
     ${CMAKE_CURRENT_LIST_DIR}/common/create_func.cpp
     ${CMAKE_CURRENT_LIST_DIR}/component/server_register.cpp
 )
+
+if(PRODUCT STREQUAL "ascend031")
+    list(APPEND adcoreSrcList
+        ${CMAKE_CURRENT_LIST_DIR}/hdc/hdc_api_stub.cpp
+    )
+else()
+    list(APPEND adcoreSrcList
+        ${CMAKE_CURRENT_LIST_DIR}/hdc/hdc_api.cpp
+    )
+endif()
 
 add_library(adcore STATIC
     ${adcoreSrcList}
@@ -82,6 +92,7 @@ target_compile_definitions(adcore PRIVATE
     $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:OS_TYPE=0>
     $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:OS_TYPE=1>
     $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:SECUREC_USING_STD_SECURE_LIB=0>
+    $<$<STREQUAL:${PRODUCT},ascend031>:TINY_COMPILE>
 )
 
 if(${TARGET_SYSTEM_NAME} STREQUAL "Windows")
@@ -95,7 +106,7 @@ target_link_libraries(adcore PRIVATE
     c_sec
     mmpa
     -Wl,--as-needed
-    ascend_hal
+    ascend_hal_stub
 )
 else()
 target_link_libraries(adcore PRIVATE
@@ -109,7 +120,8 @@ target_link_libraries(adcore PRIVATE
     mmpa
     -Wl,--as-needed
     $<$<STREQUAL:${PRODUCT_SIDE},host>:ascend_hal_stub>
-    $<$<STREQUAL:${PRODUCT_SIDE},device>:ascend_hal>
+    $<$<AND:$<STREQUAL:${PRODUCT_SIDE},device>,$<STREQUAL:${PRODUCT},pegasus>>:ascend_hal_stub>
+    $<$<AND:$<STREQUAL:${PRODUCT_SIDE},device>,$<NOT:$<STREQUAL:${PRODUCT},pegasus>>>:ascend_hal>
     $<$<STREQUAL:${PRODUCT_SIDE},device>:unified_dlog>
     $<$<AND:$<NOT:$<BOOL:${PRODUCT}>>,$<STREQUAL:${PRODUCT_SIDE},host>>:unified_dlog>
 )

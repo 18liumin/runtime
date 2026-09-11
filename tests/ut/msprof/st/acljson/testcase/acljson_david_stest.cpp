@@ -28,7 +28,7 @@ static const char DAVID_RM_RF[] = "rm -rf ./acljsonDavidstest_workspace";
 static const char DAVID_MKDIR[] = "mkdir ./acljsonDavidstest_workspace";
 static const char DAVID_OUTPUT_DIR[] = "./acljsonDavidstest_workspace/output";
 
-class AclJsonDavidStest: public testing::Test {
+class AclJsonDavidStest : public testing::Test {
 protected:
     virtual void SetUp()
     {
@@ -48,6 +48,7 @@ protected:
         DataMgr().UnInit();
         MsprofMgr().UnInit();
         system(DAVID_RM_RF);
+        GlobalMockObject::reset();
     }
     void DlStub()
     {
@@ -66,8 +67,8 @@ TEST_F(AclJsonDavidStest, AclJsonDefault)
     std::vector<std::string> deviceDataList = {"ts_track.data", "ccu0.instr", "ccu1.instr"};
     MsprofMgr().SetDeviceCheckList(deviceDataList);
     std::vector<std::string> hostDataList = {
-        "unaging.api_event.data", "unaging.compact.node_basic_info", "unaging.compact.task_track", "unaging.additional.context_id_info"
-    };
+        "unaging.api_event.data", "unaging.compact.node_basic_info", "unaging.compact.task_track",
+        "unaging.additional.context_id_info"};
     MsprofMgr().SetHostCheckList(hostDataList);
     std::vector<uint64_t> bitList = {PROF_ACL_API, PROF_TASK_TIME_L1, PROF_AICORE_METRICS};
     MsprofMgr().SetBitSwitchCheckList(bitList);
@@ -145,18 +146,27 @@ TEST_F(AclJsonDavidStest, AclJsonL2)
 
 TEST_F(AclJsonDavidStest, AclJsonInstrProfiling)
 {
-    // milan: InstrProfiling
+    // david: InstrProfiling
     nlohmann::json data;
     data["output"] = DAVID_OUTPUT_DIR;
     data["instr_profiling"] = "on";
-    data["instr_profiling_freq"] = "10000";
     std::vector<std::string> dataList = {"instr.biu_perf_group0", "instr.biu_perf_group1", "instr.biu_perf_group2"};
     // david device simulator return aicore num 18 <= DAVID_DIE0_AICORE_NUM
-    std::vector<std::string> blackDataList = {"instr.biu_perf_group3", "instr.biu_perf_group4", "instr.biu_perf_group5"};
+    std::vector<std::string> blackDataList = {
+        "instr.biu_perf_group3", "instr.biu_perf_group4", "instr.biu_perf_group5"};
     MsprofMgr().SetDeviceCheckList(dataList, blackDataList);
     std::vector<uint64_t> bitList = {PROF_INSTR};
     MsprofMgr().SetBitSwitchCheckList(bitList);
     EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().AclJsonStart(1, data));
+}
+
+TEST_F(AclJsonDavidStest, AclJsonInstrProfilingFreqUnsupported)
+{
+    nlohmann::json data;
+    data["output"] = DAVID_OUTPUT_DIR;
+    data["instr_profiling"] = "on";
+    data["instr_profiling_freq"] = 10000;
+    EXPECT_EQ(PROFILING_FAILED, MsprofMgr().AclJsonStart(1, data));
 }
 
 TEST_F(AclJsonDavidStest, AclJsonSysCpuFreq)
@@ -172,18 +182,20 @@ TEST_F(AclJsonDavidStest, AclJsonScale)
     // david: scale
     nlohmann::json data;
     data["output"] = DAVID_OUTPUT_DIR;
-    data["scale"] = "opType:MatMulV3,Index;opName:aclnnMatmul_MatMulV3Common_MatMulV3,aclnnIndex_IndexAiCore_Index";
+    data["optype"] = "MatMulV3,Index";
     EXPECT_EQ(PROFILING_FAILED, MsprofMgr().AclJsonStart(1, data));
 }
 
 TEST_F(AclJsonDavidStest, AclJsonTaskTimeL3)
 {
+    // david now supports task-time L3 (PLATFORM_TASK_TRACE_L3), so start succeeds.
+    // acljson uses the "task_time" key (task_trace is only valid on the geoption path).
     nlohmann::json data;
     data["output"] = DAVID_OUTPUT_DIR;
-    data["task_trace"] = "l3";
-    std::vector<std::string> dataList = {""};
+    data["task_time"] = "l3";
+    std::vector<std::string> dataList = {"stars_soc.data", "ffts_profile.data"};
     MsprofMgr().SetDeviceCheckList(dataList);
     std::vector<uint64_t> bitList = {PROF_TASK_TIME_L3};
     MsprofMgr().SetBitSwitchCheckList(bitList);
-    EXPECT_EQ(PROFILING_FAILED, MsprofMgr().AclJsonStart(1, data));
+    EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().AclJsonStart(1, data));
 }

@@ -7,13 +7,14 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
-set(LOG_SOURCE_PATH ${TOP_DIR}/abl/slog)
-set(UT_SOURCE_PATH ${TOP_DIR}/llt/abl/slog/ut)
+set(LOG_SOURCE_PATH ${TOP_DIR}/src/dfx/log)
+set(UT_SOURCE_PATH ${TOP_DIR}/tests/ut/slog/ut)
 
 set(libSlogdSrc
     ${LOG_SOURCE_PATH}/syslog/slog/slogd_main.c
     ${LOG_SOURCE_PATH}/syslog/slog/slogd_argv.c
     ${LOG_SOURCE_PATH}/syslog/slog/trace_server/slogd_trace_server.c
+    ${LOG_SOURCE_PATH}/syslog/slog/bbox_server/slogd_bbox_server.c
     ${LOG_SOURCE_PATH}/syslog/slog/log_server/slogd_service.c
     ${LOG_SOURCE_PATH}/syslog/slog/log_server/slogd_dev_mgr.c
     ${LOG_SOURCE_PATH}/syslog/slog/log_server/slogd_thread_mgr.c
@@ -38,8 +39,10 @@ set(libSlogdSrc
     ${LOG_SOURCE_PATH}/utils/share_mem.c
     ${LOG_SOURCE_PATH}/utils/log_system_api.c
     ${LOG_SOURCE_PATH}/utils/log_common.c
+    ${LOG_SOURCE_PATH}/utils/log_buffer/log_ring_buffer.c
     ${LOG_SOURCE_PATH}/utils/log_compress/log_compress.c
     ${LOG_SOURCE_PATH}/utils/log_compress/log_software_zip.c
+    ${LOG_SOURCE_PATH}/utils/high_mem.c
     ${LOG_SOURCE_PATH}/utils/log_time.c
     #${LOG_SOURCE_PATH}/utils/log_print_syslog.c
     ${LOG_SOURCE_PATH}/utils/log_file_util.c
@@ -84,6 +87,7 @@ set(libSlogdSrc
     ${UT_SOURCE_PATH}/stub/self_log_stub.c
     ${UT_SOURCE_PATH}/stub/ascend_hal_stub.c
     ${CMAKE_CURRENT_SOURCE_DIR}/slogd/stub/trace_server_stub.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/slogd/stub/bbox_server_stub.c
 )
 
 set(testSrc
@@ -100,6 +104,9 @@ set(testSrc
     ${CMAKE_CURRENT_SOURCE_DIR}/pm/testcase/slogd_pm_func_utest.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/file_mgr/testcase/file_mgr_func_utest.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/file_mgr/testcase/file_mgr_excp_utest.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/file_mgr/testcase/log_to_file_coverage_utest.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/file_mgr/testcase/log_software_zip_utest.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/file_mgr/testcase/high_mem_utest.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/log_path/testcase/slogd_log_path_utest.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/session_mgr/testcase/slogd_session_mgr_func_utest.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/msn_report/testcase/slogd_msn_report_func_utest.cc
@@ -108,15 +115,15 @@ set(testSrc
     ${CMAKE_CURRENT_SOURCE_DIR}/slogd/testcase/slogd_func_utest.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/event_log/testcase/event_log_utest.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/sys_log/testcase/sys_log_func_utest.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/slogd/testcase/slogd_coverage_utest.cc
 )
 
 set(libSlogdInc
-    ${TOP_DIR}/inc/driver
-    ${TOP_DIR}/abl/libc_sec/include
-    ${TOP_DIR}/abl/adump/external
-    ${TOP_DIR}/abl/adump/inc/adump
-    ${TOP_DIR}/abl/atrace/inc/trace_server
-    ${TOP_DIR}/abl/atrace/inc/utrace
+    ${TOP_DIR}/pkg_inc/driver
+    ${TOP_DIR}/src/dfx/adump/external
+    ${TOP_DIR}/src/dfx/adump/inc/adump
+    ${TOP_DIR}/pkg_inc/trace
+    ${TOP_DIR}/src/dfx/trace/inc/toolchain
     ${LOG_SOURCE_PATH}/syslog/slog
     ${LOG_SOURCE_PATH}/syslog/slog/log_server
     ${LOG_SOURCE_PATH}/syslog/slog/log_server/log_pre_process
@@ -137,12 +144,14 @@ set(libSlogdInc
     ${LOG_SOURCE_PATH}/syslog/slog/log_server/log_post_process/sys_get
     ${LOG_SOURCE_PATH}/syslog/slog/log_server/log_post_process/session_mgr
     ${LOG_SOURCE_PATH}/syslog/slog/trace_server
+    ${LOG_SOURCE_PATH}/syslog/slog/bbox_server
     ${LOG_SOURCE_PATH}/syslog/common
     ${LOG_SOURCE_PATH}/syslog/common/pm
     ${LOG_SOURCE_PATH}/syslog/common/config
     ${LOG_SOURCE_PATH}/syslog/common/driver
     ${LOG_SOURCE_PATH}/shared
     ${LOG_SOURCE_PATH}/utils
+    ${LOG_SOURCE_PATH}/utils/log_buffer
     ${LOG_SOURCE_PATH}/utils/log_compress
     ${CMAKE_CURRENT_SOURCE_DIR}/slogd/stub
     ${UT_SOURCE_PATH}/ep/stub
@@ -155,6 +164,7 @@ set(libSlogdInc
 
 add_executable(ep_slogd_utest
     ${libSlogdSrc}
+    ${TOP_DIR}/tests/ut/slog/ut/slog/testcase/main.cc
     ${testSrc}
 )
 
@@ -182,14 +192,20 @@ target_compile_definitions(ep_slogd_utest PRIVATE
     APP_LOG_PID_RECORD
 )
 
+set_source_files_properties(${LOG_SOURCE_PATH}/utils/log_compress/log_software_zip.c
+    PROPERTIES COMPILE_DEFINITIONS SOFTWARE_ZIP
+)
+
 target_link_libraries(ep_slogd_utest PRIVATE
     $<BUILD_INTERFACE:intf_llt_pub>
     $<BUILD_INTERFACE:slog_headers>
     c_sec
+    z
 )
 
 target_compile_options(ep_slogd_utest PRIVATE
     -Werror
+    -include ${UT_SOURCE_PATH}/stub/ascend_hal_ut_compat.h
 )
 
 set_target_properties(ep_slogd_utest
@@ -198,13 +214,9 @@ set_target_properties(ep_slogd_utest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/
 )
 
-run_llt_test(
-    TARGET ep_slogd_utest
-    TASK_NUM 1
-)
-
 add_executable(ep_slogd_milan_utest
     ${libSlogdSrc}
+    ${TOP_DIR}/tests/ut/slog/ut/slog/testcase/main.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/config/testcase/slogd_config_func_milan_utest.cc
 )
 
@@ -233,21 +245,18 @@ target_link_libraries(ep_slogd_milan_utest PRIVATE
     $<BUILD_INTERFACE:intf_llt_pub>
     $<BUILD_INTERFACE:slog_headers>
     c_sec
+    z
 )
 
 target_compile_options(ep_slogd_milan_utest PRIVATE
     -Werror
+    -include ${UT_SOURCE_PATH}/stub/ascend_hal_ut_compat.h
 )
 
 set_target_properties(ep_slogd_milan_utest
     PROPERTIES
     OUTPUT_NAME toolchain_ep_slogd_milan_utest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/
-)
-
-run_llt_test(
-    TARGET ep_slogd_milan_utest
-    TASK_NUM 1
 )
 
 ###################################################################

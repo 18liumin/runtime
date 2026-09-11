@@ -23,6 +23,8 @@
 #include "mini_stars_device_simulator.h"
 #include "david_device_simulator.h"
 #include "david_v121_device_simulator.h"
+#include "mdc_lite_v2_device_simulator.h"
+#include "modena_device_simulator.h"
 #include "msprof_stub.h"
 
 namespace Cann {
@@ -46,6 +48,7 @@ uint32_t DeviceSimulatorManager::CreateDeviceSimulator(uint32_t num, StPlatformT
             }
             devices_.emplace_back(std::move(simulator));
         }
+#ifndef BUILD_PROFILING_OPEN_PROJECT
         if (platformType == StPlatformType::CHIP_CLOUD_V3) {
             simulator = std::unique_ptr<DeviceSimulator>(new(std::nothrow) DavidDeviceSimulator(static_cast<uint32_t>(platformType)));
             if (simulator == nullptr) {
@@ -60,6 +63,7 @@ uint32_t DeviceSimulatorManager::CreateDeviceSimulator(uint32_t num, StPlatformT
             }
             devices_.emplace_back(std::move(simulator));
         }
+#endif
         if (platformType == StPlatformType::MINI_V3_TYPE) {
             simulator = std::unique_ptr<DeviceSimulator>(new(std::nothrow) MiniStarsDeviceSimulator(static_cast<uint32_t>(platformType)));
             if (simulator == nullptr) {
@@ -81,6 +85,7 @@ uint32_t DeviceSimulatorManager::CreateDeviceSimulator(uint32_t num, StPlatformT
             }
             devices_.emplace_back(std::move(simulator));
         }
+#ifndef BUILD_PROFILING_OPEN_PROJECT
         if (platformType == StPlatformType::MDC_TYPE) {
             simulator = std::unique_ptr<DeviceSimulator>(new(std::nothrow) MdcDeviceSimulator(static_cast<uint32_t>(platformType)));
             if (simulator == nullptr) {
@@ -88,6 +93,7 @@ uint32_t DeviceSimulatorManager::CreateDeviceSimulator(uint32_t num, StPlatformT
             }
             devices_.emplace_back(std::move(simulator));
         }
+#endif
         if (platformType == StPlatformType::MINI_TYPE) {
             simulator = std::unique_ptr<DeviceSimulator>(new(std::nothrow) MiniDeviceSimulator());
             if (simulator == nullptr) {
@@ -95,6 +101,7 @@ uint32_t DeviceSimulatorManager::CreateDeviceSimulator(uint32_t num, StPlatformT
             }
             devices_.emplace_back(std::move(simulator));
         }
+#ifndef BUILD_PROFILING_OPEN_PROJECT
         if (platformType == StPlatformType::CHIP_TINY_V1) {
             simulator = std::unique_ptr<DeviceSimulator>(new(std::nothrow) TinyDeviceSimulator());
             if (simulator == nullptr) {
@@ -102,6 +109,8 @@ uint32_t DeviceSimulatorManager::CreateDeviceSimulator(uint32_t num, StPlatformT
             }
             devices_.emplace_back(std::move(simulator));
         }
+#endif
+#ifndef BUILD_PROFILING_OPEN_PROJECT
         if (platformType == StPlatformType::CHIP_NANO_V1) {
             simulator = std::unique_ptr<DeviceSimulator>(new(std::nothrow) NanoDeviceSimulator(static_cast<uint32_t>(platformType)));
             if (simulator == nullptr) {
@@ -109,6 +118,8 @@ uint32_t DeviceSimulatorManager::CreateDeviceSimulator(uint32_t num, StPlatformT
             }
             devices_.emplace_back(std::move(simulator));
         }
+#endif
+#ifndef BUILD_PROFILING_OPEN_PROJECT
         if (platformType == StPlatformType::CHIP_MDC_MINI_V3) {
             simulator = std::unique_ptr<DeviceSimulator>(new(std::nothrow) MdcMiniV3DeviceSimulator(static_cast<uint32_t>(platformType)));
             if (simulator == nullptr) {
@@ -123,6 +134,21 @@ uint32_t DeviceSimulatorManager::CreateDeviceSimulator(uint32_t num, StPlatformT
             }
             devices_.emplace_back(std::move(simulator));
         }
+        if (platformType == StPlatformType::CHIP_MDC_LITE_V2) {
+            simulator = std::unique_ptr<DeviceSimulator>(new(std::nothrow) MdcLiteV2DeviceSimulator(static_cast<uint32_t>(platformType)));
+            if (simulator == nullptr) {
+                return 0;
+            }
+            devices_.emplace_back(std::move(simulator));
+        }
+        if (platformType == StPlatformType::CHIP_5162A) {
+            simulator = std::unique_ptr<DeviceSimulator>(new(std::nothrow) ModenaDeviceSimulator(static_cast<uint32_t>(platformType)));
+            if (simulator == nullptr) {
+                return 0;
+            }
+            devices_.emplace_back(std::move(simulator));
+        }
+#endif
     }
     platformType_ = static_cast<uint32_t>(platformType);
     devNum_ = num;

@@ -38,50 +38,60 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "thread_local_container.hpp"
+#include "rt_unwrap.h"
+#include "runtime/rt_inner_dfx.h"
+#include "../../data/elf.h"
 #undef protected
 #undef private
 
 using namespace testing;
 using namespace cce::runtime;
 
-class ApiCloudDisableThreadDfxTest : public testing::Test
-{
+class ApiCloudDisableThreadDfxTest : public testing::Test {
 protected:
     static void SetUpTestCase()
     {
-        (void)rtSetSocVersion("Ascend910B1");
-        ((Runtime *)Runtime::Instance())->SetDisableThread(true);
+        (void)rtSetSocVersion("Ascend910A");
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
 
-        int64_t hardwareVersion = CHIP_910_B_93 << 8;
-        driver_ = ((Runtime *)Runtime::Instance())->driverFactory_.GetDriver(NPU_DRIVER);
-        MOCKER_CPP_VIRTUAL(driver_,
-            &Driver::GetDevInfo).stubs().with(mockcpp::any(), mockcpp::any(), mockcpp::any(),outBoundP(&hardwareVersion, sizeof(hardwareVersion)))
+        int64_t hardwareVersion = CHIP_CLOUD << 8;
+        driver_ = ((Runtime*)Runtime::Instance())->driverFactory_.GetDriver(NPU_DRIVER);
+        MOCKER_CPP_VIRTUAL(driver_, &Driver::GetDevInfo)
+            .stubs()
+            .with(mockcpp::any(), mockcpp::any(), mockcpp::any(), outBoundP(&hardwareVersion, sizeof(hardwareVersion)))
             .will(returnValue(RT_ERROR_NONE));
-        MOCKER(halGetSocVersion).stubs().with(mockcpp::any(), mockcpp::any(), mockcpp::any()).will(returnValue(DRV_ERROR_NOT_SUPPORT));
-        MOCKER(halGetDeviceInfo).stubs().with(mockcpp::any(), mockcpp::any(), mockcpp::any(), outBoundP(&hardwareVersion, sizeof(hardwareVersion))).will(returnValue(RT_ERROR_NONE));
+        MOCKER(halGetSocVersion)
+            .stubs()
+            .with(mockcpp::any(), mockcpp::any(), mockcpp::any())
+            .will(returnValue(DRV_ERROR_NOT_SUPPORT));
+        MOCKER(halGetDeviceInfo)
+            .stubs()
+            .with(mockcpp::any(), mockcpp::any(), mockcpp::any(), outBoundP(&hardwareVersion, sizeof(hardwareVersion)))
+            .will(returnValue(RT_ERROR_NONE));
 
-        MOCKER_CPP_VIRTUAL((NpuDriver*)(driver_), &NpuDriver::GetRunMode).stubs().will(returnValue((uint32_t)RT_RUN_MODE_ONLINE));
+        MOCKER_CPP_VIRTUAL((NpuDriver*)(driver_), &NpuDriver::GetRunMode)
+            .stubs()
+            .will(returnValue((uint32_t)RT_RUN_MODE_ONLINE));
 
         (void)rtSetDevice(0);
         (void)rtSetTSDevice(0);
         rtError_t error1 = rtStreamCreateWithFlags(&stream_, 0, RT_STREAM_FAST_LAUNCH);
         rtError_t error2 = rtEventCreate(&event_);
 
-        for (uint32_t i = 0; i < sizeof(binary_)/sizeof(uint32_t); i++)
-        {
+        for (uint32_t i = 0; i < sizeof(binary_) / sizeof(uint32_t); i++) {
             binary_[i] = i;
         }
 
         rtDevBinary_t devBin;
-        devBin.magic = RT_DEV_BINARY_MAGIC_PLAIN;
-        devBin.version = 1;
-        devBin.length = sizeof(binary_);
-        devBin.data = binary_;
+        devBin.magic = RT_DEV_BINARY_MAGIC_ELF;
+        devBin.version = 2;
+        devBin.data = (void*)elf_o;
+        devBin.length = elf_o_len;
         rtError_t error3 = rtDevBinaryRegister(&devBin, &binHandle_);
 
         rtError_t error4 = rtFunctionRegister(binHandle_, &function_, "foo", nullptr, 0);
 
-        std::cout<<"api test start:"<<error1<<", "<<error2<<", "<<error3<<", "<<error4<<std::endl;
+        std::cout << "api test start:" << error1 << ", " << error2 << ", " << error3 << ", " << error4 << std::endl;
     }
 
     static void TearDownTestCase()
@@ -89,43 +99,37 @@ protected:
         rtError_t error1 = rtStreamDestroy(stream_);
         rtError_t error2 = rtEventDestroy(event_);
         rtError_t error3 = rtDevBinaryUnRegister(binHandle_);
-        std::cout<<"api test start end : "<<error1<<", "<<error2<<", "<<error3<<std::endl;
+        std::cout << "api test start end : " << error1 << ", " << error2 << ", " << error3 << std::endl;
         rtDeviceReset(0);
         (void)rtSetSocVersion("");
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
-        rtInstance->SetDisableThread(false);      // Recover.
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
     }
 
-    virtual void SetUp()
-    {
-    }
+    virtual void SetUp() {}
 
-    virtual void TearDown()
-    {
-        GlobalMockObject::verify();
-    }
+    virtual void TearDown() { GlobalMockObject::verify(); }
 
 public:
     static rtStream_t stream_;
-    static rtEvent_t  event_;
-    static void      *binHandle_;
-    static char       function_;
-    static uint32_t   binary_[32];
+    static rtEvent_t event_;
+    static void* binHandle_;
+    static char function_;
+    static uint32_t binary_[32];
     static rtChipType_t originType_;
-    static Driver    *driver_;
+    static Driver* driver_;
 };
 
 rtStream_t ApiCloudDisableThreadDfxTest::stream_ = nullptr;
 rtEvent_t ApiCloudDisableThreadDfxTest::event_ = nullptr;
 void* ApiCloudDisableThreadDfxTest::binHandle_ = nullptr;
-char  ApiCloudDisableThreadDfxTest::function_ = 'a';
+char ApiCloudDisableThreadDfxTest::function_ = 'a';
 uint32_t ApiCloudDisableThreadDfxTest::binary_[32] = {};
-rtChipType_t ApiCloudDisableThreadDfxTest::originType_ = CHIP_910_B_93;
+rtChipType_t ApiCloudDisableThreadDfxTest::originType_ = CHIP_CLOUD;
 Driver* ApiCloudDisableThreadDfxTest::driver_ = nullptr;
 
 TEST_F(ApiCloudDisableThreadDfxTest, kernel_launch_with_handle_task_full)
 {
-    Stream *stm = (Stream*)stream_;
+    Stream* stm = rt_ut::UnwrapOrNull<Stream>(stream_);
     stm->SetLimitFlag(true);
     stm->SetRecycleFlag(false);
     Context* context = stm->Context_();
@@ -142,15 +146,27 @@ TEST_F(ApiCloudDisableThreadDfxTest, kernel_launch_with_handle_task_full)
 TEST_F(ApiCloudDisableThreadDfxTest, streamCreateFail1)
 {
     rtStream_t stm;
-    MOCKER_CPP(&TaskResManage::AllocTaskInfoByTaskResId)
+    MOCKER_CPP(&TaskResManage::AllocTaskInfoByTaskResId).stubs().will(returnValue(static_cast<TaskInfo*>(nullptr)));
+    MOCKER_CPP_VIRTUAL(rt_ut::UnwrapOrNull<Stream>(stream_)->Device_(), &Device::GetDevStatus)
         .stubs()
-        .will(returnValue(static_cast<TaskInfo *>(nullptr)));
-    MOCKER_CPP_VIRTUAL(((Stream *)stream_)->Device_(), &Device::GetDevStatus)
-    .stubs()
-    .will(returnValue(RT_ERROR_NONE))
-    .then(returnValue(RT_ERROR_LOST_HEARTBEAT));
+        .will(returnValue(RT_ERROR_NONE))
+        .then(returnValue(RT_ERROR_LOST_HEARTBEAT));
     rtError_t error1 = rtEventRecord(event_, stream_);
 
     EXPECT_EQ(error1, ACL_ERROR_RT_LOST_HEARTBEAT);
     GlobalMockObject::verify();
+}
+
+TEST_F(ApiCloudDisableThreadDfxTest, test_rtSetKernelDfxInfoCallback)
+{
+    auto func = [](rtKernelDfxInfoType type, uint32_t coreType, uint32_t coreId, const uint8_t* buffer, size_t length) {
+    };
+    rtError_t err = rtSetKernelDfxInfoCallback(RT_KERNEL_DFX_INFO_INVALID, func);
+    EXPECT_EQ(err, ACL_ERROR_RT_PARAM_INVALID);
+    err = rtSetKernelDfxInfoCallback(RT_KERNEL_DFX_INFO_DEFAULT, nullptr);
+    EXPECT_EQ(err, ACL_ERROR_RT_PARAM_INVALID);
+    err = rtSetKernelDfxInfoCallback(RT_KERNEL_DFX_INFO_DEFAULT, func);
+    EXPECT_EQ(err, ACL_RT_SUCCESS);
+    err = rtSetKernelDfxInfoCallback(RT_KERNEL_DFX_INFO_DEFAULT, func);
+    EXPECT_EQ(err, ACL_ERROR_RT_PARAM_INVALID);
 }

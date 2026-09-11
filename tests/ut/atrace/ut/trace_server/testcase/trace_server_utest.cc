@@ -7,6 +7,8 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
+#include <future>
+#include <unistd.h>
 #include "gtest/gtest.h"
 #include "mockcpp/mockcpp.hpp"
 #include "atrace_types.h"
@@ -17,45 +19,66 @@
 #include "utrace_api.h"
 #include "trace_session_mgr.h"
 #include "trace_server_socket.h"
-#include "utrace_socket.h"
 #include "adx_component_api_c.h"
 #include "ascend_hal_stub.h"
 
 extern "C" {
-    void TraceInit(void);
-    void TraceExit(void);
+void TraceInit(void);
+void TraceExit(void);
+TraStatus TraceRecorderWrite(int32_t fd, const char* msg, uint32_t len);
 }
 
-class TraceServerUtest: public testing::Test {
+class TraceServerUtest : public testing::Test {
 protected:
     virtual void SetUp()
     {
         Clear();
         system("echo [DBG][TEST][`date +%Y-%m-%d-%H-%M-%S`] Start test case");
-        system("mkdir -p " LLT_TEST_DIR );
+        system("mkdir -p " LLT_TEST_DIR);
         MOCKER(lchown).stubs().will(returnValue(0));
     }
 
-    void Clear()
-    {
-        system("rm -rf " LLT_TEST_DIR "/*");
-    }
+    void Clear() { system("rm -rf " LLT_TEST_DIR "/*"); }
     virtual void TearDown()
     {
+        UtraceSetSocketFd(-1);
         system("echo [DBG][TEST][`date +%Y-%m-%d-%H-%M-%S`] End test case");
         GlobalMockObject::verify();
-        system("rm -rf " LLT_TEST_DIR );
+        system("rm -rf " LLT_TEST_DIR);
     }
 
-    static void SetUpTestCase()
+    static void SetUpTestCase() {}
+
+    static void TearDownTestCase() {}
+
+    static void WaitSocketFileRemoved(const char* socketPath)
     {
+        constexpr int maxRetry = 100;
+        constexpr useconds_t waitIntervalUs = 10000;
+        for (int i = 0; i < maxRetry; ++i) {
+            if (access(socketPath, F_OK) != 0) {
+                return;
+            }
+            usleep(waitIntervalUs);
+        }
     }
 
-    static void TearDownTestCase()
+    static void WakeSocketThreadAndWait(const char* socketPath, uint32_t devId)
     {
+        if (access(socketPath, F_OK) == 0) {
+            int32_t sockFd = UtraceCreateSocket(devId);
+            if (sockFd != TRACE_FAILURE) {
+                char wakeMsg[] = "wake";
+                (void)TraceRecorderWrite(sockFd, wakeMsg, (uint32_t)sizeof(wakeMsg));
+                (void)TraceCloseSocket(sockFd);
+            }
+        }
+        WaitSocketFileRemoved(socketPath);
+        EXPECT_NE(0, access(socketPath, F_OK));
     }
 };
 extern "C" int32_t TraceServerGetDevId(void);
+
 TEST_F(TraceServerUtest, TraceServerInitPf)
 {
     TraceServerInit(-1);
@@ -75,13 +98,16 @@ TEST_F(TraceServerUtest, TraceServerInitPfServiceFailed)
 
 TEST_F(TraceServerUtest, TraceServerInitPfDevIdFailed)
 {
-    MOCKER(halGetDevIDsEx).stubs().will(returnValue(1));
+    // 场景1：halGetDevIDsEx 返回失败（halGetDevNumEx 走桩成功，设备号有效）
+    MOCKER(halGetDevIDsEx).stubs().will(returnValue((drvError_t)1));
     TraceServerInit(-1);
     EXPECT_EQ(-1, TraceServerGetDevId());
     EXPECT_EQ(TRACE_FAILURE, TraceServerProcess());
     TraceServerExit();
+    GlobalMockObject::verify();
 
-    MOCKER(halGetDevNumEx).stubs().will(returnValue(1));
+    // 场景2：halGetDevNumEx 返回失败，不再调用 halGetDevIDsEx
+    MOCKER(halGetDevNumEx).stubs().will(returnValue((drvError_t)1));
     TraceServerInit(-1);
     EXPECT_EQ(-1, TraceServerGetDevId());
     EXPECT_EQ(TRACE_FAILURE, TraceServerProcess());
@@ -152,7 +178,7 @@ TEST_F(TraceServerUtest, TraceServerInitInvalidDevId)
 
 TEST_F(TraceServerUtest, KtraceTsCreateThreadThread)
 {
-    uint32_t devIdArray[2] = { 0U, 1U };
+    uint32_t devIdArray[2] = {0U, 1U};
     EXPECT_EQ(TRACE_SUCCESS, KtraceTsCreateThread(2U, devIdArray));
     KtraceTsDestroyThread();
 }
@@ -167,8 +193,8 @@ TEST_F(TraceServerUtest, KtraceTsCreateThreadInvalidInput)
 
 TEST_F(TraceServerUtest, KtraceTsCreateThreadMallocFailed)
 {
-    MOCKER(AdiagMalloc).stubs().will(returnValue((void *)NULL));
-    uint32_t devIdArray[1] = { 0U };
+    MOCKER(AdiagMalloc).stubs().will(returnValue((void*)NULL));
+    uint32_t devIdArray[1] = {0U};
     EXPECT_EQ(TRACE_FAILURE, KtraceTsCreateThread(1U, devIdArray));
     KtraceTsDestroyThread();
 }
@@ -176,7 +202,7 @@ TEST_F(TraceServerUtest, KtraceTsCreateThreadMallocFailed)
 TEST_F(TraceServerUtest, KtraceTsCreateThreadThreadFailed)
 {
     MOCKER(TraceCreateTaskWithThreadAttr).stubs().will(returnValue(TRACE_FAILURE));
-    uint32_t devIdArray[2] = { 0U, 1U };
+    uint32_t devIdArray[2] = {0U, 1U};
     EXPECT_EQ(TRACE_FAILURE, KtraceTsCreateThread(2U, devIdArray));
     KtraceTsDestroyThread();
 }
@@ -207,6 +233,93 @@ TEST_F(TraceServerUtest, UtraceSocket)
     TraceServerExit();
 }
 
+TEST_F(TraceServerUtest, UtraceWriteSocketUsesCurrentFd)
+{
+    char buffer[] = "abc";
+    UtraceSetSocketFd(10);
+    MOCKER(TraceRecorderWrite)
+        .expects(once())
+        .with(eq(10), any(), eq((uint32_t)sizeof(buffer)))
+        .will(returnValue(TRACE_SUCCESS));
+    EXPECT_EQ(TRACE_SUCCESS, UtraceWriteSocket(0, buffer, (uint32_t)sizeof(buffer)));
+    UtraceSetSocketFd(-1);
+}
+
+TEST_F(TraceServerUtest, UtraceWriteSocketCreateWhenFdInvalid)
+{
+    TraceServerInit(-1);
+    EXPECT_EQ(TRACE_SUCCESS, TraceServerProcess());
+    UtraceSetSocketFd(-1);
+
+    char buffer[] = "abc";
+    EXPECT_EQ(TRACE_SUCCESS, UtraceWriteSocket(0, buffer, (uint32_t)sizeof(buffer)));
+    EXPECT_EQ(true, UtraceIsSocketFdValid());
+
+    UtraceCloseSocket();
+    TraceServerExit();
+    WakeSocketThreadAndWait(SOCKET_FILE_DIR SOCKET_FILE, 0U);
+}
+
+TEST_F(TraceServerUtest, UtraceWriteSocketCreateFailed)
+{
+    char buffer[] = "abc";
+    UtraceSetSocketFd(-1);
+    MOCKER(UtraceCreateSocket).expects(once()).with(eq(0U)).will(returnValue(TRACE_FAILURE));
+    MOCKER(TraceRecorderWrite).expects(never());
+
+    EXPECT_EQ(TRACE_FAILURE, UtraceWriteSocket(0, buffer, (uint32_t)sizeof(buffer)));
+    EXPECT_EQ(false, UtraceIsSocketFdValid());
+}
+
+TEST_F(TraceServerUtest, UtraceWriteSocketInvalidInput)
+{
+    char buffer[] = "abc";
+    UtraceSetSocketFd(-1);
+    MOCKER(UtraceCreateSocket).expects(never());
+    MOCKER(TraceRecorderWrite).expects(never());
+
+    EXPECT_EQ(TRACE_FAILURE, UtraceWriteSocket(0, NULL, (uint32_t)sizeof(buffer)));
+    EXPECT_EQ(TRACE_FAILURE, UtraceWriteSocket(0, buffer, 0));
+    EXPECT_EQ(false, UtraceIsSocketFdValid());
+}
+
+TEST_F(TraceServerUtest, UtraceWriteSocketResetFdOnWriteFailed)
+{
+    char buffer[] = "abc";
+    UtraceSetSocketFd(10);
+    MOCKER(TraceRecorderWrite)
+        .expects(once())
+        .with(eq(10), any(), eq((uint32_t)sizeof(buffer)))
+        .will(returnValue(TRACE_FAILURE));
+    MOCKER(mmCloseSocket).expects(once()).with(eq((mmSockHandle)10)).will(returnValue(0));
+
+    EXPECT_EQ(TRACE_FAILURE, UtraceWriteSocket(0, buffer, (uint32_t)sizeof(buffer)));
+    EXPECT_EQ(false, UtraceIsSocketFdValid());
+}
+
+TEST_F(TraceServerUtest, UtraceWriteSocketConcurrentWrites)
+{
+    TraceServerInit(-1);
+    EXPECT_EQ(TRACE_SUCCESS, TraceServerProcess());
+    UtraceSetSocketFd(-1);
+
+    const char buffer[] = "abc";
+    const char* msg = buffer;
+    const uint32_t len = (uint32_t)sizeof(buffer);
+    constexpr int threadNum = 4;
+    std::future<TraStatus> futures[threadNum];
+    for (int i = 0; i < threadNum; ++i) {
+        futures[i] = std::async(std::launch::async, [msg, len]() { return UtraceWriteSocket(0, msg, len); });
+    }
+    for (int i = 0; i < threadNum; ++i) {
+        EXPECT_EQ(TRACE_SUCCESS, futures[i].get());
+    }
+
+    UtraceCloseSocket();
+    TraceServerExit();
+    WakeSocketThreadAndWait(SOCKET_FILE_DIR SOCKET_FILE, 0U);
+}
+
 TEST_F(TraceServerUtest, UtraceSocketConnectFailed)
 {
     // server not ready, connect failed
@@ -229,9 +342,9 @@ TEST_F(TraceServerUtest, UtraceTracerSubmitWithNoSession)
     TraceServerInit(-1);
     EXPECT_EQ(TRACE_SUCCESS, TraceServerProcess());
     TraceInit();
-    TraceGlobalAttr globalAttr = { 1, 0, 0 };
+    TraceGlobalAttr globalAttr = {1, 0, 0};
     UtraceSetGlobalAttr(&globalAttr);
-    TraceAttr attr = { 0 };
+    TraceAttr attr = {0};
     attr.exitSave = true;
     attr.msgSize = DEFAULT_ATRACE_MSG_SIZE;
     attr.msgNum = DEFAULT_ATRACE_MSG_NUM;
@@ -253,7 +366,7 @@ TEST_F(TraceServerUtest, UtraceTracerSubmitWithNoSession)
 TEST_F(TraceServerUtest, TestUtraceSubmit_MemcpyFailed)
 {
     TraceInit();
-    TraceAttr attr = { 0 };
+    TraceAttr attr = {0};
     attr.exitSave = true;
     attr.msgSize = DEFAULT_ATRACE_MSG_SIZE;
     attr.msgNum = DEFAULT_ATRACE_MSG_NUM;
@@ -276,7 +389,7 @@ TEST_F(TraceServerUtest, TestUtraceSubmit_MemcpyFailed)
 TEST_F(TraceServerUtest, TestUtraceSubmitLockFree_MemcpyFailed)
 {
     TraceInit();
-    TraceAttr attr = { 0 };
+    TraceAttr attr = {0};
     attr.exitSave = true;
     attr.msgSize = DEFAULT_ATRACE_MSG_SIZE;
     attr.msgNum = DEFAULT_ATRACE_MSG_NUM;
@@ -313,9 +426,9 @@ TEST_F(TraceServerUtest, TestAtraceCreateWithAttrDataStructDefineAlignWithNoSess
     TraceServerInit(-1);
     EXPECT_EQ(TRACE_SUCCESS, TraceServerProcess());
     TraceInit();
-    TraceGlobalAttr globalAttr = { 1, 0, 0 };
+    TraceGlobalAttr globalAttr = {1, 0, 0};
     UtraceSetGlobalAttr(&globalAttr);
-    TraceAttr attr = { true, DEFAULT_ATRACE_MSG_NUM, DEFAULT_ATRACE_MSG_SIZE, NULL };
+    TraceAttr attr = {true, DEFAULT_ATRACE_MSG_NUM, DEFAULT_ATRACE_MSG_SIZE, NULL};
     TRACE_STRUCT_DEFINE_ENTRY(demoSt);
     TRACE_STRUCT_DEFINE_ENTRY_NAME(demoSt, "demo");
     TRACE_STRUCT_DEFINE_FIELD_UINT32(demoSt, tid, TRACE_STRUCT_SHOW_MODE_DEC);
@@ -348,7 +461,7 @@ TEST_F(TraceServerUtest, TestAtraceCreateWithAttrDataStructDefineAlignWithNoSess
         structList[i].hostIdArray[1] = i + 2;
         structList[i].hostIdArray[2] = i + 3;
         structList[i].hostIdArray[3] = i + 4;
-        auto ret = UtraceSubmit(handle, (void *)&structList[i], sizeof(struct demoStructAlign));
+        auto ret = UtraceSubmit(handle, (void*)&structList[i], sizeof(struct demoStructAlign));
         EXPECT_EQ(ret, TRACE_SUCCESS);
     }
     UtraceSave(TRACER_TYPE_SCHEDULE, false);
@@ -363,18 +476,18 @@ TEST_F(TraceServerUtest, UtraceTracerSubmit)
     TraceServerInit(-1);
     EXPECT_EQ(TRACE_SUCCESS, TraceServerProcess());
     TraceInit();
-    TraceGlobalAttr globalAttr = { 1, 0, 10 };
+    TraceGlobalAttr globalAttr = {1, 0, 10};
     UtraceSetGlobalAttr(&globalAttr);
 
     // insert session node
-    void *sessionHandle = malloc(10);
+    void* sessionHandle = malloc(10);
     int32_t pid = 10;
     int32_t devId = 0;
     int32_t timeout = 0;
     EXPECT_EQ(NULL, TraceServerGetSessionNode(pid, devId));
     EXPECT_EQ(TRACE_SUCCESS, TraceServerInsertSessionNode(sessionHandle, pid, devId, timeout));
 
-    TraceAttr attr = { 0 };
+    TraceAttr attr = {0};
     attr.exitSave = true;
     attr.msgSize = DEFAULT_ATRACE_MSG_SIZE;
     attr.msgNum = DEFAULT_ATRACE_MSG_NUM;
@@ -404,18 +517,18 @@ TEST_F(TraceServerUtest, TestAtraceCreateWithAttrDataStructDefineAlign)
     TraceServerInit(-1);
     EXPECT_EQ(TRACE_SUCCESS, TraceServerProcess());
     TraceInit();
-    TraceGlobalAttr globalAttr = { 1, 0, 10 };
+    TraceGlobalAttr globalAttr = {1, 0, 10};
     UtraceSetGlobalAttr(&globalAttr);
 
     // insert session node
-    void *sessionHandle = malloc(10);
+    void* sessionHandle = malloc(10);
     int32_t pid = 10;
     int32_t devId = 0;
     int32_t timeout = 0;
     EXPECT_EQ(NULL, TraceServerGetSessionNode(pid, devId));
     EXPECT_EQ(TRACE_SUCCESS, TraceServerInsertSessionNode(sessionHandle, pid, devId, timeout));
 
-    TraceAttr attr = { true, DEFAULT_ATRACE_MSG_NUM, DEFAULT_ATRACE_MSG_SIZE, NULL };
+    TraceAttr attr = {true, DEFAULT_ATRACE_MSG_NUM, DEFAULT_ATRACE_MSG_SIZE, NULL};
     TRACE_STRUCT_DEFINE_ENTRY(demoSt);
     TRACE_STRUCT_DEFINE_ENTRY_NAME(demoSt, "demo");
     TRACE_STRUCT_DEFINE_FIELD_UINT32(demoSt, tid, TRACE_STRUCT_SHOW_MODE_DEC);
@@ -448,7 +561,7 @@ TEST_F(TraceServerUtest, TestAtraceCreateWithAttrDataStructDefineAlign)
         structList[i].hostIdArray[1] = i + 2;
         structList[i].hostIdArray[2] = i + 3;
         structList[i].hostIdArray[3] = i + 4;
-        auto ret = UtraceSubmit(handle, (void *)&structList[i], sizeof(struct demoStructAlign));
+        auto ret = UtraceSubmit(handle, (void*)&structList[i], sizeof(struct demoStructAlign));
         EXPECT_EQ(ret, TRACE_SUCCESS);
     }
     UtraceSave(TRACER_TYPE_SCHEDULE, false);
@@ -464,9 +577,9 @@ TEST_F(TraceServerUtest, UtraceTracerSubmitWithNoSocket)
 {
     // server not ready
     TraceInit();
-    TraceGlobalAttr globalAttr = { 1, 0, 0 };
+    TraceGlobalAttr globalAttr = {1, 0, 0};
     UtraceSetGlobalAttr(&globalAttr);
-    TraceAttr attr = { 0 };
+    TraceAttr attr = {0};
     attr.exitSave = true;
     attr.msgSize = DEFAULT_ATRACE_MSG_SIZE;
     attr.msgNum = DEFAULT_ATRACE_MSG_NUM;
@@ -488,10 +601,10 @@ TEST_F(TraceServerUtest, TestAtraceCreateWithAttrDataStructDefineAlignWithNoSock
 {
     // server not ready
     TraceInit();
-    TraceGlobalAttr globalAttr = { 1, 0, 0 };
+    TraceGlobalAttr globalAttr = {1, 0, 0};
     UtraceSetGlobalAttr(&globalAttr);
 
-    TraceAttr attr = { true, DEFAULT_ATRACE_MSG_NUM, DEFAULT_ATRACE_MSG_SIZE, NULL };
+    TraceAttr attr = {true, DEFAULT_ATRACE_MSG_NUM, DEFAULT_ATRACE_MSG_SIZE, NULL};
     TRACE_STRUCT_DEFINE_ENTRY(demoSt);
     TRACE_STRUCT_DEFINE_ENTRY_NAME(demoSt, "demo");
     TRACE_STRUCT_DEFINE_FIELD_UINT32(demoSt, tid, TRACE_STRUCT_SHOW_MODE_DEC);
@@ -524,7 +637,7 @@ TEST_F(TraceServerUtest, TestAtraceCreateWithAttrDataStructDefineAlignWithNoSock
         structList[i].hostIdArray[1] = i + 2;
         structList[i].hostIdArray[2] = i + 3;
         structList[i].hostIdArray[3] = i + 4;
-        auto ret = UtraceSubmit(handle, (void *)&structList[i], sizeof(struct demoStructAlign));
+        auto ret = UtraceSubmit(handle, (void*)&structList[i], sizeof(struct demoStructAlign));
         EXPECT_EQ(ret, TRACE_SUCCESS);
     }
     UtraceSave(TRACER_TYPE_SCHEDULE, false);
@@ -568,9 +681,9 @@ TEST_F(TraceServerUtest, UtraceSetSocketFailed)
 TEST_F(TraceServerUtest, UtraceWithNodata)
 {
     TraceInit();
-    TraceGlobalAttr globalAttr = { 1, 0, 0 };
+    TraceGlobalAttr globalAttr = {1, 0, 0};
     UtraceSetGlobalAttr(&globalAttr);
-    TraceAttr attr = { true, DEFAULT_ATRACE_MSG_NUM, DEFAULT_ATRACE_MSG_SIZE, NULL };
+    TraceAttr attr = {true, DEFAULT_ATRACE_MSG_NUM, DEFAULT_ATRACE_MSG_SIZE, NULL};
     auto handle1 = UtraceCreateWithAttr(TRACER_TYPE_SCHEDULE, "demo", &attr);
     EXPECT_NE(TRACE_INVALID_HANDLE, handle1);
     TRACE_STRUCT_DEFINE_ENTRY(demoSt);

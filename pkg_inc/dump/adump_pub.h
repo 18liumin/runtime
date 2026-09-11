@@ -21,7 +21,6 @@
 #include <map>
 #include <vector>
 #include "acl/acl_base.h"
-#include "exe_graph/runtime/tensor.h"
 
 #if (defined(_WIN32) || defined(_WIN64) || defined(_MSC_VER))
 #define ADX_API __declspec(dllexport)
@@ -73,16 +72,36 @@ ADX_API uint64_t AdumpGetDumpSwitch(const DumpType dumpType);
 
 /**
  * @ingroup dump
- * @par 描述: 根据配置文件设置dump功能
+ * @par 描述: 根据配置文件设置dump功能, 接口即将废弃, 不建议使用
  *
  * @attention  无
- * @param[in]  configPath  config文件配置路径
+ * @param[in]  dumpConfigData  config文件数据内容
+ * @param[in]  dumpConfigSize  config文件数据内容的大小
  * @retval     #0 dump     开关设置成功
  * @retval     #!0 dump    开关设置失败
  * @see        无
  * @since
  */
 ADX_API int32_t AdumpSetDump(const char *dumpConfigData, size_t dumpConfigSize);
+
+typedef struct DumpConfigInfo {
+    const char *dumpConfigPath; // 配置文件路径
+    const char *dumpConfigData; // 配置文件数据内容
+    size_t dumpConfigSize;      // 配置文件数据内容的大小
+}DumpConfigInfo;
+
+/**
+ * @ingroup dump
+ * @par 描述: 根据配置文件设置dump功能
+ *
+ * @attention  无
+ * @param[in]  configInfo  config文件的信息（路径，数据内容，内容大小）
+ * @retval     #0 dump     开关设置成功
+ * @retval     #!0 dump    开关设置失败
+ * @see        无
+ * @since
+ */
+ADX_API int32_t AdumpSetDumpConfig(const DumpConfigInfo configInfo);
 
 /**
  * @ingroup dump
@@ -115,24 +134,30 @@ enum TensorPlacement : int32_t {
     kFollowing,    ///< Tensor位于Host，且数据紧跟在结构体后面
     kOnDeviceP2p,  ///< Tensor位于Device上的P2p内存
     kTensorPlacementEnd
-}; 
+};
 
 struct TensorInfo {
-    gert::Tensor *tensor;
-    TensorType type;
-    AddressType addrType;
-    uint32_t argsOffSet;
+    TensorType type;       // tensor类型
+    size_t tensorSize;     // tensor内存大小
+    int32_t format;
+    int32_t dataType;
+    int64_t *tensorAddr;   // tensor数据地址
+    AddressType addrType;  // 地址的类型
+    int32_t placement;
+    uint32_t argsOffSet;   // tensor数据地址在args里的偏移
+    std::vector<int64_t> shape;  //shape
+    std::vector<int64_t> originShape; //originShape
 };
 
 struct TensorInfoV2 {
     TensorType type;       // tensor类型
-    size_t tensorSize;     // tensor内存大小  
-    int32_t format;      
-    int32_t dataType;     
+    size_t tensorSize;     // tensor内存大小
+    int32_t format;
+    int32_t dataType;
     int64_t *tensorAddr;   // tensor数据地址
     AddressType addrType;  // 地址的类型
     int32_t placement;
-    uint32_t argsOffSet;   // tensor数据地址在args里的偏移 
+    uint32_t argsOffSet;   // tensor数据地址在args里的偏移
     std::vector<int64_t> shape;  //shape
     std::vector<int64_t> originShape; //originShape
 };
@@ -170,6 +195,59 @@ ADX_API int32_t AdumpDumpTensor(const std::string &opType, const std::string &op
  */
 ADX_API int32_t AdumpDumpTensorV2(const std::string &opType, const std::string &opName,
     const std::vector<TensorInfoV2> &tensors, aclrtStream stream);
+
+typedef enum {
+    DUMP_ATTR_MODEL_NAME = 1,
+    DUMP_ATTR_MODEL_NAMESIZE,
+    DUMP_ATTR_MODEL_ID,
+    DUMP_ATTR_STEP_ID_ADDR,
+    DUMP_ATTR_ITER_PER_LOOP_ADDR,
+    DUMP_ATTR_LOOP_COND_ADDR,
+    DUMP_ATTR_DUMP_STEP,
+    DUMP_ATTR_DUMP_STEPSIZE,
+    DUMP_ATTR_STREAM_MODEL,
+} DumpAttrId;
+
+typedef union {
+    char* modelName;
+    uint64_t modelNameSize;
+    uint32_t modelId;
+    uint64_t stepIdAddr;
+    uint64_t iterPerLoopAddr;
+    uint64_t loopCondAddr;
+    char* dumpStep;
+    uint64_t dumpStepSize;
+    uint32_t streamModel;
+} DumpAttrVal;
+
+typedef struct {
+    DumpAttrId id;
+    DumpAttrVal value;
+} DumpAttr;
+
+typedef struct {
+    DumpAttr* attrs;
+    size_t numAttrs;
+} DumpCfg;
+
+/**
+ * @ingroup dump
+ * @par 描述: dump tensor
+ *
+ * @attention  无
+ * @param[in]  opType  算子类型
+ * @param[in]  opName  算子名称
+ * @param[in]  tensors  算子tensor信息
+ * @param[in]  stream  算子处理流句柄
+ * @param[in]  dumpCfg dump配置
+ * @retval     #0 dump tensor成功
+ * @retval     #!0 dump tensor失败
+ * @see        无
+ * @since
+ */
+__attribute__((weak)) ADX_API int32_t AdumpDumpTensorWithCfg(const std::string &opType,
+    const std::string &opName, const std::vector<TensorInfo> &tensors, aclrtStream stream,
+    const DumpCfg &dumpCfg);
 
 constexpr char DUMP_ADDITIONAL_BLOCK_DIM[] = "block_dim";
 constexpr char DUMP_ADDITIONAL_TILING_KEY[] = "tiling_key";
@@ -262,7 +340,7 @@ extern "C" ADX_API int32_t AdumpDelExceptionOperatorInfo(uint32_t deviceId, uint
 
 /**
  * @ingroup dump
- * @par 描述: 获取动态shape异常算子需要Dump的size信息空间。
+ * @par 描述: 获取动态shape异常算子需要Dump的size信息空间。接口即将废弃下线, 不建议使用
  *
  * @attention   无
  * @param[in]   uint32_t space 待获取space大小
@@ -276,7 +354,7 @@ extern "C" ADX_API void *AdumpGetDFXInfoAddrForDynamic(uint32_t space, uint64_t 
 
 /**
  * @ingroup dump
- * @par 描述: 获取静态shape异常算子需要Dump的size信息空间。
+ * @par 描述: 获取静态shape异常算子需要Dump的size信息空间。接口即将废弃下线, 不建议使用
  *
  * @attention   无
  * @param[in]   uint32_t space 待获取space大小
@@ -310,6 +388,38 @@ enum class SaveType : int32_t {
 };
 
 ADX_API int32_t AdumpSaveToFile(const char *data, size_t dataLen, const char *filename, SaveType type);
+
+constexpr uint32_t MAX_KERNELNAME_LEN = 1024U;
+constexpr uint32_t EXCEPTION_DUMP_MAX_TENSOR_NUM = 128U;
+
+enum class ExceptionDumpMode : uint32_t {
+    DUMP_MODE_NONE = 0,
+    DUMP_MODE_OVERWRITE = 1,
+    DUMP_MODE_ADDITIONAL = 2
+};
+
+// 调用方保证 kernelName/kernelDisplayName 以 \0 结尾，最大长度含终止符 MAX_KERNELNAME_LEN 字节。
+struct ExceptionDumpInfo {
+    uint32_t coreId;
+    uint32_t coreType;     // rtCoreType_t
+    uint32_t argSize;
+    void *argAddr;
+    void *bin;             // rtBinHandle
+    char kernelName[MAX_KERNELNAME_LEN];
+    char kernelDisplayName[MAX_KERNELNAME_LEN];
+    uint32_t extraTensorNum;
+    TensorInfo extraTensor[EXCEPTION_DUMP_MAX_TENSOR_NUM];
+};
+
+using ExceptionDumpCallback = uint32_t (*)(void *exceptionInfo,  // rtExceptionInfo_t*
+    ExceptionDumpInfo *exceptionDumpInfo,
+    uint32_t exceptionDumpSize,
+    uint32_t *exceptionDumpRealSize,
+    ExceptionDumpMode *mode);
+
+__attribute__((weak)) ADX_API int32_t AdumpRegExceptionDumpCallback(ExceptionDumpCallback callback);
+
+__attribute__((weak)) ADX_API int32_t AdumpUnregExceptionDumpCallback(ExceptionDumpCallback callback);
 
 } // namespace Adx
 #endif

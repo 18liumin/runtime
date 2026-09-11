@@ -15,8 +15,8 @@
 #include <set>
 
 #include "mmpa/mmpa_api.h"
-#include "adx_datadump_server.h"
 #include "adump_pub.h"
+#include "dump_shim.h"
 
 #include "common/json_parser.h"
 #include "common/error_codes_inner.h"
@@ -24,90 +24,108 @@
 #include "common/log_inner.h"
 #include "utils/string_utils.h"
 #include "aclrt_impl/acl_rt_impl_base.h"
-#include "acl/acl_rt_impl.h"
+#include "acl_rt_impl.h"
 
 namespace {
-    bool aclmdlInitDumpFlag = false;
-    std::mutex aclDumpMutex;
-    constexpr int32_t ADX_ERROR_NONE = 0;
-
-    typedef aclError (*aclDumpSetCallbackFunc)(const char *configStr);
-    typedef aclError (*aclDumpUnsetCallbackFunc)();
-    std::mutex dumpCbMtx;
-    aclDumpSetCallbackFunc dumpSetCbFunc;
-    aclDumpUnsetCallbackFunc dumpUnsetCbFunc;
-}
+bool aclmdlInitDumpFlag = false;
+std::mutex aclDumpMutex;
+constexpr int32_t ADX_ERROR_NONE = 0;
+} // namespace
 
 namespace acl {
-    AclDump &AclDump::GetInstance()
-    {
-        static AclDump aclDumpProc;
-        return aclDumpProc;
+AclDump& AclDump::GetInstance()
+{
+    static AclDump aclDumpProc;
+    return aclDumpProc;
+}
+
+aclError AclDump::HandleDumpCommand(const char* configStr, size_t size, const char* configPath)
+{
+    ACL_LOG_INFO("start to execute HandleDumpCommand.");
+
+    const auto& funcs = acl::GetAdumpCallbacks();
+    if (funcs.serverInit == nullptr) {
+        ACL_LOG_INNER_ERROR("[Check][DumpCallback]Adump server init callback is not registered.");
+        return ACL_ERROR_INTERNAL_ERROR;
+    }
+    int32_t adxRet = funcs.serverInit();
+    if (adxRet != ADX_ERROR_NONE) {
+        ACL_LOG_INNER_ERROR("[AdxDataDumpServer][Init]dump server run failed, adx errorCode = %d", adxRet);
+        return ACL_ERROR_INTERNAL_ERROR;
+    }
+    acl::AclDump::GetInstance().SetAdxInitFromAclInitFlag(true);
+
+    // base dump
+    acl::AdumpDumpConfigInfo configInfo;
+    configInfo.dumpConfigPath = configPath;
+    configInfo.dumpConfigData = configStr;
+    configInfo.dumpConfigSize = size;
+    if (funcs.setDumpConfig == nullptr) {
+        ACL_LOG_INNER_ERROR("[Check][DumpCallback]Adump set dump config callback is not registered.");
+        return ACL_ERROR_INTERNAL_ERROR;
+    }
+    adxRet = funcs.setDumpConfig(configInfo);
+    if (adxRet != ADX_ERROR_NONE) {
+        auto ret = (adxRet == Adx::ADUMP_INPUT_FAILED) ? ACL_ERROR_INVALID_DUMP_CONFIG : ACL_ERROR_INTERNAL_ERROR;
+        ACL_LOG_INNER_ERROR("[Set][Dump]set dump config failed, adx errorCode = %d", adxRet);
+        return ret;
     }
 
-    aclError AclDump::HandleDumpCommand(const char *configStr, size_t size)
-    {
-        ACL_LOG_INFO("start to execute HandleDumpCommand.");
+    return ACL_SUCCESS;
+}
 
-        int32_t adxRet = AdxDataDumpServerInit();
-        if (adxRet != ADX_ERROR_NONE) {
-            ACL_LOG_INNER_ERROR("[AdxDataDumpServer][Init]dump server run failed, adx errorCode = %d", adxRet);
-            return ACL_ERROR_INTERNAL_ERROR;
-        }
-        acl::AclDump::GetInstance().SetAdxInitFromAclInitFlag(true);
-
-        // base dump
-        adxRet = Adx::AdumpSetDump(configStr, size);
-        if (adxRet != ADX_ERROR_NONE) {
-            auto ret =
-                (adxRet == Adx::ADUMP_INPUT_FAILED) ? ACL_ERROR_INVALID_DUMP_CONFIG : ACL_ERROR_INTERNAL_ERROR;
-            ACL_LOG_INNER_ERROR("[Set][Dump]set dump config failed, adx errorCode = %d", adxRet);
-            return ret;
-        }
-
-        return ACL_SUCCESS;
+aclError AclDump::HandleDumpConfig(const char_t* const configPath)
+{
+    ACL_LOG_INFO("start to execute HandleDumpConfig.");
+    std::string configStr;
+    const aclError ret = acl::JsonParser::GetConfigStrFromFile(configPath, configStr);
+    if (ret != ACL_SUCCESS) {
+        ACL_LOG_INNER_ERROR("Get config string from file[%s] failed, errorCode = %d", configPath, ret);
+        return ret;
     }
-
-    aclError AclDump::HandleDumpConfig(const char_t *const configPath)
-    {
-        ACL_LOG_INFO("start to execute HandleDumpConfig.");
-        std::string configStr;
-        aclError ret = acl::JsonParser::GetConfigStrFromFile(configPath, configStr);
-        if (ret != ACL_SUCCESS) {
-            ACL_LOG_INNER_ERROR("Get config string from file[%s] failed, errorCode = %d",
-                configPath, ret);
-            return ret;
+    try {
+        if (!configStr.empty()) {
+            return HandleDumpCommand(configStr.c_str(), configStr.size(), configPath);
         }
-        try {
-            if (!configStr.empty()) {
-                return HandleDumpCommand(configStr.c_str(), configStr.size());
-            }
-        } catch (const nlohmann::json::exception &e) {
-            ACL_LOG_INNER_ERROR("[Convert][DumpConfig]parse json for config failed, exception:%s.",
-                e.what());
-            return ACL_ERROR_INVALID_DUMP_CONFIG;
-        }
-        ACL_LOG_INFO("HandleDumpConfig end in HandleDumpConfig.");
-        return ACL_SUCCESS;
+    } catch (const nlohmann::json::exception& e) {
+        ACL_LOG_INNER_ERROR("[Convert][DumpConfig]parse json for config failed, exception:%s.", e.what());
+        return ACL_ERROR_INVALID_DUMP_CONFIG;
     }
+    ACL_LOG_INFO("HandleDumpConfig end in HandleDumpConfig.");
+    return ACL_SUCCESS;
+}
 } // namespace acl
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 aclError aclmdlInitDumpImpl()
 {
     ACL_LOG_INFO("start to execute aclmdlInitDump.");
     if (!acl::GetAclInitFlag()) {
-        ACL_LOG_INNER_ERROR("[Check][AclInitFlag]aclmdlInitDump is not supported because it does not execute aclInit");
+        acl::AclErrorLogManager::ReportInputError(
+            "EP0008", std::vector<const char*>({"func", "reason"}),
+            std::vector<const char*>({"aclmdlInitDump", "aclInit must be executed before aclmdlInitDump is called"}));
+        ACL_LOG_ERROR("[Check][AclInitFlag]aclInit must be executed before aclmdlInitDump is called");
         return ACL_ERROR_UNINITIALIZE;
     }
 
     const std::unique_lock<std::mutex> lk(aclDumpMutex);
     if (aclmdlInitDumpFlag) {
-        ACL_LOG_INNER_ERROR("[Check][InitDumpFlag]repeatedly initialized dump in aclmdlInitDump, "
-            "only initialized once");
+        acl::AclErrorLogManager::ReportInputError(
+            "EP0008", std::vector<const char*>({"func", "reason"}),
+            std::vector<const char*>({"aclmdlInitDump", "This API cannot be called repeatedly"}));
+        ACL_LOG_ERROR("[Check][InitDumpFlag]This API cannot be called repeatedly");
         return ACL_ERROR_REPEAT_INITIALIZE;
     }
 
-    const int32_t adxRet = AdxDataDumpServerInit();
+    const auto& funcs = acl::GetAdumpCallbacks();
+    if (funcs.serverInit == nullptr) {
+        ACL_LOG_INNER_ERROR("[Check][DumpCallback]Adump server init callback is not registered.");
+        return ACL_ERROR_INTERNAL_ERROR;
+    }
+    const int32_t adxRet = funcs.serverInit();
     if (adxRet != ADX_ERROR_NONE) {
         ACL_LOG_CALL_ERROR("[AdxDataDumpServer][Init]dump server run failed, adx errorCode = %d", adxRet);
         return ACL_ERROR_INTERNAL_ERROR;
@@ -118,17 +136,24 @@ aclError aclmdlInitDumpImpl()
     return ACL_SUCCESS;
 }
 
-aclError aclmdlSetDumpImpl(const char *dumpCfgPath)
+aclError aclmdlSetDumpImpl(const char* dumpCfgPath)
 {
     ACL_LOG_INFO("start to execute aclmdlSetDump.");
     if (!acl::GetAclInitFlag()) {
-        ACL_LOG_INNER_ERROR("[Check][AclInitFlag]aclmdlSetDump is not supported because it does not execute aclInit");
+        acl::AclErrorLogManager::ReportInputError(
+            "EP0008", std::vector<const char*>({"func", "reason"}),
+            std::vector<const char*>({"aclmdlSetDump", "aclInit must be executed before aclmdlSetDumpImpl is called"}));
+        ACL_LOG_ERROR("[Check][AclInitFlag]aclInit must be executed before aclmdlSetDumpImpl is called");
         return ACL_ERROR_UNINITIALIZE;
     }
 
     const std::unique_lock<std::mutex> lk(aclDumpMutex);
     if (!aclmdlInitDumpFlag) {
-        ACL_LOG_INNER_ERROR("[Check][aclmdlInitDumpFlag]dump is not initialized in aclmdlInitDump");
+        acl::AclErrorLogManager::ReportInputError(
+            "EP0008", std::vector<const char*>({"func", "reason"}),
+            std::vector<const char*>(
+                {"aclmdlSetDump", "aclmdlInitDump must be executed before aclmdlSetDumpImpl is called"}));
+        ACL_LOG_ERROR("[Check][aclmdlInitDumpFlag]aclmdlInitDump must be executed before aclmdlSetDumpImpl is called");
         return ACL_ERROR_DUMP_NOT_RUN;
     }
 
@@ -136,18 +161,25 @@ aclError aclmdlSetDumpImpl(const char *dumpCfgPath)
     std::string configStr;
     aclError ret = acl::JsonParser::GetConfigStrFromFile(dumpCfgPath, configStr);
     if (ret != ACL_SUCCESS) {
-        ACL_LOG_INNER_ERROR("Get config string from file[%s] failed, errorCode = %d",
-            dumpCfgPath, ret);
+        ACL_LOG_INNER_ERROR("Get config string from file[%s] failed, errorCode = %d", dumpCfgPath, ret);
         return ret;
     }
 
     // base dump
     if (!configStr.empty()) {
         ACL_LOG_INFO("Start to set dump.");
-        const auto adxRet = Adx::AdumpSetDump(configStr.c_str(), configStr.size());
+        const auto& funcs = acl::GetAdumpCallbacks();
+        if (funcs.setDumpConfig == nullptr) {
+            ACL_LOG_INNER_ERROR("[Check][DumpCallback]Adump set dump config callback is not registered.");
+            return ACL_ERROR_INTERNAL_ERROR;
+        }
+        acl::AdumpDumpConfigInfo configInfo;
+        configInfo.dumpConfigPath = dumpCfgPath;
+        configInfo.dumpConfigData = configStr.c_str();
+        configInfo.dumpConfigSize = configStr.size();
+        const auto adxRet = funcs.setDumpConfig(configInfo);
         if (adxRet != ADX_ERROR_NONE) {
-            ret =
-                (adxRet == Adx::ADUMP_INPUT_FAILED) ? ACL_ERROR_INVALID_DUMP_CONFIG : ACL_ERROR_INTERNAL_ERROR;
+            ret = (adxRet == Adx::ADUMP_INPUT_FAILED) ? ACL_ERROR_INVALID_DUMP_CONFIG : ACL_ERROR_INTERNAL_ERROR;
             ACL_LOG_INNER_ERROR("[Set][Dump]set dump config failed, adx errorCode = %d", adxRet);
             return ret;
         }
@@ -160,26 +192,42 @@ aclError aclmdlFinalizeDumpImpl()
 {
     ACL_LOG_INFO("start to execute aclmdlFinalizeDump.");
     if (!acl::GetAclInitFlag()) {
-        ACL_LOG_INNER_ERROR("[Check][AclInitFlag]aclmdlFinalizeDump is not supported because it does not "
-            "execute aclInit");
+        acl::AclErrorLogManager::ReportInputError(
+            "EP0008", std::vector<const char*>({"func", "reason"}),
+            std::vector<const char*>(
+                {"aclmdlFinalizeDump", "aclInit must be executed before aclmdlFinalizeDump is called"}));
+        ACL_LOG_ERROR("[Check][AclInitFlag]aclInit must be executed before aclmdlFinalizeDump is called");
         return ACL_ERROR_UNINITIALIZE;
     }
 
     const std::unique_lock<std::mutex> lk(aclDumpMutex);
     if (!aclmdlInitDumpFlag) {
-        ACL_LOG_INNER_ERROR("[Check][aclmdlInitDumpFlag]dump is not initialized in aclmdlInitDump");
+        acl::AclErrorLogManager::ReportInputError(
+            "EP0008", std::vector<const char*>({"func", "reason"}),
+            std::vector<const char*>(
+                {"aclmdlFinalizeDump", "aclmdlInitDump must be executed before aclmdlFinalizeDump is called"}));
+        ACL_LOG_ERROR("[Check][aclmdlInitDumpFlag]aclmdlInitDump must be executed before aclmdlFinalizeDump is called");
         return ACL_ERROR_DUMP_NOT_RUN;
     }
 
     // close adump opened
-    int32_t adxRet = Adx::AdumpUnSetDump();
+    const auto& funcs = acl::GetAdumpCallbacks();
+    if (funcs.unsetDump == nullptr) {
+        ACL_LOG_INNER_ERROR("[Check][DumpCallback]Adump unset dump callback is not registered.");
+        return ACL_ERROR_INTERNAL_ERROR;
+    }
+    int32_t adxRet = funcs.unsetDump();
     if (adxRet != ADX_ERROR_NONE) {
         ACL_LOG_INNER_ERROR("[Set][Dump]set dump off failed, adx errorCode = %d", adxRet);
         return ACL_ERROR_INTERNAL_ERROR;
     }
 
     // close dump server
-    adxRet = AdxDataDumpServerUnInit();
+    if (funcs.serverUnInit == nullptr) {
+        ACL_LOG_INNER_ERROR("[Check][DumpCallback]Adump server uninit callback is not registered.");
+        return ACL_ERROR_INTERNAL_ERROR;
+    }
+    adxRet = funcs.serverUnInit();
     if (adxRet != ADX_ERROR_NONE) {
         ACL_LOG_CALL_ERROR("[AdxDataDumpServer][UnInit]generate dump file failed in disk, adx errorCode = %d", adxRet);
         return ACL_ERROR_INTERNAL_ERROR;
@@ -187,38 +235,6 @@ aclError aclmdlFinalizeDumpImpl()
 
     aclmdlInitDumpFlag = false;
     ACL_LOG_INFO("successfully execute aclmdlFinalizeDump, the dump task completed!");
-    return ACL_SUCCESS;
-}
-
-// add interface for acl_model dump
-#ifdef __cplusplus
-extern "C" {
-#endif
-ACL_FUNC_VISIBILITY aclError aclDumpSetCallbackRegister(aclDumpSetCallbackFunc cbFunc)
-{
-    const std::unique_lock<std::mutex> lk(dumpCbMtx);
-    dumpSetCbFunc = cbFunc;
-    return ACL_SUCCESS;
-}
-
-ACL_FUNC_VISIBILITY aclError aclDumpSetCallbackUnRegister()
-{
-    const std::unique_lock<std::mutex> lk(dumpCbMtx);
-    dumpSetCbFunc = nullptr;
-    return ACL_SUCCESS;
-}
-
-ACL_FUNC_VISIBILITY aclError aclDumpUnsetCallbackRegister(aclDumpUnsetCallbackFunc cbFunc)
-{
-    const std::unique_lock<std::mutex> lk(dumpCbMtx);
-    dumpUnsetCbFunc = cbFunc;
-    return ACL_SUCCESS;
-}
-
-ACL_FUNC_VISIBILITY aclError aclDumpUnsetCallbackUnRegister()
-{
-    const std::unique_lock<std::mutex> lk(dumpCbMtx);
-    dumpUnsetCbFunc = nullptr;
     return ACL_SUCCESS;
 }
 #ifdef __cplusplus

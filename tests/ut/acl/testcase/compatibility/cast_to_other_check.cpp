@@ -16,27 +16,29 @@
 #include "runtime/rt.h"
 #include "runtime/rts/rts.h"
 #include "runtime/rt_ras.h"
+#include "runtime/rt_inner_task.h"
+#include "runtime/rt_inner_device.h"
+#include "runtime/rt_inner_model.h"
 #undef private
 #endif
 
-class UTEST_ACL_compatibility_cast_check : public testing::Test
-{
-    public:
-        UTEST_ACL_compatibility_cast_check() {}
+class UTEST_ACL_compatibility_cast_check : public testing::Test {
+public:
+    UTEST_ACL_compatibility_cast_check() {}
 
-    protected:
-        virtual void SetUp() {}
-        virtual void TearDown() {}
+protected:
+    virtual void SetUp() {}
+    virtual void TearDown() {}
 };
 
 TEST_F(UTEST_ACL_compatibility_cast_check, aclrtErrorType)
 {
     EXPECT_EQ((uint64_t)ACL_RT_NO_ERROR, (uint64_t)RT_NO_ERROR);
     EXPECT_EQ((uint64_t)ACL_RT_ERROR_MEMORY, (uint64_t)RT_ERROR_MEMORY);
-    EXPECT_EQ((uint64_t)ACL_RT_ERROR_L2 , (uint64_t)RT_ERROR_L2);
-    EXPECT_EQ((uint64_t)ACL_RT_ERROR_AICORE , (uint64_t)RT_ERROR_AICORE);
-    EXPECT_EQ((uint64_t)ACL_RT_ERROR_LINK , (uint64_t)RT_ERROR_LINK);
-    EXPECT_EQ((uint64_t)ACL_RT_ERROR_OTHERS , (uint64_t)RT_ERROR_OTHERS);
+    EXPECT_EQ((uint64_t)ACL_RT_ERROR_L2, (uint64_t)RT_ERROR_L2);
+    EXPECT_EQ((uint64_t)ACL_RT_ERROR_AICORE, (uint64_t)RT_ERROR_AICORE);
+    EXPECT_EQ((uint64_t)ACL_RT_ERROR_LINK, (uint64_t)RT_ERROR_LINK);
+    EXPECT_EQ((uint64_t)ACL_RT_ERROR_OTHERS, (uint64_t)RT_ERROR_OTHERS);
     EXPECT_EQ(sizeof(aclrtErrorType), sizeof(rtErrType));
 }
 
@@ -52,7 +54,8 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtErrorInfoDetail)
 {
     size_t acl_offset, rts_offset;
     acl_offset = OFFSET_OF_MEMBER(aclrtErrorInfoDetail, uceInfo);
-    rts_offset = OFFSET_OF_MEMBER(rtErrorInfoDetail, uceInfo); EXPECT_EQ(acl_offset, rts_offset);
+    rts_offset = OFFSET_OF_MEMBER(rtErrorInfoDetail, uceInfo);
+    EXPECT_EQ(acl_offset, rts_offset);
 
     acl_offset = OFFSET_OF_MEMBER(aclrtErrorInfoDetail, aicoreErrType);
     rts_offset = OFFSET_OF_MEMBER(rtErrorInfoDetail, aicoreErrType);
@@ -61,15 +64,15 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtErrorInfoDetail)
     EXPECT_EQ(sizeof(aclrtErrorInfoDetail), sizeof(size_t) + ACL_RT_MEM_UCE_INFO_MAX_NUM * sizeof(aclrtMemUceInfo));
 }
 
-TEST_F(UTEST_ACL_compatibility_cast_check, aclrtErrorInfo) 
-{ 
-    size_t acl_offset, rts_offset; 
-    acl_offset = OFFSET_OF_MEMBER(aclrtErrorInfo, tryRepair); 
-    rts_offset = OFFSET_OF_MEMBER(rtErrorInfo, tryRepair); 
+TEST_F(UTEST_ACL_compatibility_cast_check, aclrtErrorInfo)
+{
+    size_t acl_offset, rts_offset;
+    acl_offset = OFFSET_OF_MEMBER(aclrtErrorInfo, tryRepair);
+    rts_offset = OFFSET_OF_MEMBER(rtErrorInfo, tryRepair);
     EXPECT_EQ(acl_offset, rts_offset);
 
-    acl_offset = OFFSET_OF_MEMBER(aclrtErrorInfo, hasDetail); 
-    rts_offset = OFFSET_OF_MEMBER(rtErrorInfo, hasDetail); 
+    acl_offset = OFFSET_OF_MEMBER(aclrtErrorInfo, hasDetail);
+    rts_offset = OFFSET_OF_MEMBER(rtErrorInfo, hasDetail);
     EXPECT_EQ(acl_offset, rts_offset);
 
     acl_offset = OFFSET_OF_MEMBER(aclrtErrorInfo, detail);
@@ -92,9 +95,11 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtBinaryLoadOptionType)
 TEST_F(UTEST_ACL_compatibility_cast_check, aclrtLaunchKernelAttrId)
 {
     EXPECT_EQ((uint64_t)ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE, (uint64_t)RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE);
+    EXPECT_EQ((uint64_t)ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE, (uint64_t)RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
     EXPECT_EQ((uint64_t)ACL_RT_LAUNCH_KERNEL_ATTR_ENGINE_TYPE, (uint64_t)RT_LAUNCH_KERNEL_ATTR_ENGINE_TYPE);
     EXPECT_EQ((uint64_t)ACL_RT_LAUNCH_KERNEL_ATTR_BLOCKDIM_OFFSET, (uint64_t)RT_LAUNCH_KERNEL_ATTR_BLOCKDIM_OFFSET);
-    EXPECT_EQ((uint64_t)ACL_RT_LAUNCH_KERNEL_ATTR_BLOCK_TASK_PREFETCH, (uint64_t)RT_LAUNCH_KERNEL_ATTR_BLOCK_TASK_PREFETCH);
+    EXPECT_EQ(
+        (uint64_t)ACL_RT_LAUNCH_KERNEL_ATTR_BLOCK_TASK_PREFETCH, (uint64_t)RT_LAUNCH_KERNEL_ATTR_BLOCK_TASK_PREFETCH);
     EXPECT_EQ((uint64_t)ACL_RT_LAUNCH_KERNEL_ATTR_DATA_DUMP, (uint64_t)RT_LAUNCH_KERNEL_ATTR_DATA_DUMP);
     EXPECT_EQ((uint64_t)ACL_RT_LAUNCH_KERNEL_ATTR_TIMEOUT, (uint64_t)RT_LAUNCH_KERNEL_ATTR_TIMEOUT);
     EXPECT_EQ((uint64_t)ACL_RT_LAUNCH_KERNEL_ATTR_TIMEOUT_US, (uint64_t)RT_LAUNCH_KERNEL_ATTR_TIMEOUT_US);
@@ -118,7 +123,7 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtMemcpyKind)
 
 TEST_F(UTEST_ACL_compatibility_cast_check, aclrtBinaryLoadOption)
 {
-    EXPECT_EQ(OFFSET_OF_MEMBER(aclrtBinaryLoadOption, type), OFFSET_OF_MEMBER(rtLoadBinaryOption_t , optionId));
+    EXPECT_EQ(OFFSET_OF_MEMBER(aclrtBinaryLoadOption, type), OFFSET_OF_MEMBER(rtLoadBinaryOption_t, optionId));
     EXPECT_EQ(OFFSET_OF_MEMBER(aclrtBinaryLoadOption, value), OFFSET_OF_MEMBER(rtLoadBinaryOption_t, value));
 
     EXPECT_EQ(sizeof(aclrtBinaryLoadOption), sizeof(rtLoadBinaryOption_t));
@@ -134,7 +139,7 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtBinaryLoadOptions)
 
 TEST_F(UTEST_ACL_compatibility_cast_check, aclrtLaunchKernelAttr)
 {
-    EXPECT_EQ(OFFSET_OF_MEMBER(aclrtLaunchKernelAttr, id), OFFSET_OF_MEMBER(rtLaunchKernelAttr_t , id));
+    EXPECT_EQ(OFFSET_OF_MEMBER(aclrtLaunchKernelAttr, id), OFFSET_OF_MEMBER(rtLaunchKernelAttr_t, id));
     EXPECT_EQ(OFFSET_OF_MEMBER(aclrtLaunchKernelAttr, value), OFFSET_OF_MEMBER(rtLaunchKernelAttr_t, value));
 
     EXPECT_EQ(sizeof(aclrtLaunchKernelAttr), sizeof(rtLaunchKernelAttr_t));
@@ -142,7 +147,7 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtLaunchKernelAttr)
 
 TEST_F(UTEST_ACL_compatibility_cast_check, aclrtLaunchKernelCfg)
 {
-    EXPECT_EQ(OFFSET_OF_MEMBER(aclrtLaunchKernelCfg, attrs), OFFSET_OF_MEMBER(rtKernelLaunchCfg_t , attrs));
+    EXPECT_EQ(OFFSET_OF_MEMBER(aclrtLaunchKernelCfg, attrs), OFFSET_OF_MEMBER(rtKernelLaunchCfg_t, attrs));
     EXPECT_EQ(OFFSET_OF_MEMBER(aclrtLaunchKernelCfg, numAttrs), OFFSET_OF_MEMBER(rtKernelLaunchCfg_t, numAttrs));
 
     EXPECT_EQ(sizeof(aclrtLaunchKernelCfg), sizeof(rtKernelLaunchCfg_t));
@@ -182,6 +187,8 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtMemMallocPolicy)
 TEST_F(UTEST_ACL_compatibility_cast_check, aclrtHostRegisterType)
 {
     EXPECT_EQ((uint64_t)ACL_HOST_REGISTER_MAPPED, (uint64_t)RT_HOST_REGISTER_MAPPED);
+    EXPECT_EQ((uint64_t)ACL_HOST_REGISTER_IOMEMORY, (uint64_t)RT_HOST_REGISTER_IOMEMORY);
+    EXPECT_EQ((uint64_t)ACL_HOST_REGISTER_READONLY, (uint64_t)RT_HOST_REGISTER_READONLY);
 
     // check total size
     EXPECT_EQ(sizeof(aclrtHostRegisterType), sizeof(rtHostRegisterType));
@@ -319,16 +326,18 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtDevAttr)
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_CUBE_CORE_NUM, (uint64_t)RT_DEV_ATTR_CUBE_CORE_NUM);
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_WARP_SIZE, (uint64_t)RT_DEV_ATTR_WARP_SIZE);
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_MAX_THREAD_PER_VECTOR_CORE, (uint64_t)RT_DEV_ATTR_MAX_THREAD_PER_VECTOR_CORE);
-    EXPECT_EQ((uint64_t)ACL_DEV_ATTR_LOCAL_MEM_PER_VECTOR_CORE, (uint64_t)RT_DEV_ATTR_LOCAL_MEM_PER_VECTOR_CORE);
+    EXPECT_EQ((uint64_t)ACL_DEV_ATTR_UBUF_PER_VECTOR_CORE, (uint64_t)RT_DEV_ATTR_UBUF_PER_VECTOR_CORE);
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_TOTAL_GLOBAL_MEM_SIZE, (uint64_t)RT_DEV_ATTR_TOTAL_GLOBAL_MEM_SIZE);
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_L2_CACHE_SIZE, (uint64_t)RT_DEV_ATTR_L2_CACHE_SIZE);
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_SMP_ID, (uint64_t)RT_DEV_ATTR_SMP_ID);
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_PHY_CHIP_ID, (uint64_t)RT_DEV_ATTR_PHY_CHIP_ID);
-    EXPECT_EQ((uint64_t)ACL_DEV_ATTR_SUPER_POD_DEVIDE_ID, (uint64_t)RT_DEV_ATTR_SUPER_POD_DEVICE_ID);
+    EXPECT_EQ((uint64_t)ACL_DEV_ATTR_SUPER_POD_DEVICE_ID, (uint64_t)RT_DEV_ATTR_SUPER_POD_DEVICE_ID);
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_SUPER_POD_SERVER_ID, (uint64_t)RT_DEV_ATTR_SUPER_POD_SERVER_ID);
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_SUPER_POD_ID, (uint64_t)RT_DEV_ATTR_SUPER_POD_ID);
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_CUST_OP_PRIVILEGE, (uint64_t)RT_DEV_ATTR_CUST_OP_PRIVILEGE);
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_MAINBOARD_ID, (uint64_t)RT_DEV_ATTR_MAINBOARD_ID);
+    EXPECT_EQ((uint64_t)ACL_DEV_ATTR_SUPER_POD_CHASSIS_ID, (uint64_t)RT_DEV_ATTR_SUPER_POD_CHASSIS_ID);
+    EXPECT_EQ((uint64_t)ACL_DEV_ATTR_NPU_ARCH, (uint64_t)RT_DEV_ATTR_NPU_ARCH);
     EXPECT_EQ((uint64_t)ACL_DEV_ATTR_IS_VIRTUAL, (uint64_t)RT_DEV_ATTR_IS_VIRTUAL);
 
     // check total size
@@ -337,7 +346,9 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtDevAttr)
 
 TEST_F(UTEST_ACL_compatibility_cast_check, aclrtDevFeatureType)
 {
-    EXPECT_EQ((uint64_t)ACL_FEATURE_TSCPU_TASK_UPDATE_SUPPORT_AIC_AIV, (uint64_t)RT_FEATURE_TSCPU_TASK_UPDATE_SUPPORT_AIC_AIV);
+    EXPECT_EQ(
+        (uint64_t)ACL_FEATURE_TSCPU_TASK_UPDATE_SUPPORT_AIC_AIV,
+        (uint64_t)RT_FEATURE_TSCPU_TASK_UPDATE_SUPPORT_AIC_AIV);
     EXPECT_EQ((uint64_t)ACL_FEATURE_SYSTEM_MEMQ_EVENT_CROSS_DEV, (uint64_t)RT_FEATURE_SYSTEM_MEMQ_EVENT_CROSS_DEV);
 
     // check total size
@@ -551,7 +562,9 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtRandomNumFuncType)
     EXPECT_EQ((uint64_t)ACL_RT_RANDOM_NUM_FUNC_TYPE_DROPOUT_BITMASK, (uint64_t)RT_RANDOM_NUM_FUNC_TYPE_DROPOUT_BITMASK);
     EXPECT_EQ((uint64_t)ACL_RT_RANDOM_NUM_FUNC_TYPE_UNIFORM_DIS, (uint64_t)RT_RANDOM_NUM_FUNC_TYPE_UNIFORM_DIS);
     EXPECT_EQ((uint64_t)ACL_RT_RANDOM_NUM_FUNC_TYPE_NORMAL_DIS, (uint64_t)RT_RANDOM_NUM_FUNC_TYPE_NORMAL_DIS);
-    EXPECT_EQ((uint64_t)ACL_RT_RANDOM_NUM_FUNC_TYPE_TRUNCATED_NORMAL_DIS, (uint64_t)RT_RANDOM_NUM_FUNC_TYPE_TRUNCATED_NORMAL_DIS);
+    EXPECT_EQ(
+        (uint64_t)ACL_RT_RANDOM_NUM_FUNC_TYPE_TRUNCATED_NORMAL_DIS,
+        (uint64_t)RT_RANDOM_NUM_FUNC_TYPE_TRUNCATED_NORMAL_DIS);
     // check total size
     EXPECT_EQ(sizeof(aclrtRandomNumFuncType), sizeof(rtRandomNumFuncType));
 }
@@ -570,7 +583,6 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtRandomNumFuncParaInfo)
     // check total size
     EXPECT_EQ(sizeof(aclrtRandomNumFuncParaInfo), sizeof(rtRandomNumFuncParaInfo_t));
 }
-
 
 TEST_F(UTEST_ACL_compatibility_cast_check, aclrtRandomNumTaskInfo)
 {
@@ -751,19 +763,26 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtCntNotifyWaitInfo)
 TEST_F(UTEST_ACL_compatibility_cast_check, ipc_flag)
 {
     EXPECT_EQ((uint64_t)ACL_RT_NOTIFY_EXPORT_FLAG_DEFAULT, (uint64_t)RT_NOTIFY_FLAG_DEFAULT);
-    EXPECT_EQ((uint64_t)ACL_RT_NOTIFY_EXPORT_FLAG_DISABLE_PID_VALIDATION, (uint64_t)RT_NOTIFY_EXPORT_FLAG_DISABLE_PID_VALIDATION);
+    EXPECT_EQ(
+        (uint64_t)ACL_RT_NOTIFY_EXPORT_FLAG_DISABLE_PID_VALIDATION,
+        (uint64_t)RT_NOTIFY_EXPORT_FLAG_DISABLE_PID_VALIDATION);
 
     EXPECT_EQ((uint64_t)ACL_RT_NOTIFY_IMPORT_FLAG_DEFAULT, (uint64_t)RT_NOTIFY_FLAG_DEFAULT);
-    EXPECT_EQ((uint64_t)ACL_RT_NOTIFY_IMPORT_FLAG_ENABLE_PEER_ACCESS, (uint64_t)RT_NOTIFY_IMPORT_FLAG_ENABLE_PEER_ACCESS);
+    EXPECT_EQ(
+        (uint64_t)ACL_RT_NOTIFY_IMPORT_FLAG_ENABLE_PEER_ACCESS, (uint64_t)RT_NOTIFY_IMPORT_FLAG_ENABLE_PEER_ACCESS);
 
     EXPECT_EQ((uint64_t)ACL_RT_IPC_MEM_EXPORT_FLAG_DEFAULT, (uint64_t)RT_IPC_MEM_FLAG_DEFAULT);
-    EXPECT_EQ((uint64_t)ACL_RT_IPC_MEM_EXPORT_FLAG_DISABLE_PID_VALIDATION, (uint64_t)RT_IPC_MEM_EXPORT_FLAG_DISABLE_PID_VALIDATION);
+    EXPECT_EQ(
+        (uint64_t)ACL_RT_IPC_MEM_EXPORT_FLAG_DISABLE_PID_VALIDATION,
+        (uint64_t)RT_IPC_MEM_EXPORT_FLAG_DISABLE_PID_VALIDATION);
 
     EXPECT_EQ((uint64_t)ACL_RT_IPC_MEM_IMPORT_FLAG_DEFAULT, (uint64_t)RT_IPC_MEM_FLAG_DEFAULT);
-    EXPECT_EQ((uint64_t)ACL_RT_IPC_MEM_IMPORT_FLAG_ENABLE_PEER_ACCESS, (uint64_t)RT_IPC_MEM_IMPORT_FLAG_ENABLE_PEER_ACCESS);
+    EXPECT_EQ(
+        (uint64_t)ACL_RT_IPC_MEM_IMPORT_FLAG_ENABLE_PEER_ACCESS, (uint64_t)RT_IPC_MEM_IMPORT_FLAG_ENABLE_PEER_ACCESS);
 
     EXPECT_EQ((uint64_t)ACL_RT_VMM_EXPORT_FLAG_DEFAULT, (uint64_t)RT_VMM_FLAG_DEFAULT);
-    EXPECT_EQ((uint64_t)ACL_RT_VMM_EXPORT_FLAG_DISABLE_PID_VALIDATION, (uint64_t)RT_VMM_EXPORT_FLAG_DISABLE_PID_VALIDATION);
+    EXPECT_EQ(
+        (uint64_t)ACL_RT_VMM_EXPORT_FLAG_DISABLE_PID_VALIDATION, (uint64_t)RT_VMM_EXPORT_FLAG_DISABLE_PID_VALIDATION);
 }
 
 TEST_F(UTEST_ACL_compatibility_cast_check, aclrtMemAccessFlags)
@@ -794,8 +813,8 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtMemAccessDesc)
 
 TEST_F(UTEST_ACL_compatibility_cast_check, process_state)
 {
-  EXPECT_EQ((uint64_t)ACL_RT_PROCESS_STATE_RUNNING, (uint64_t)RT_PROCESS_STATE_RUNNING);
-  EXPECT_EQ((uint64_t)ACL_RT_PROCESS_STATE_LOCKED, (uint64_t)RT_PROCESS_STATE_LOCKED);
+    EXPECT_EQ((uint64_t)ACL_RT_PROCESS_STATE_RUNNING, (uint64_t)RT_PROCESS_STATE_RUNNING);
+    EXPECT_EQ((uint64_t)ACL_RT_PROCESS_STATE_LOCKED, (uint64_t)RT_PROCESS_STATE_LOCKED);
 }
 
 TEST_F(UTEST_ACL_compatibility_cast_check, aclrtKernelType)
@@ -812,6 +831,143 @@ TEST_F(UTEST_ACL_compatibility_cast_check, aclrtKernelType)
 TEST_F(UTEST_ACL_compatibility_cast_check, aclrtFuncAttribute)
 {
     EXPECT_EQ((uint64_t)ACL_FUNC_ATTR_KERNEL_TYPE, (uint64_t)RT_FUNCTION_ATTR_KERNEL_TYPE);
+    EXPECT_EQ((uint64_t)ACL_FUNC_ATTR_KERNEL_RATIO, (uint64_t)RT_FUNCTION_ATTR_KERNEL_RATIO);
+    EXPECT_EQ((uint64_t)ACL_FUNC_ATTR_KERNEL_SCHED_MODE, (uint64_t)RT_FUNCTION_ATTR_KERNEL_SCHED_MODE);
 
     EXPECT_EQ(sizeof(aclrtFuncAttribute), sizeof(rtFuncAttribute));
+}
+TEST_F(UTEST_ACL_compatibility_cast_check, aclrtHacType)
+{
+    EXPECT_EQ((uint32_t)ACL_RT_HAC_TYPE_STARS, (uint32_t)RT_HAC_TYPE_STARS);
+    EXPECT_EQ((uint32_t)ACL_RT_HAC_TYPE_AICPU, (uint32_t)RT_HAC_TYPE_AICPU);
+    EXPECT_EQ((uint32_t)ACL_RT_HAC_TYPE_AIC, (uint32_t)RT_HAC_TYPE_AIC);
+    EXPECT_EQ((uint32_t)ACL_RT_HAC_TYPE_AIV, (uint32_t)RT_HAC_TYPE_AIV);
+    EXPECT_EQ((uint32_t)ACL_RT_HAC_TYPE_PCIEDMA, (uint32_t)RT_HAC_TYPE_PCIEDMA);
+    EXPECT_EQ((uint32_t)ACL_RT_HAC_TYPE_RDMA, (uint32_t)RT_HAC_TYPE_RDMA);
+    EXPECT_EQ((uint32_t)ACL_RT_HAC_TYPE_SDMA, (uint32_t)RT_HAC_TYPE_SDMA);
+    EXPECT_EQ((uint32_t)ACL_RT_HAC_TYPE_DVPP, (uint32_t)RT_HAC_TYPE_DVPP);
+    EXPECT_EQ((uint32_t)ACL_RT_HAC_TYPE_UDMA, (uint32_t)RT_HAC_TYPE_UDMA);
+    EXPECT_EQ((uint32_t)ACL_RT_HAC_TYPE_CCU, (uint32_t)RT_HAC_TYPE_CCU);
+    EXPECT_EQ(sizeof(aclrtHacType), sizeof(rtHacType));
+}
+
+TEST_F(UTEST_ACL_compatibility_cast_check, aclrtHostMemMapCapability)
+{
+    EXPECT_EQ((uint32_t)ACL_RT_HOST_MEM_MAP_NOT_SUPPORTED, (uint32_t)RT_HOST_MEM_MAP_NOT_SUPPORTED);
+    EXPECT_EQ((uint32_t)ACL_RT_HOST_MEM_MAP_SUPPORTED, (uint32_t)RT_HOST_MEM_MAP_SUPPORTED);
+
+    EXPECT_EQ(sizeof(aclrtHostMemMapCapability), sizeof(rtHostMemMapCapability));
+}
+
+TEST_F(UTEST_ACL_compatibility_cast_check, aclmdlRITaskType)
+{
+    EXPECT_EQ((uint64_t)ACL_MODEL_RI_TASK_DEFAULT, (uint64_t)RT_TASK_DEFAULT);
+    EXPECT_EQ((uint64_t)ACL_MODEL_RI_TASK_KERNEL, (uint64_t)RT_TASK_KERNEL);
+    EXPECT_EQ((uint64_t)ACL_MODEL_RI_TASK_EVENT_RECORD, (uint64_t)RT_TASK_EVENT_RECORD);
+    EXPECT_EQ((uint64_t)ACL_MODEL_RI_TASK_EVENT_WAIT, (uint64_t)RT_TASK_EVENT_WAIT);
+    EXPECT_EQ((uint64_t)ACL_MODEL_RI_TASK_EVENT_RESET, (uint64_t)RT_TASK_EVENT_RESET);
+    EXPECT_EQ((uint64_t)ACL_MODEL_RI_TASK_VALUE_WRITE, (uint64_t)RT_TASK_VALUE_WRITE);
+    EXPECT_EQ((uint64_t)ACL_MODEL_RI_TASK_VALUE_WAIT, (uint64_t)RT_TASK_VALUE_WAIT);
+
+    EXPECT_EQ(sizeof(aclmdlRITaskType), sizeof(rtTaskType));
+}
+
+TEST_F(UTEST_ACL_compatibility_cast_check, aclmdlRITaskParams)
+{
+    size_t acl_offset, rt_offset;
+    acl_offset = OFFSET_OF_MEMBER(aclmdlRITaskParams, type);
+    rt_offset = OFFSET_OF_MEMBER(rtTaskParams, type);
+    EXPECT_EQ(acl_offset, rt_offset);
+
+    acl_offset = OFFSET_OF_MEMBER(aclmdlRITaskParams, taskGrp);
+    rt_offset = OFFSET_OF_MEMBER(rtTaskParams, taskGrp);
+    EXPECT_EQ(acl_offset, rt_offset);
+
+    acl_offset = OFFSET_OF_MEMBER(aclmdlRITaskParams, opInfoSize);
+    rt_offset = OFFSET_OF_MEMBER(rtTaskParams, opInfoSize);
+    EXPECT_EQ(acl_offset, rt_offset);
+
+    // check total size
+    EXPECT_EQ(sizeof(aclmdlRITaskParams), sizeof(rtTaskParams));
+}
+
+TEST_F(UTEST_ACL_compatibility_cast_check, aclrtAtomicOperationCapability)
+{
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_CAPABILITY_SIGNED, (uint32_t)RT_ATOMIC_CAPABILITY_SIGNED);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_CAPABILITY_UNSIGNED, (uint32_t)RT_ATOMIC_CAPABILITY_UNSIGNED);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_CAPABILITY_REDUCATION, (uint32_t)RT_ATOMIC_CAPABILITY_REDUCATION);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_CAPABILITY_REDUCTION, (uint32_t)RT_ATOMIC_CAPABILITY_REDUCTION);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_CAPABILITY_SCALAR8, (uint32_t)RT_ATOMIC_CAPABILITY_SCALAR8);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_CAPABILITY_SCALAR16, (uint32_t)RT_ATOMIC_CAPABILITY_SCALAR16);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_CAPABILITY_SCALAR32, (uint32_t)RT_ATOMIC_CAPABILITY_SCALAR32);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_CAPABILITY_SCALAR64, (uint32_t)RT_ATOMIC_CAPABILITY_SCALAR64);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_CAPABILITY_SCALAR128, (uint32_t)RT_ATOMIC_CAPABILITY_SCALAR128);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_CAPABILITY_VECTOR32X4, (uint32_t)RT_ATOMIC_CAPABILITY_VECTOR32X4);
+
+    EXPECT_EQ(sizeof(aclrtAtomicOperationCapability), sizeof(rtAtomicOperationCapability));
+}
+
+TEST_F(UTEST_ACL_compatibility_cast_check, aclrtAtomicOperation)
+{
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_INTEGER_ADD, (uint32_t)RT_ATOMIC_OPERATION_INTEGER_ADD);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_INTEGER_MIN, (uint32_t)RT_ATOMIC_OPERATION_INTEGER_MIN);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_INTEGER_MAX, (uint32_t)RT_ATOMIC_OPERATION_INTEGER_MAX);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_INTEGER_INCREMENT, (uint32_t)RT_ATOMIC_OPERATION_INTEGER_INCREMENT);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_INTEGER_DECREMENT, (uint32_t)RT_ATOMIC_OPERATION_INTEGER_DECREMENT);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_AND, (uint32_t)RT_ATOMIC_OPERATION_AND);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_OR, (uint32_t)RT_ATOMIC_OPERATION_OR);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_XOR, (uint32_t)RT_ATOMIC_OPERATION_XOR);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_EXCHANGE, (uint32_t)RT_ATOMIC_OPERATION_EXCHANGE);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_CAS, (uint32_t)RT_ATOMIC_OPERATION_CAS);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_FLOAT_ADD, (uint32_t)RT_ATOMIC_OPERATION_FLOAT_ADD);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_FLOAT_MIN, (uint32_t)RT_ATOMIC_OPERATION_FLOAT_MIN);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_FLOAT_MAX, (uint32_t)RT_ATOMIC_OPERATION_FLOAT_MAX);
+
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_DMA_ADD, (uint32_t)RT_ATOMIC_OPERATION_DMA_ADD);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_DMA_MIN, (uint32_t)RT_ATOMIC_OPERATION_DMA_MIN);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_DMA_MAX, (uint32_t)RT_ATOMIC_OPERATION_DMA_MAX);
+
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_SIMD_SCALAR_ADD, (uint32_t)RT_ATOMIC_OPERATION_SIMD_SCALAR_ADD);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_SIMD_SCALAR_MIN, (uint32_t)RT_ATOMIC_OPERATION_SIMD_SCALAR_MIN);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_SIMD_SCALAR_MAX, (uint32_t)RT_ATOMIC_OPERATION_SIMD_SCALAR_MAX);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_SIMD_SCALAR_CAS, (uint32_t)RT_ATOMIC_OPERATION_SIMD_SCALAR_CAS);
+    EXPECT_EQ((uint32_t)ACL_RT_ATOMIC_OPERATION_SIMD_SCALAR_EXCH, (uint32_t)RT_ATOMIC_OPERATION_SIMD_SCALAR_EXCH);
+
+    EXPECT_EQ(sizeof(aclrtAtomicOperation), sizeof(rtAtomicOperation));
+}
+
+TEST_F(UTEST_ACL_compatibility_cast_check, aclmdlRICondHandleFlag)
+{
+    EXPECT_EQ((uint64_t)ACL_MODEL_RI_COND_HANDLE_ASSIGN_DEFAULT, (uint64_t)RT_COND_HANDLE_ASSIGN_DEFAULT);
+    EXPECT_EQ(sizeof(aclmdlRICondHandleFlag), sizeof(rtCondHandleFlag_t));
+}
+
+TEST_F(UTEST_ACL_compatibility_cast_check, aclmdlRICondTaskType)
+{
+    EXPECT_EQ((uint64_t)ACL_MODEL_RI_COND_TYPE_IF, (uint64_t)RT_COND_TASK_TYPE_IF);
+    EXPECT_EQ((uint64_t)ACL_MODEL_RI_COND_TYPE_WHILE, (uint64_t)RT_COND_TASK_TYPE_WHILE);
+    EXPECT_EQ((uint64_t)ACL_MODEL_RI_COND_TYPE_SWITCH, (uint64_t)RT_COND_TASK_TYPE_SWITCH);
+    EXPECT_EQ(sizeof(aclmdlRICondTaskType), sizeof(rtCondTaskType_t));
+}
+
+TEST_F(UTEST_ACL_compatibility_cast_check, aclmdlRICondTaskParams)
+{
+    size_t acl_offset, rt_offset;
+    acl_offset = OFFSET_OF_MEMBER(aclmdlRICondTaskParams, handle);
+    rt_offset = OFFSET_OF_MEMBER(rtCondTaskParams, handle);
+    EXPECT_EQ(acl_offset, rt_offset);
+
+    acl_offset = OFFSET_OF_MEMBER(aclmdlRICondTaskParams, type);
+    rt_offset = OFFSET_OF_MEMBER(rtCondTaskParams, type);
+    EXPECT_EQ(acl_offset, rt_offset);
+
+    acl_offset = OFFSET_OF_MEMBER(aclmdlRICondTaskParams, size);
+    rt_offset = OFFSET_OF_MEMBER(rtCondTaskParams, size);
+    EXPECT_EQ(acl_offset, rt_offset);
+
+    acl_offset = OFFSET_OF_MEMBER(aclmdlRICondTaskParams, modelRIArray);
+    rt_offset = OFFSET_OF_MEMBER(rtCondTaskParams, modelRIArray);
+    EXPECT_EQ(acl_offset, rt_offset);
+
+    EXPECT_EQ(sizeof(aclmdlRICondTaskParams), sizeof(rtCondTaskParams));
 }

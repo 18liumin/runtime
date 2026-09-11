@@ -27,7 +27,7 @@ typedef struct {
     int16_t moduleId;
 } PlogDeviceLogInfo;
 
-typedef struct { // sub log file list paramter
+typedef struct { // sub log file list parameter
     int32_t fileNum;
     int32_t currIndex;
     int32_t maxFileNum;
@@ -35,22 +35,24 @@ typedef struct { // sub log file list paramter
     uint32_t pid;
     char aucFilePath[MAX_FILEPATH_LEN + 1U];
     char aucFileHead[MAX_NAME_HEAD_LEN + 1U];
-    char **aucFileName;
+    char** aucFileName;
     unsigned char devWriteFileFlag;
 } PlogFileList;
 
-typedef struct { // log file list paramter
+typedef struct { // log file list parameter
     uint32_t deviceNum;
     char rootPath[MAX_FILEPATH_LEN + 1U];
     PlogFileList hostLogList[LOG_TYPE_NUM];
-    PlogFileList *deviceLogList[LOG_TYPE_NUM];
+    PlogFileList* deviceLogList[LOG_TYPE_NUM];
 } PlogFileMgrInfo;
 
 LogStatus PlogFileMgrInit(void);
 void PlogFileMgrExit(void);
+void PlogReinitFileHeadsForChild(void);
+PlogFileMgrInfo* PlogGetFileMgrInfo(void);
 
-LogStatus PlogWriteDeviceLog(char *msg, const PlogDeviceLogInfo *info);
-LogStatus PlogWriteHostLog(int32_t logType, char *msg, uint32_t len);
+LogStatus PlogWriteDeviceLog(char* msg, const PlogDeviceLogInfo* info);
+LogStatus PlogWriteHostLog(int32_t logType, char* msg, uint32_t len);
 
 #ifdef __cplusplus
 }

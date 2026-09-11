@@ -12,24 +12,35 @@
 #include "securec.h"
 #include "base.hpp"
 #include "runtime.hpp"
+#include <mutex>
 #define MAX_LOG_BUF_SIZE 2048
 using namespace cce::runtime;
 
-static const char *logLevel[] =
-{
-    "DEBUG",
-    "INFO",
-    "WARNING",
-    "ERR",
-    "RESERVED",
+static const char* logLevel[] = {
+    "DEBUG", "INFO", "WARNING", "ERR", "RESERVED",
 };
 
-int CheckLogLevel(int moduleId, int logLevel)
+int CheckLogLevel(int moduleId, int logLevel) { return 0; }
+
+// 全局缓冲区：存储最近一条 DlogRecord 渲染后的完整日志行，供 UT 正则看护使用
+// 多线程并发调用 DlogRecord 时通过 mutex 保护，避免数据竞争
+std::string g_lastDlogRecordLine;
+// 累积所有 DlogRecord 日志行，供 UT 搜索历史日志（g_lastDlogRecordLine 只保留最后一行会被覆盖）
+std::string g_allDlogRecordLines;
+static std::mutex g_dlogRecordMutex;
+void ClearLastDlogRecordLine()
 {
-    return 0;
+    const std::lock_guard<std::mutex> lock(g_dlogRecordMutex);
+    g_lastDlogRecordLine.clear();
+    g_allDlogRecordLines.clear();
+}
+bool DlogRecordContains(const std::string& keyword)
+{
+    const std::lock_guard<std::mutex> lock(g_dlogRecordMutex);
+    return g_allDlogRecordLines.find(keyword) != std::string::npos;
 }
 
-void DlogRecord(int moduleId, int level, const char *fmt, ...)
+void DlogRecord(int moduleId, int level, const char* fmt, ...)
 {
     if (level < 0 || level > 4) {
         return;
@@ -41,6 +52,11 @@ void DlogRecord(int moduleId, int level, const char *fmt, ...)
     vsnprintf(buf, MAX_LOG_BUF_SIZE, fmt, arg);
     va_end(arg);
 
+    {
+        const std::lock_guard<std::mutex> lock(g_dlogRecordMutex);
+        g_lastDlogRecordLine = std::string(buf);
+        g_allDlogRecordLines += g_lastDlogRecordLine + "\n";
+    }
     syslog(level, "%u %lu [%s]: %s\n", getpid(), syscall(SYS_gettid), logLevel[level], buf);
     if (level > 1) {
         printf("%u %lu [%s]: %s\n", getpid(), syscall(SYS_gettid), logLevel[level], buf);
@@ -49,78 +65,73 @@ void DlogRecord(int moduleId, int level, const char *fmt, ...)
     return;
 }
 
-void DlogErrorInner(int module_id, const char *fmt, ...)
+void DlogErrorInner(int module_id, const char* fmt, ...)
 {
     char buf[MAX_LOG_BUF_SIZE] = {0};
 
     va_list arg;
-    va_start (arg, fmt);
+    va_start(arg, fmt);
     vsnprintf(buf, MAX_LOG_BUF_SIZE, fmt, arg);
-    va_end (arg);
+    va_end(arg);
 
-    syslog(RT_LOG_ERROR, "%u %lu [%s]: %s\n",
-           getpid(),syscall(SYS_gettid),logLevel[RT_LOG_ERROR], buf);
+    syslog(RT_LOG_ERROR, "%u %lu [%s]: %s\n", getpid(), syscall(SYS_gettid), logLevel[RT_LOG_ERROR], buf);
 
-    printf("%u %lu [%s]: %s\n",
-           getpid(), syscall(SYS_gettid),logLevel[RT_LOG_ERROR], buf);
+    printf("%u %lu [%s]: %s\n", getpid(), syscall(SYS_gettid), logLevel[RT_LOG_ERROR], buf);
     return;
 }
 
-void DlogWarnInner(int module_id, const char *fmt, ...)
+void DlogWarnInner(int module_id, const char* fmt, ...)
 {
     char buf[MAX_LOG_BUF_SIZE] = {0};
 
     va_list arg;
-    va_start (arg, fmt);
+    va_start(arg, fmt);
     vsnprintf(buf, MAX_LOG_BUF_SIZE, fmt, arg);
-    va_end (arg);
+    va_end(arg);
 
-    syslog(RT_LOG_WARNING, "%u %lu [%s]: %s\n",
-           getpid(),syscall(SYS_gettid),logLevel[RT_LOG_WARNING], buf);
+    syslog(RT_LOG_WARNING, "%u %lu [%s]: %s\n", getpid(), syscall(SYS_gettid), logLevel[RT_LOG_WARNING], buf);
     return;
 }
-void DlogInfoInner(int module_id, const char *fmt, ...)
+void DlogInfoInner(int module_id, const char* fmt, ...)
 {
     char buf[MAX_LOG_BUF_SIZE] = {0};
 
     va_list arg;
-    va_start (arg, fmt);
+    va_start(arg, fmt);
     vsnprintf(buf, MAX_LOG_BUF_SIZE, fmt, arg);
-    va_end (arg);
+    va_end(arg);
 
-    syslog(RT_LOG_INFO, "%u %lu [%s]: %s\n",
-           getpid(),syscall(SYS_gettid),logLevel[RT_LOG_INFO], buf);
+    syslog(RT_LOG_INFO, "%u %lu [%s]: %s\n", getpid(), syscall(SYS_gettid), logLevel[RT_LOG_INFO], buf);
     return;
 }
-void DlogDebugInner(int module_id, const char *fmt, ...)
+void DlogDebugInner(int module_id, const char* fmt, ...)
 {
     char buf[MAX_LOG_BUF_SIZE] = {0};
 
     va_list arg;
-    va_start (arg, fmt);
+    va_start(arg, fmt);
     vsnprintf(buf, MAX_LOG_BUF_SIZE, fmt, arg);
-    va_end (arg);
+    va_end(arg);
 
     /*syslog(RT_LOG_DEBUG, "%u %lu [%s]: %s\n",
            getpid(),syscall(SYS_gettid),logLevel[RT_LOG_DEBUG], buf);*/
     return;
 }
 
-void DlogEventInner(int module_id, const char *fmt, ...)
+void DlogEventInner(int module_id, const char* fmt, ...)
 {
     char buf[MAX_LOG_BUF_SIZE] = {0};
 
     va_list arg;
-    va_start (arg, fmt);
+    va_start(arg, fmt);
     vsnprintf(buf, MAX_LOG_BUF_SIZE, fmt, arg);
-    va_end (arg);
+    va_end(arg);
 
-    syslog(RT_LOG_EVENT, "%u %lu [%s]: %s\n",
-           getpid(),syscall(SYS_gettid),logLevel[RT_LOG_EVENT], buf);
+    syslog(RT_LOG_EVENT, "%u %lu [%s]: %s\n", getpid(), syscall(SYS_gettid), logLevel[RT_LOG_EVENT], buf);
     return;
 }
 
-int dlog_getlevel(int module_id, int *enable_event)
+int dlog_getlevel(int module_id, int* enable_event)
 {
     if (enable_event != nullptr) {
         *enable_event = true;
@@ -129,12 +140,6 @@ int dlog_getlevel(int module_id, int *enable_event)
     return 0;
 }
 
-int DlogReportStart(int devId, int mode)
-{
-    return DRV_ERROR_NONE;
-}
+int DlogReportStart(int devId, int mode) { return DRV_ERROR_NONE; }
 
-void DlogReportStop(int devId)
-{
-    return;
-}
+void DlogReportStop(int devId) { return; }

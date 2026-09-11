@@ -14,33 +14,34 @@
 #include <cassert>
 #include <filesystem>
 #include "case_workspace.h"
-#include "dump_param_builder.h"
 #include "dump_file_checker.h"
 #include "acl_op.h"
 #include "adump_pub.h"
 #include "adump_api.h"
 #include "sys_utils.h"
 #include "dump_manager.h"
+#include "operator_dumper.h"
+#include "dump_file.h"
 #include "acl/acl_base.h"
 #include "acl/acl_dump.h"
 #include "sys_utils.h"
 #include "common/file.h"
 #include "common/path.h"
+#include "common/thread.h"
 #include "utils.h"
+#include "error_manager_stub.h"
+#include "dump_exception_stub.h"
 
 using namespace Adx;
 #define JSON_BASE ADUMP_BASE_DIR "stub/data/json/"
 
-constexpr uint32_t MODULE_ID_11 = 11;
-constexpr uint32_t MODULE_ID_12 = 12;
-constexpr uint32_t MODULE_ID_13 = 13;
-constexpr uint32_t MODULE_ID_14 = 14;
-constexpr uint32_t MODULE_ID_100 = 100;
-constexpr uint32_t INVALID_ACTION = 10;
-
+// test adump_api.cpp
+// test dump_manager.cpp
 class AdumpApiUtest : public testing::Test {
 protected:
-    virtual void SetUp() {}
+    virtual void SetUp() {
+        MOCKER(Thread::CreateDetachTaskWithDefaultAttr).stubs().will(returnValue(EN_OK));
+    }
     virtual void TearDown()
     {
         DumpManager::Instance().Reset();
@@ -99,6 +100,9 @@ TEST_F(AdumpApiUtest, Test_EnableOperatorDumpStats)
     dumpConf.dumpData = "stats";
     EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
     EXPECT_EQ(AdumpIsDumpEnable(DumpType::OPERATOR), true);
+    dumpConf.dumpStatus = "off";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+     EXPECT_EQ(AdumpIsDumpEnable(DumpType::OPERATOR), false);
 }
 
 TEST_F(AdumpApiUtest, Test_EnableOperatorOverflowDump)
@@ -110,6 +114,27 @@ TEST_F(AdumpApiUtest, Test_EnableOperatorOverflowDump)
     dumpConf.dumpSwitch = (OPERATOR_OP_DUMP | OPERATOR_KERNEL_DUMP);
     EXPECT_EQ(AdumpSetDumpConfig(DumpType::OP_OVERFLOW, dumpConf), ADUMP_SUCCESS);
     EXPECT_EQ(AdumpIsDumpEnable(DumpType::OP_OVERFLOW), true);
+    dumpConf.dumpStatus = "off";
+    dumpConf.dumpSwitch = 0;
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OP_OVERFLOW, dumpConf), ADUMP_SUCCESS);
+    EXPECT_EQ(AdumpIsDumpEnable(DumpType::OP_OVERFLOW), false);
+}
+
+TEST_F(AdumpApiUtest, Test_EnableOperatorOverflowDump_With_Geoptions)
+{
+    DumpConfig dumpConf;
+    dumpConf.dumpPath = "/path/to/dump/dir";
+    dumpConf.dumpStatus = "on";
+    dumpConf.dumpMode = "all";
+    // GE options: Set dumpSwitch with zero
+    dumpConf.dumpSwitch = 0U;
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OP_OVERFLOW, dumpConf), ADUMP_SUCCESS);
+    EXPECT_EQ(AdumpIsDumpEnable(DumpType::OP_OVERFLOW), true);
+    EXPECT_EQ(AdumpGetDumpSwitch(DumpType::OP_OVERFLOW), 0U);
+    dumpConf.dumpStatus = "off";
+    dumpConf.dumpSwitch = 0U;
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OP_OVERFLOW, dumpConf), ADUMP_SUCCESS);
+    EXPECT_EQ(AdumpIsDumpEnable(DumpType::OP_OVERFLOW), false);
 }
 
 TEST_F(AdumpApiUtest, Test_DisableOperatorDump)
@@ -129,7 +154,7 @@ TEST_F(AdumpApiUtest, Test_DisableOperatorOverflowDump)
     dumpConf.dumpPath = "";
     dumpConf.dumpStatus = "off";
     dumpConf.dumpMode = "";
-    dumpConf.dumpSwitch = (OPERATOR_OP_DUMP | OPERATOR_KERNEL_DUMP);
+    dumpConf.dumpSwitch = 0;
     EXPECT_EQ(AdumpSetDumpConfig(DumpType::OP_OVERFLOW, dumpConf), ADUMP_SUCCESS);
     EXPECT_EQ(AdumpIsDumpEnable(DumpType::OP_OVERFLOW), false);
 }
@@ -155,6 +180,7 @@ TEST_F(AdumpApiUtest, Test_SetOperatorDumpConf_fail)
     invalidDumpConf.dumpStatus = "on";
     invalidDumpConf.dumpMode = "all";
     EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, invalidDumpConf), ADUMP_FAILED);
+    EXPECT_EQ(AdumpIsDumpEnable(DumpType::OPERATOR), false);
 }
 
 TEST_F(AdumpApiUtest, Test_SetOperatorOverflowDumpConf_fail)
@@ -167,28 +193,12 @@ TEST_F(AdumpApiUtest, Test_SetOperatorOverflowDumpConf_fail)
     invalidDumpConf.dumpMode = "all";
     EXPECT_EQ(AdumpSetDumpConfig(DumpType::OP_OVERFLOW, invalidDumpConf), ADUMP_FAILED);
 
-    // invalid dump mode
-    invalidDumpConf.dumpPath = "/path/to/dump/";
-    invalidDumpConf.dumpStatus = "on";
-    invalidDumpConf.dumpMode = "invalid";
-    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OP_OVERFLOW, invalidDumpConf), ADUMP_SUCCESS);
-
     // invalid dump path
     invalidDumpConf.dumpPath = "";
     invalidDumpConf.dumpStatus = "on";
     invalidDumpConf.dumpMode = "all";
     EXPECT_EQ(AdumpSetDumpConfig(DumpType::OP_OVERFLOW, invalidDumpConf), ADUMP_FAILED);
-}
-
-TEST_F(AdumpApiUtest, Test_AdumpDumpTensor_With_Nullptr)
-{
-    EnableOperatorDump();
-
-    TensorInfo outputTensorInfo = BuildTensorInfo(nullptr, TensorType::OUTPUT);
-    ;
-    std::vector<TensorInfo> tensorInfos = {outputTensorInfo};
-    aclrtStream stream = (aclrtStream)0x1234;
-    EXPECT_EQ(AdumpDumpTensor("Conv2D", "op_name", tensorInfos, stream), ADUMP_FAILED);
+    EXPECT_EQ(AdumpIsDumpEnable(DumpType::OPERATOR), false);
 }
 
 TEST_F(AdumpApiUtest, Test_AdumpDumpTensor_with_DumpStatus_off)
@@ -197,7 +207,210 @@ TEST_F(AdumpApiUtest, Test_AdumpDumpTensor_with_DumpStatus_off)
     dumpConf.dumpStatus = "off";
     EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
     aclrtStream stream = (aclrtStream)0x1234;
-    EXPECT_EQ(AdumpDumpTensor("Conv2D", "op_name", {}, stream), ADUMP_SUCCESS);
+    MOCKER(rtStreamGetCaptureInfo).stubs().will(returnValue(0));
+    EXPECT_EQ(AdumpDumpTensor("AdumpDumpTensor", "DumpStatus_off", {}, stream), ADUMP_SUCCESS);
+    EXPECT_EQ(AdumpDumpTensorV2("AdumpDumpTensor", "DumpStatus_off", {}, stream), ADUMP_SUCCESS);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpDumpTensor_With_Launch_Error)
+{
+    DumpConfig dumpConf;
+    dumpConf.dumpPath = "/path/to/dump/Test_AdumpDumpTensor_With_Launch_Error";
+    dumpConf.dumpStatus = "on";
+    dumpConf.dumpMode = "all";
+    dumpConf.dumpSwitch = (OPERATOR_OP_DUMP | OPERATOR_KERNEL_DUMP);
+    dumpConf.dumpData = "data";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+
+    MOCKER(rtStreamGetCaptureInfo).stubs().will(returnValue(-1));
+    MOCKER(&OperatorDumper::Launch).stubs().will(returnValue(ADUMP_FAILED));
+    std::vector<TensorInfo> tensors;
+    TensorInfo tensor1;
+    tensor1.type = TensorType::INPUT;
+    tensor1.placement = TensorPlacement::kOnDeviceHbm;
+    tensor1.tensorAddr = (int64_t *)0x1111;
+    tensor1.tensorSize = 1;
+    tensors.push_back(tensor1);
+    DumpCfg dumpcfg{nullptr, 0};
+    aclrtStream stream = (aclrtStream)0x1234;
+    EXPECT_EQ(AdumpDumpTensor("AdumpDumpTensor", "Launch_Error", tensors, stream), ADUMP_FAILED);
+
+    dumpConf.dumpStatus = "off";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+    EXPECT_EQ(AdumpIsDumpEnable(DumpType::OPERATOR), false);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpDumpTensorWithCfg_With_DumpStatus_Off)
+{
+    DumpConfig dumpConf;
+    dumpConf.dumpStatus = "off";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+    aclrtStream stream = (aclrtStream)0x1234;
+    DumpCfg dumpcfg{nullptr, 0};
+    EXPECT_EQ(AdumpDumpTensorWithCfg("Conv2D", "op_name", {}, stream, dumpcfg), ADUMP_SUCCESS);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpDumpTensorWithCfg_With_DumpCfg_Invalid)
+{
+    DumpConfig dumpConf;
+    dumpConf.dumpPath = "/path/to/dump/Test_AdumpDumpTensorWithCfg_With_DumpCfg_Invalid";
+    dumpConf.dumpStatus = "on";
+    dumpConf.dumpMode = "all";
+    dumpConf.dumpSwitch = (OPERATOR_OP_DUMP | OPERATOR_KERNEL_DUMP);
+    dumpConf.dumpData = "stats";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+
+    aclrtStream stream = (aclrtStream)0x1234;
+    DumpCfg dumpcfg{nullptr, 1};
+    EXPECT_EQ(AdumpDumpTensorWithCfg("AdumpDumpTensorWithCfg", "DumpCfg_Invalid", {}, stream, dumpcfg), ADUMP_FAILED);
+
+    dumpConf.dumpStatus = "off";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+    EXPECT_EQ(AdumpIsDumpEnable(DumpType::OPERATOR), false);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpDumpTensorWithCfg_With_Tensor_Empty)
+{
+    DumpConfig dumpConf;
+    dumpConf.dumpPath = "/path/to/dump/Test_AdumpDumpTensorWithCfg_With_Tensor_Empty";
+    dumpConf.dumpStatus = "on";
+    dumpConf.dumpMode = "all";
+    dumpConf.dumpSwitch = (OPERATOR_OP_DUMP | OPERATOR_KERNEL_DUMP);
+    dumpConf.dumpData = "stats";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+
+    aclrtStream stream = (aclrtStream)0x1234;
+    DumpCfg dumpcfg{nullptr, 0};
+    EXPECT_EQ(AdumpDumpTensorWithCfg("AdumpDumpTensorWithCfg", "Tensor_Empty", {}, stream, dumpcfg), ADUMP_SUCCESS);
+
+    std::vector<TensorInfo> tensors;
+    TensorInfo tensor1;
+    tensor1.type = TensorType::INPUT;
+    tensor1.placement = TensorPlacement::kOnHost;
+    tensor1.tensorAddr = (int64_t *)0x1234;
+    tensor1.tensorSize = 1;
+
+    TensorInfo tensor2;
+    tensor2.type = TensorType::OUTPUT;
+    tensor2.placement = TensorPlacement::kOnDeviceHbm;
+    tensor2.tensorAddr = nullptr;
+    tensor2.tensorSize = 1;
+
+    TensorInfo tensor3;
+    tensor3.type = TensorType::OUTPUT;
+    tensor3.placement = TensorPlacement::kOnDeviceHbm;
+    tensor3.tensorAddr = (int64_t *)0x1234;
+    tensor3.tensorSize = 0;
+
+    tensors.push_back(tensor1);
+    tensors.push_back(tensor2);
+    tensors.push_back(tensor3);
+    EXPECT_EQ(AdumpDumpTensorWithCfg("AdumpDumpTensorWithCfg", "Tensor_Empty", tensors, stream, dumpcfg), ADUMP_SUCCESS);
+
+    dumpConf.dumpStatus = "off";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+    EXPECT_EQ(AdumpIsDumpEnable(DumpType::OPERATOR), false);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpDumpTensorWithCfg_With_Capture_Error)
+{
+    DumpConfig dumpConf;
+    dumpConf.dumpPath = "/path/to/dump/Test_AdumpDumpTensorWithCfg_With_Capture_Error";
+    dumpConf.dumpStatus = "on";
+    dumpConf.dumpMode = "all";
+    dumpConf.dumpSwitch = (OPERATOR_OP_DUMP | OPERATOR_KERNEL_DUMP);
+    dumpConf.dumpData = "data";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+
+    std::vector<TensorInfo> tensors;
+    TensorInfo tensor1;
+    tensor1.type = TensorType::INPUT;
+    tensor1.placement = TensorPlacement::kOnDeviceHbm;
+    tensor1.tensorAddr = (int64_t *)0x1234;
+    tensor1.tensorSize = 1;
+    tensors.push_back(tensor1);
+
+    aclrtStream stream = (aclrtStream)0x0;
+    DumpCfg dumpcfg{nullptr, 0};
+    EXPECT_EQ(AdumpDumpTensorWithCfg("AdumpDumpTensorWithCfg", "Capture_Error", tensors, stream, dumpcfg), ADUMP_FAILED);
+
+    dumpConf.dumpStatus = "off";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+    EXPECT_EQ(AdumpIsDumpEnable(DumpType::OPERATOR), false);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpDumpTensorWithCfg_With_Launch_Error)
+{
+    DumpConfig dumpConf;
+    dumpConf.dumpPath = "/path/to/dump/Test_AdumpDumpTensorWithCfg_With_Launch_Error";
+    dumpConf.dumpStatus = "on";
+    dumpConf.dumpMode = "all";
+    dumpConf.dumpSwitch = (OPERATOR_OP_DUMP | OPERATOR_KERNEL_DUMP);
+    dumpConf.dumpData = "data";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+
+    MOCKER(rtStreamGetCaptureInfo).stubs().will(returnValue(-1));
+    MOCKER(&OperatorDumper::LaunchWithCfg).stubs().will(returnValue(ADUMP_FAILED));
+    std::vector<TensorInfo> tensors;
+    TensorInfo tensor1;
+    tensor1.type = TensorType::INPUT;
+    tensor1.placement = TensorPlacement::kOnDeviceHbm;
+    tensor1.tensorAddr = (int64_t *)0x1111;
+    tensor1.tensorSize = 1;
+    tensors.push_back(tensor1);
+    DumpCfg dumpcfg{nullptr, 0};
+    aclrtStream stream = (aclrtStream)0x1234;
+    EXPECT_EQ(AdumpDumpTensorWithCfg("AdumpDumpTensorWithCfg", "Launch_Error", tensors, stream, dumpcfg), ADUMP_FAILED);
+
+    dumpConf.dumpStatus = "off";
+    EXPECT_EQ(AdumpSetDumpConfig(DumpType::OPERATOR, dumpConf), ADUMP_SUCCESS);
+    EXPECT_EQ(AdumpIsDumpEnable(DumpType::OPERATOR), false);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpAddExceptionOperatorInfo)
+{
+    uint32_t testId = 10U;
+    OperatorInfo opInfo;
+    opInfo.agingFlag = false;
+    opInfo.taskId = testId;
+    opInfo.streamId = testId;
+    opInfo.deviceId = testId;
+    TensorInfo tensor;
+    tensor.type = TensorType::INPUT;
+    tensor.addrType = AddressType::TRADITIONAL;
+    tensor.shape.push_back(10);
+    tensor.originShape.push_back(10);
+    opInfo.tensorInfos.push_back(tensor);
+
+    EXPECT_EQ(AdumpAddExceptionOperatorInfo(opInfo), ADUMP_SUCCESS);
+    EXPECT_NE(DumpManager::Instance().exceptionDumper_.residentOperators_.find(testId),
+        DumpManager::Instance().exceptionDumper_.residentOperators_.end());
+    EXPECT_EQ(AdumpDelExceptionOperatorInfo(testId, testId), ADUMP_SUCCESS);
+    EXPECT_EQ(DumpManager::Instance().exceptionDumper_.residentOperators_.find(testId),
+        DumpManager::Instance().exceptionDumper_.residentOperators_.end());
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpAddExceptionOperatorInfoV2)
+{
+    uint32_t testId = 11U;
+    OperatorInfoV2 opInfo;
+    opInfo.agingFlag = false;
+    opInfo.taskId = testId;
+    opInfo.streamId = testId;
+    opInfo.deviceId = testId;
+    TensorInfoV2 tensor;
+    tensor.type = TensorType::INPUT;
+    tensor.addrType = AddressType::TRADITIONAL;
+    tensor.shape.push_back(11);
+    tensor.originShape.push_back(11);
+    opInfo.tensorInfos.push_back(tensor);
+
+    EXPECT_EQ(AdumpAddExceptionOperatorInfoV2(opInfo), ADUMP_SUCCESS);
+    EXPECT_NE(DumpManager::Instance().exceptionDumper_.residentOperators_.find(testId),
+        DumpManager::Instance().exceptionDumper_.residentOperators_.end());
+    EXPECT_EQ(AdumpDelExceptionOperatorInfo(testId, testId), ADUMP_SUCCESS);
+    EXPECT_EQ(DumpManager::Instance().exceptionDumper_.residentOperators_.find(testId),
+        DumpManager::Instance().exceptionDumper_.residentOperators_.end());
 }
 
 ////////////// test exception dump //////////////////////
@@ -229,20 +442,6 @@ static rtError_t rtRegTaskFailCallbackByModuleStub(const char_t *moduleName, rtT
 {
     RuntimeExceptionCallback::Instance().MutableCallback() = callback;
     return RT_ERROR_NONE;
-}
-
-static void ExceptionOccur(uint32_t deviceId, uint32_t taskId, uint32_t streamId, uint32_t retCode)
-{
-    rtExceptionInfo exception = BuildRtException(deviceId, taskId, streamId, retCode);
-    exception.expandInfo.u.aicoreInfo.exceptionArgs.argAddr = nullptr;
-    exception.expandInfo.u.aicoreInfo.exceptionArgs.argAddr = 0;
-    char hostKernel[] = "host kernel bin file stub";
-    exception.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.bin = static_cast<rtBinHandle>(hostKernel);
-    exception.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.binSize = sizeof(hostKernel);
-    std::string kernelName = "AddCustom_6ee04b5d550e4239498c29151be6bb50_mix_aic";
-    exception.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.kernelName = kernelName.data();
-    exception.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.kernelNameSize = kernelName.size();
-    RuntimeExceptionCallback::Instance().Invoke(&exception);
 }
 
 uint64_t mmGetClockMonotonicTime()
@@ -378,59 +577,24 @@ TEST_F(AdumpApiUtest, Test_ArgsException_GetSizeInfoAddr_With_Right_Addr)
 
 TEST_F(AdumpApiUtest, Test_GetEnv_Exception)
 {
-    const char* env = "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-    "1111111111";
-    EXPECT_EQ(SysUtils::HandleEnv(env), "");
+    std::string env(4097U, '1');
+    EXPECT_EQ(SysUtils::HandleEnv(env.c_str()), "");
 }
 
 TEST_F(AdumpApiUtest, Test_AdumpSetDump)
 {
+    MOCKER(Thread::CreateDetachTaskWithDefaultAttr).stubs().will(returnValue(EN_OK));
     int32_t ret = AdumpSetDump(nullptr, 0);
     EXPECT_EQ(ret, ADUMP_FAILED);
 
     ret = AdumpSetDump("", 0);
     EXPECT_EQ(ret, ADUMP_FAILED);
 
-    std::string invalidConfigData = ReadFileToString(JSON_BASE "common/bad_path.json");
+    std::string invalidConfigData = R"({"dump": {"dump_path": "asdf###"}})";
     ret = AdumpSetDump(invalidConfigData.c_str(), invalidConfigData.size());
     EXPECT_EQ(ret, ADUMP_INPUT_FAILED);
 
-    std::string validConfigData = ReadFileToString(JSON_BASE "common/only_path.json");
+    std::string validConfigData = R"({"dump": {"dump_path": "./"}})";
     ret = AdumpSetDump(validConfigData.c_str(), validConfigData.size());
     EXPECT_EQ(ret, ADUMP_SUCCESS);
 
@@ -497,8 +661,10 @@ static int32_t AdumpCallbackTest(uint64_t dumpSwitch, const char *dumpConfig, in
 {
     if ((dumpSwitch & OP_INFO_RECORD_DUMP) == 0) {
         std::string testData("test op info record");
-        AdumpSaveToFile(testData.c_str(), testData.size(), "12323/test_op_info.json", SaveType::OVERWRITE);
-        AdumpSaveToFile(testData.c_str(), testData.size(), "12323/test_op_info.json", SaveType::APPEND);
+        AdumpSaveToFile(testData.c_str(), testData.size(),
+            "UTest_EmptyJsonSuccess/test_op_info.json", SaveType::OVERWRITE);
+        AdumpSaveToFile(testData.c_str(), testData.size(),
+            "UTest_EmptyJsonSuccess/test_op_info.json", SaveType::APPEND);
     }
     return 0;
 }
@@ -517,55 +683,113 @@ TEST_F(AdumpApiUtest, Test_OP_Dump_Save)
     std::string path("./UTest_EmptyJsonSuccess");
     EXPECT_EQ(ACL_SUCCESS, aclopStartDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS, path.c_str()));
     EXPECT_EQ(ACL_SUCCESS, aclopStopDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS));
-    std::string jsonPath = path + "/12323/test_op_info.json";
+    std::string jsonPath = path + "/UTest_EmptyJsonSuccess/test_op_info.json";
     std::ifstream jsonFile(jsonPath);
     EXPECT_EQ(true, jsonFile.is_open());
     std::string data;
     std::getline(jsonFile, data);
     EXPECT_STREQ("test op info recordtest op info record", data.c_str());
-    system("rm -r ./UTest_EmptyJsonSuccess");
+    DumpManager::Instance().opInfoRecordPath_.clear();
+    DumpManager::Instance().enableCallbackFunc_.clear();
+    DumpManager::Instance().disableCallbackFunc_.clear();
+    system("rm -rf ./UTest_EmptyJsonSuccess");
 }
 
-TEST_F(AdumpApiUtest, Test_OP_Dump_Save_Error)
-{
-    EXPECT_EQ(0, AdumpRegisterCallback(1, AdumpCallbackTest, AdumpCallbackTest));
-    std::string path("./UTest_EmptyJsonSuccess");
-    EXPECT_EQ(ACL_SUCCESS, aclopStartDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS, path.c_str()));
-    MOCKER(&File::IsFileOpen).stubs().will(returnValue(ADUMP_FAILED));
-    EXPECT_EQ(ACL_SUCCESS, aclopStopDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS));
-    MOCKER(&Path::RealPath).stubs().will(returnValue(false));
-    EXPECT_EQ(ACL_SUCCESS, aclopStopDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS));
-    MOCKER(&Path::CreateDirectory).stubs().will(returnValue(false));
-    EXPECT_EQ(ACL_SUCCESS, aclopStopDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS));
-    std::string jsonPath = path + "/12323/test_op_info.json";
-    std::ifstream jsonFile(jsonPath);
-    EXPECT_EQ(true, jsonFile.is_open());
-    std::string data;
-    std::getline(jsonFile, data);
-    EXPECT_STREQ("", data.c_str());
-    system("rm -r ./UTest_EmptyJsonSuccess");
-}
-
-TEST_F(AdumpApiUtest, Test_OP_Dump_Api_Error)
+TEST_F(AdumpApiUtest, Test_OP_Dump_StartStop_Error)
 {
     EXPECT_EQ(0, AdumpRegisterCallback(1, AdumpCallbackTest, AdumpCallbackTest));
 
+    // Test StopDumpArgs errors
     EXPECT_EQ(ACL_SUCCESS, aclopStopDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS));
     MOCKER_CPP(&DumpManager::StopDumpArgs).stubs().will(returnValue(-1));
     EXPECT_EQ(ACL_ERROR_FAILURE, aclopStopDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS));
 
     std::string path("./UTest_EmptyJsonSuccess");
+
+    // Test aclopStartDumpArgs with empty path
+    ClearLastReportedErrorCode();
     EXPECT_EQ(ACL_ERROR_FAILURE, aclopStartDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS, ""));
-    MOCKER_CPP(&Path::IsDirectory).stubs().will(returnValue(false)).then(returnValue(true));
+    EXPECT_EQ(GetLastReportedErrorCode(), "EP0006");
+
+    // Test aclopStartDumpArgs with no read/write permission
+    system("mkdir -p ./UTest_EmptyJsonSuccess");
+    ClearLastReportedErrorCode();
+    MOCKER_CPP(&Path::Asccess).stubs().will(returnValue(false));
     EXPECT_EQ(ACL_ERROR_FAILURE, aclopStartDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS, path.c_str()));
+    EXPECT_EQ(GetLastReportedErrorCode(), "EP0006");
+    GlobalMockObject::verify();
+
+    // Test aclopStartDumpArgs with path not a directory
+    system("mkdir -p ./UTest_EmptyJsonSuccess/subdir");
+    ClearLastReportedErrorCode();
+    MOCKER_CPP(&Path::IsDirectory).stubs().will(returnValue(false));
+    EXPECT_EQ(ACL_ERROR_FAILURE, aclopStartDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS, path.c_str()));
+    EXPECT_EQ(GetLastReportedErrorCode(), "EP0006");
+    GlobalMockObject::verify();
+    
+    // Test aclopStartDumpArgs with create directory failed (path not exist)
+    system("rm -rf ./UTest_EmptyJsonSuccess");
+    ClearLastReportedErrorCode();
+    MOCKER_CPP(&Path::CreateDirectory).stubs().will(returnValue(false));
+    EXPECT_EQ(ACL_ERROR_FAILURE, aclopStartDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS, path.c_str()));
+    EXPECT_EQ(GetLastReportedErrorCode(), "EP0006");
+    GlobalMockObject::verify();
+    
+    // Test aclopStartDumpArgs success (path not exist, create success)
+    system("rm -rf ./UTest_EmptyJsonSuccess");
+    ClearLastReportedErrorCode();
     EXPECT_EQ(ACL_SUCCESS, aclopStartDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS, path.c_str()));
+    
+    // Test aclopStartDumpArgs with double start (EP0008)
+    ClearLastReportedErrorCode();
     EXPECT_EQ(ACL_ERROR_FAILURE, aclopStartDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS, path.c_str()));
-    system("rm -r ./UTest_EmptyJsonSuccess");
+    EXPECT_EQ(GetLastReportedErrorCode(), "EP0008");
+
+    // Test StopDumpArgs with file errors
+    MOCKER(&File::IsFileOpen).stubs().will(returnValue(ADUMP_FAILED));
+    EXPECT_EQ(ACL_SUCCESS, aclopStopDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS));
+    GlobalMockObject::verify();
+    
+    MOCKER(&Path::RealPath).stubs().will(returnValue(false));
+    EXPECT_EQ(ACL_SUCCESS, aclopStopDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS));
+    GlobalMockObject::verify();
+    
+    DumpManager::Instance().opInfoRecordPath_.clear();
+    DumpManager::Instance().enableCallbackFunc_.clear();
+    DumpManager::Instance().disableCallbackFunc_.clear();
+    system("rm -rf ./UTest_EmptyJsonSuccess");
+}
+
+TEST_F(AdumpApiUtest, Test_aclopStartDumpArgs_NullPath)
+{
+    ClearLastReportedErrorCode();
+    aclError ret = aclopStartDumpArgs(ACL_OP_DUMP_OP_AICORE_ARGS, nullptr);
+    EXPECT_EQ(ret, ACL_ERROR_FAILURE);
+    EXPECT_EQ(GetLastReportedErrorCode(), "EP0007");
+}
+
+TEST_F(AdumpApiUtest, Test_aclopStartDumpArgs_InvalidDumpType)
+{
+    std::string path("./UTest_ValidPath");
+    system("mkdir ./UTest_ValidPath");
+    
+    ClearLastReportedErrorCode();
+    aclError ret1 = aclopStartDumpArgs(0, path.c_str());
+    EXPECT_EQ(ret1, ACL_ERROR_FAILURE);
+    EXPECT_EQ(GetLastReportedErrorCode(), "EP0006");
+    
+    ClearLastReportedErrorCode();
+    aclError ret2 = aclopStartDumpArgs(2, path.c_str());
+    EXPECT_EQ(ret2, ACL_ERROR_FAILURE);
+    EXPECT_EQ(GetLastReportedErrorCode(), "EP0006");
+    
+    system("rm -rf ./UTest_ValidPath");
 }
 
 TEST_F(AdumpApiUtest, Test_Callback_AdumpSetDump_AdumpUnSetDump)
 {
-    EXPECT_EQ(ADUMP_SUCCESS, AdumpRegisterCallback(MODULE_ID_11, AdumpCallbackFuncTest, AdumpCallbackFuncTest));
+    MOCKER(Thread::CreateDetachTaskWithDefaultAttr).stubs().will(returnValue(EN_OK));
+    EXPECT_EQ(ADUMP_SUCCESS, AdumpRegisterCallback(11, AdumpCallbackFuncTest, AdumpCallbackFuncTest));
     std::string configData = ReadFileToString(JSON_BASE "datadump/dump_ge_tensor.json");
     int32_t ret = AdumpSetDump(configData.c_str(), configData.size());
     EXPECT_EQ(ret, ADUMP_SUCCESS);
@@ -579,7 +803,7 @@ TEST_F(AdumpApiUtest, Test_AdumpSetDump_Callback_AdumpUnSetDump)
     std::string configData = ReadFileToString(JSON_BASE "datadump/dump_ge_tensor.json");
     int32_t ret = AdumpSetDump(configData.c_str(), configData.size());
     EXPECT_EQ(ret, ADUMP_SUCCESS);
-    EXPECT_EQ(ADUMP_SUCCESS, AdumpRegisterCallback(MODULE_ID_12, AdumpCallbackFuncTest, AdumpCallbackFuncTest));
+    EXPECT_EQ(ADUMP_SUCCESS, AdumpRegisterCallback(12, AdumpCallbackFuncTest, AdumpCallbackFuncTest));
     ret = AdumpUnSetDump();
     EXPECT_EQ(ret, ADUMP_SUCCESS);
     system("rm -rf ./ge/test_callback_info.json");
@@ -587,15 +811,339 @@ TEST_F(AdumpApiUtest, Test_AdumpSetDump_Callback_AdumpUnSetDump)
 
 TEST_F(AdumpApiUtest, Test_Invalid_Callback_AdumpSetDump_AdumpUnSetDump)
 {
-    EXPECT_EQ(DumpManager::Instance().HandleDumpEvent(MODULE_ID_100, DumpEnableAction::DISABLE), ADUMP_FAILED);
-    EXPECT_EQ(DumpManager::Instance().HandleDumpEvent(
-        MODULE_ID_100, static_cast<DumpEnableAction>(INVALID_ACTION)), ADUMP_FAILED);
-    EXPECT_EQ(ADUMP_FAILED, AdumpRegisterCallback(MODULE_ID_13, AdumpCallbackFuncTest, nullptr));
-    EXPECT_EQ(ADUMP_FAILED, AdumpRegisterCallback(MODULE_ID_14, nullptr, nullptr));
+    MOCKER(Thread::CreateDetachTaskWithDefaultAttr).stubs().will(returnValue(EN_OK));
+    EXPECT_EQ(DumpManager::Instance().HandleDumpEvent(100, DumpEnableAction::DISABLE), ADUMP_FAILED);
+    EXPECT_EQ(DumpManager::Instance().HandleDumpEvent(100, static_cast<DumpEnableAction>(10)), ADUMP_FAILED);
+    EXPECT_EQ(ADUMP_FAILED, AdumpRegisterCallback(13, AdumpCallbackFuncTest, nullptr));
+    EXPECT_EQ(ADUMP_FAILED, AdumpRegisterCallback(14, nullptr, nullptr));
     std::string configData = ReadFileToString(JSON_BASE "datadump/dump_ge_tensor.json");
     int32_t ret = AdumpSetDump(configData.c_str(), configData.size());
     EXPECT_EQ(ret, ADUMP_SUCCESS);
     ret = AdumpUnSetDump();
     EXPECT_EQ(ret, ADUMP_SUCCESS);
     system("rm -rf ./ge/test_callback_info.json");
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpGetPath)
+{
+    const char *path = acldumpGetPath(static_cast<acldumpType>(0));
+    EXPECT_EQ(path, nullptr);
+    MOCKER_CPP(&Path::CreateDirectory).stubs().will(returnValue(false)).then(returnValue(true));
+    path = acldumpGetPath(acldumpType::AIC_ERR_BRIEF_DUMP);
+    EXPECT_EQ(path, nullptr);
+    MOCKER_CPP(&Path::RealPath).stubs().will(returnValue(true));
+    path = acldumpGetPath(acldumpType::AIC_ERR_BRIEF_DUMP);
+    EXPECT_NE(path, nullptr);
+    EXPECT_EQ(path, DumpManager::Instance().exceptionDumper_.extraDumpPath_.c_str());
+    path = acldumpGetPath(acldumpType::DATA_DUMP);
+    EXPECT_NE(path, nullptr);
+    EXPECT_EQ(path, DumpManager::Instance().dumpSetting_.dumpPath_.path_.c_str());
+}
+
+namespace {
+acldumpTensorInfo MakeAclDumpTensor(acldumpTensorType type, int64_t *addr, size_t size)
+{
+    acldumpTensorInfo tensor{};
+    tensor.type = type;
+    tensor.tensorSize = size;
+    tensor.format = 2;    // ND
+    tensor.dataType = 0;  // DT_UNDEFINED
+    tensor.tensorAddr = addr;
+    tensor.addrType = ACL_DUMP_ADDR_RAW;
+    tensor.placement = ACL_DUMP_PLACEMENT_DEVICE;
+    tensor.argsOffset = 0;
+    tensor.shapeNum = 2;
+    tensor.shape[0] = 4;
+    tensor.shape[1] = 2;
+    tensor.originShapeNum = 2;
+    tensor.originShape[0] = 4;
+    tensor.originShape[1] = 2;
+    return tensor;
+}
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_NullFileName)
+{
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    EXPECT_EQ(acldumpSaveExceptionInfo(nullptr, "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_EmptyFileName)
+{
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    EXPECT_EQ(acldumpSaveExceptionInfo("", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_FileNameHasParentDir)
+{
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    // fileName 含 '..' 路径段应在入口被拦截，返回 ACL_ERROR_INVALID_PARAM
+    EXPECT_EQ(acldumpSaveExceptionInfo("../evil.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+    EXPECT_EQ(acldumpSaveExceptionInfo("sub/../../x.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_NullTensorsWithCount)
+{
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", nullptr, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_PathNotReady)
+{
+    // CreateExtraDumpPath fails -> empty root path -> failure
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::CreateDirectory).stubs().will(returnValue(false));
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_FAILURE);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_Success)
+{
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::CreateDirectory).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::RealPath).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::IsDirectory).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::Exist).stubs().will(returnValue(true));
+    MOCKER(rtGetDevice).stubs().will(returnValue((rtError_t)RT_ERROR_NONE));
+    MOCKER(&DumpFile::Dump).stubs().will(returnValue(ADUMP_SUCCESS));
+    MOCKER(mmChmod).stubs().will(returnValue(0));
+
+    int64_t inData = 0;
+    int64_t outData = 0;
+    int64_t wsData = 0;
+    std::vector<acldumpTensorInfo> tensors = {
+        MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &inData, sizeof(inData)),
+        MakeAclDumpTensor(ACL_DUMP_TENSOR_OUTPUT, &outData, sizeof(outData)),
+        MakeAclDumpTensor(ACL_DUMP_TENSOR_WORKSPACE, &wsData, sizeof(wsData)),
+    };
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "component=demo", tensors.data(), tensors.size()), ACL_SUCCESS);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_NullUserTag)
+{
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::CreateDirectory).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::RealPath).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::IsDirectory).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::Exist).stubs().will(returnValue(true));
+    MOCKER(rtGetDevice).stubs().will(returnValue((rtError_t)RT_ERROR_NONE));
+    MOCKER(&DumpFile::Dump).stubs().will(returnValue(ADUMP_SUCCESS));
+    MOCKER(mmChmod).stubs().will(returnValue(0));
+
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", nullptr, &tensor, 1), ACL_SUCCESS);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_FileNameHasTimestampSuffix)
+{
+    // 落盘前应查询毫秒时间戳并追加到文件名，避免重复运行覆盖已有文件或被已有文件阻塞落盘。
+    // GetCurrentTimeWithMillisecond 被调用即证明时间戳后缀逻辑生效。
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::CreateDirectory).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::RealPath).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::IsDirectory).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::Exist).stubs().will(returnValue(true));
+    MOCKER(rtGetDevice).stubs().will(returnValue((rtError_t)RT_ERROR_NONE));
+    MOCKER_CPP(&SysUtils::GetCurrentTimeWithMillisecond)
+        .expects(once())
+        .will(returnValue(std::string("20260721153012345")));
+    MOCKER(&DumpFile::Dump).stubs().will(returnValue(ADUMP_SUCCESS));
+    MOCKER(mmChmod).stubs().will(returnValue(0));
+
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_SUCCESS);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_ShapeNumOverMax)
+{
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    tensor.shapeNum = ACL_DUMP_MAX_SHAPE_NUM + 1;
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_OriginShapeNumOverMax)
+{
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    tensor.originShapeNum = ACL_DUMP_MAX_SHAPE_NUM + 1;
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_UnsupportedTensorType)
+{
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    // out-of-range value is rejected as well
+    tensor.type = static_cast<acldumpTensorType>(ACL_DUMP_TENSOR_WORKSPACE + 1);
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_UnsupportedAddrType)
+{
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    tensor.addrType = ACL_DUMP_ADDR_PTR;
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+    tensor.addrType = ACL_DUMP_ADDR_PTR_PTR;
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+    // out-of-range value is rejected as well
+    tensor.addrType = static_cast<acldumpTensorAddressType>(ACL_DUMP_ADDR_RAW + 1);
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_UnsupportedPlacement)
+{
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    tensor.placement = ACL_DUMP_PLACEMENT_HOST;
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+    tensor.placement = ACL_DUMP_PLACEMENT_END;
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_ZeroTensorCount)
+{
+    // tensorCount 为 0 时无数据可落盘，必须在入口拦截，不能报成功
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 0), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_NullTensorAddr)
+{
+    // tensorAddr 为空的 tensor 会在组装 dump 数据时被跳过，必须在入口拦截，不能报成功
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, nullptr, sizeof(int64_t));
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_ZeroTensorSize)
+{
+    // tensorSize 为 0 的 tensor 同样会被跳过，必须在入口拦截，不能报成功
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, 0);
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_InvalidTensorInMiddleRejected)
+{
+    // 数组中任意一个非法 tensor 都应导致整体失败，不能只落盘合法的部分
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    int64_t inData = 0;
+    int64_t outData = 0;
+    std::vector<acldumpTensorInfo> tensors = {
+        MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &inData, sizeof(inData)),
+        MakeAclDumpTensor(ACL_DUMP_TENSOR_OUTPUT, nullptr, sizeof(outData)),
+    };
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", tensors.data(), tensors.size()), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpSaveExceptionInfo_DumpFail)
+{
+    MOCKER_CPP(&ExceptionDumper::IsEnabledExceptionDump).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::CreateDirectory).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::RealPath).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::IsDirectory).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::Exist).stubs().will(returnValue(true));
+    MOCKER(rtGetDevice).stubs().will(returnValue((rtError_t)RT_ERROR_NONE));
+    MOCKER(&DumpFile::Dump).stubs().will(returnValue(ADUMP_FAILED));
+
+    int64_t data = 0;
+    acldumpTensorInfo tensor = MakeAclDumpTensor(ACL_DUMP_TENSOR_INPUT, &data, sizeof(data));
+    EXPECT_EQ(acldumpSaveExceptionInfo("exc.bin", "tag", &tensor, 1), ACL_ERROR_FAILURE);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpGetExceptionInfoPath_InvalidParam)
+{
+    char buf[64] = {0};
+    EXPECT_EQ(acldumpGetExceptionInfoPath(nullptr, sizeof(buf)), ACL_ERROR_INVALID_PARAM);
+    EXPECT_EQ(acldumpGetExceptionInfoPath(buf, 0), ACL_ERROR_INVALID_PARAM);
+    EXPECT_EQ(acldumpGetExceptionInfoPath(buf, 1), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpGetExceptionInfoPath_PathNotReady)
+{
+    // 已使能但 CreateDeviceDumpPath 失败 -> empty path -> failure
+    DumpManager::Instance().exceptionDumper_.argsExceptionStatus_ = true;
+    MOCKER_CPP(&Path::CreateDirectory).stubs().will(returnValue(false));
+    MOCKER(rtGetDevice).stubs().will(returnValue((rtError_t)RT_ERROR_NONE));
+    char buf[64] = {0};
+    EXPECT_EQ(acldumpGetExceptionInfoPath(buf, sizeof(buf)), ACL_ERROR_FAILURE);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpGetExceptionInfoPath_NotEnabled)
+{
+    // exception dump 未使能 -> 返回空 -> 失败
+    DumpManager::Instance().exceptionDumper_.argsExceptionStatus_ = false;
+    DumpManager::Instance().exceptionDumper_.exceptionStatus_ = false;
+    DumpManager::Instance().exceptionDumper_.coredumpStatus_ = false;
+    char buf[4096] = {0};
+    EXPECT_EQ(acldumpGetExceptionInfoPath(buf, sizeof(buf)), ACL_ERROR_FAILURE);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpGetExceptionInfoPath_Success)
+{
+    DumpManager::Instance().exceptionDumper_.argsExceptionStatus_ = true;
+    MOCKER_CPP(&Path::CreateDirectory).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::RealPath).stubs().will(returnValue(true));
+    MOCKER(rtGetDevice).stubs().will(returnValue((rtError_t)RT_ERROR_NONE));
+    char buf[4096] = {0};
+    EXPECT_EQ(acldumpGetExceptionInfoPath(buf, sizeof(buf)), ACL_SUCCESS);
+    EXPECT_GT(strlen(buf), 0U);
+}
+
+TEST_F(AdumpApiUtest, Test_acldumpGetExceptionInfoPath_BufferTooSmall)
+{
+    DumpManager::Instance().exceptionDumper_.argsExceptionStatus_ = true;
+    MOCKER_CPP(&Path::CreateDirectory).stubs().will(returnValue(true));
+    MOCKER_CPP(&Path::RealPath).stubs().will(returnValue(true));
+    MOCKER(rtGetDevice).stubs().will(returnValue((rtError_t)RT_ERROR_NONE));
+    char buf[2] = {0};
+    EXPECT_EQ(acldumpGetExceptionInfoPath(buf, sizeof(buf)), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpRegExceptionDumpCallback_Null)
+{
+    int32_t ret = AdumpRegExceptionDumpCallback(nullptr);
+    EXPECT_EQ(ret, ADUMP_INPUT_FAILED);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpRegExceptionDumpCallback_Success)
+{
+    int32_t ret = AdumpRegExceptionDumpCallback(MockExceptionCallback);
+    EXPECT_EQ(ret, ADUMP_SUCCESS);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpUnregExceptionDumpCallback_Null)
+{
+    int32_t ret = AdumpUnregExceptionDumpCallback(nullptr);
+    EXPECT_EQ(ret, ADUMP_INPUT_FAILED);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpUnregExceptionDumpCallback_NotRegistered)
+{
+    int32_t ret = AdumpUnregExceptionDumpCallback(MockExceptionCallback);
+    EXPECT_EQ(ret, ADUMP_SUCCESS);
+}
+
+TEST_F(AdumpApiUtest, Test_AdumpUnregExceptionDumpCallback_Success)
+{
+    int32_t ret = AdumpRegExceptionDumpCallback(MockExceptionCallback);
+    EXPECT_EQ(ret, ADUMP_SUCCESS);
+    
+    ret = AdumpUnregExceptionDumpCallback(MockExceptionCallback);
+    EXPECT_EQ(ret, ADUMP_SUCCESS);
 }

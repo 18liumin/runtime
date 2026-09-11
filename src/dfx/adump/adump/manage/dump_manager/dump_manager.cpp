@@ -14,44 +14,41 @@
 #include <map>
 #include <algorithm>
 #include <cerrno>
+#include <sstream>
 #include "str_utils.h"
 #include "lib_path.h"
 #include "file_utils.h"
+#include "adump_platform_manager.h"
 #include "log/adx_log.h"
 #include "runtime/context.h"
+#include "runtime/config.h"
+#include "rts/rts_snapshot.h"
+#include "error_codes/rt_error_codes.h"
 #include "adump_dsmi.h"
 #include "common_utils.h"
 #include "exception_info_common.h"
 #include "dump_config_converter.h"
 #include "adump_api.h"
+#include "adump_error_manager.h"
 #include "operator_dumper.h"
+#include "kernel_dfx_dumper.h"
 #include "adx_dump_record.h"
 #include "common/file.h"
+#include "common/path.h"
+#include "sys_utils.h"
+#include "dump_file.h"
+#include "adx_datadump_server.h"
 
 namespace Adx {
 constexpr char EXCEPTION_CB_MODULE[] = "AdumpException";
 constexpr char COREDUMP_CB_MODULE[] = "AdumpCoredump";
-static const uint32_t ADUMP_ACL_ERROR_RT_AICORE_OVER_FLOW = 207003;  // aicore over flow
-static const uint32_t ADUMP_ACL_ERROR_RT_AIVEC_OVER_FLOW = 207016;   // aivec over flow
 
 std::vector<std::shared_ptr<OperatorPreliminary>> DumpManager::operatorMap_;
 
-static void ExceptionCallback(rtExceptionInfo *const exception)
+static void ExceptionCallback(rtExceptionInfo* const exception)
 {
     IDE_RUN_LOGI("An exception callback message is received.");
     if (exception != nullptr) {
-        if (exception->retcode == ADUMP_ACL_ERROR_RT_AICORE_OVER_FLOW ||
-            exception->retcode == ADUMP_ACL_ERROR_RT_AIVEC_OVER_FLOW) {
-            IDE_LOGW("Ignore exception dump request, retcode: %u.", exception->retcode);
-            return;
-        }
-        rtExceptionArgsInfo_t exceptionArgsInfo{};
-        rtExceptionExpandType_t exceptionTaskType = exception->expandInfo.type;
-        if (ExceptionInfoCommon::GetExceptionInfo(*exception, exceptionTaskType, exceptionArgsInfo) != ADUMP_SUCCESS) {
-            IDE_LOGW("Get exception args info failed.");
-            return;
-        }
-
         (void)DumpManager::Instance().DumpExceptionInfo(*exception);
         AdxLogFlush();
     }
@@ -86,10 +83,127 @@ static void NotifyCoredumpCallback(uint32_t devId, bool isOpen)
     setDeviceRecord[devId] = 1;
 }
 
-DumpManager &DumpManager::Instance()
+static uint32_t DumpSnapShotLockPreCallback(int32_t deviceId, void* args)
+{
+    UNUSED(deviceId);
+    UNUSED(args);
+    return DumpManager::Instance().StopDataDumpServer() ? 0U : 1U;
+}
+
+DumpManager& DumpManager::Instance()
 {
     static DumpManager instance;
     return instance;
+}
+
+DumpManager::DumpManager()
+{
+    try {
+        // 1. 通过环境变量使能Exception Dump
+        EnableExceptionDumpWithEnv();
+        // 2. 通过环境变量使能Kernel Dfx Dump
+        KernelDfxDumper::Instance();
+    } catch (...) {
+        IDE_LOGW("Enable dump function with env variable failed!");
+    }
+}
+
+bool DumpManager::StartDataDumpServer()
+{
+    // 注册快照回调：快照备份前关闭Data Dump Server
+    RegisterSnapShotCallback();
+#if !defined(ADUMP_SOC_HOST) || ADUMP_SOC_HOST == 1
+    // 如果没有启动Data Dump Server，启动Data Dump Server
+    int32_t dumpNum = AdxDumpRecord::Instance().GetDumpInitNum();
+    if (dumpNum == 0) {
+        return AdxDataDumpServerInit() == ADUMP_SUCCESS;
+    }
+#endif
+    return true;
+}
+
+bool DumpManager::StopDataDumpServer()
+{
+#if !defined(ADUMP_SOC_HOST) || ADUMP_SOC_HOST == 1
+    int32_t dumpNum = AdxDumpRecord::Instance().GetDumpInitNum();
+    while (dumpNum > 0) {
+        IDE_CTRL_VALUE_FAILED(
+            AdxDataDumpServerUnInit() == ADUMP_SUCCESS, return false, "Stop data dump server failed!");
+        dumpNum = AdxDumpRecord::Instance().GetDumpInitNum();
+    }
+#endif
+    return true;
+}
+
+void DumpManager::RegisterSnapShotCallback()
+{
+    if (!snapCbkRegistered_) {
+        rtError_t ret = rtSnapShotCallbackRegister(RT_SNAPSHOT_LOCK_PRE, DumpSnapShotLockPreCallback, nullptr);
+        if (ret == ACL_ERROR_RT_FEATURE_NOT_SUPPORT) {
+            IDE_LOGI("RTS does not support snapshot feature. ret=%d", ret);
+            return;
+        }
+        IDE_CTRL_VALUE_WARN(
+            ret == ACL_SUCCESS, return, "Register DumpSnapShotLockPreCallback to RTS failed. ret=%d", ret);
+        snapCbkRegistered_ = true;
+        IDE_LOGI("Register DumpSnapShotLockPreCallback success.");
+    }
+}
+
+void DumpManager::EnableExceptionDumpWithEnv()
+{
+    DumpConfig config;
+    DumpType dumpType;
+    if (DumpConfigConverter::EnableExceptionDumpWithEnv(config, dumpType)) {
+        if (SetDumpConfig(dumpType, config) != ADUMP_SUCCESS) {
+            IDE_LOGW("Enable exception dump failed. dumpType: %d", dumpType);
+        } else {
+            isEnvExceptionDump_ = true;
+        }
+    }
+}
+
+bool DumpManager::AdjustOpExecuteTimeOut()
+{
+    if (opTimeoutModified_) {
+        IDE_LOGI("Op execute timeout has been adjusted for data dump, skip.");
+        return true;
+    }
+    uint32_t curTimeout = 0U;
+    rtError_t ret = rtGetOpExecuteTimeoutV2(&curTimeout);
+    IDE_CTRL_VALUE_FAILED(
+        ret == RT_ERROR_NONE, return false, "Get op execute timeout failed, skip adjust for data dump. ret=%d", ret);
+    if (curTimeout >= OP_EXECUTE_TIMEOUT_FOR_DATADUMP_MS) {
+        IDE_LOGI(
+            "Current op execute timeout %ums is no less than %ums, no need to adjust for data dump.", curTimeout,
+            OP_EXECUTE_TIMEOUT_FOR_DATADUMP_MS);
+        return true;
+    }
+    ret = rtSetOpExecuteTimeOutWithMs(OP_EXECUTE_TIMEOUT_FOR_DATADUMP_MS);
+    IDE_CTRL_VALUE_FAILED(
+        ret == RT_ERROR_NONE, return false, "Set op execute timeout to %ums failed for data dump. ret=%d",
+        OP_EXECUTE_TIMEOUT_FOR_DATADUMP_MS, ret);
+    originOpExecuteTimeOut_ = curTimeout;
+    opTimeoutModified_ = true;
+    IDE_LOGI(
+        "Adjust op execute timeout from %ums to %ums for data dump.", curTimeout, OP_EXECUTE_TIMEOUT_FOR_DATADUMP_MS);
+    return true;
+}
+
+bool DumpManager::RestoreOpExecuteTimeOut()
+{
+    if (!opTimeoutModified_) {
+        return true;
+    }
+    rtError_t ret = rtSetOpExecuteTimeOutWithMs(originOpExecuteTimeOut_);
+    // 恢复失败时保持 opTimeoutModified_=true，以便下次关闭 data dump 时重试恢复
+    IDE_CTRL_VALUE_FAILED(
+        ret == RT_ERROR_NONE, return false, "Restore op execute timeout to %ums failed. ret=%d",
+        originOpExecuteTimeOut_, ret);
+    IDE_LOGI("Restore op execute timeout to %ums after data dump disabled.", originOpExecuteTimeOut_);
+    opTimeoutModified_ = false;
+    originOpExecuteTimeOut_ = 0U;
+    return true;
 }
 
 void DumpManager::KFCResourceInit()
@@ -101,11 +215,12 @@ void DumpManager::KFCResourceInit()
     }
     std::vector<uint32_t> devList = AdumpDsmi::DrvGetDeviceList();
 
-    for (uint32_t &deviceId : devList) {
+    for (uint32_t& deviceId : devList) {
         IDE_LOGI("Start to initialize KFC resources on device %u.", deviceId);
         SharedPtr<OperatorPreliminary> opIniter = MakeSharedInstance<OperatorPreliminary>(GetDumpSetting(), deviceId);
-        IDE_CTRL_VALUE_FAILED_NODO(opIniter != nullptr && opIniter->OperatorInit() == ADUMP_SUCCESS, return,
-                                   "Failed to execute the resource initialization task on device %u.", deviceId);
+        IDE_CTRL_VALUE_FAILED_NODO(
+            opIniter != nullptr && opIniter->OperatorInit() == ADUMP_SUCCESS, return,
+            "Failed to execute the resource initialization task on device %u.", deviceId);
         DumpManager::operatorMap_.emplace_back(std::move(opIniter));
         IDE_LOGI("KFC executed on the device %u successfully.", deviceId);
     }
@@ -113,40 +228,40 @@ void DumpManager::KFCResourceInit()
     isKFCInit_ = true;
 }
 
-int32_t DumpManager::ExceptionConfig(DumpType dumpType, const DumpConfig &dumpConfig)
+int32_t DumpManager::ExceptionConfig(DumpType dumpType, const DumpConfig& dumpConfig)
 {
-    if ((exceptionDumper_.GetExceptionStatus() || exceptionDumper_.GetArgsExceptionStatus() ||
-            exceptionDumper_.GetCoredumpStatus())) {
-        std::string dumpStatus = dumpConfig.dumpStatus;
-        std::transform(dumpStatus.begin(), dumpStatus.end(), dumpStatus.begin(), ::tolower);
-        if (dumpStatus == "on") {
-            IDE_LOGI("Exception dump is already enable, can't enable dump type[%d] again.", dumpType);
-            return ADUMP_SUCCESS;
-        }
+    if (exceptionDumper_.IsRepeatEnableException(dumpType, dumpConfig)) {
+        IDE_LOGW(
+            "Exception dump has been enabled, not support enable exception dump[%s] again",
+            DumpConfigConverter::DumpTypeToStr(dumpType).c_str());
+        return ADUMP_SUCCESS;
     }
+
     if (dumpType == DumpType::AIC_ERR_DETAIL_DUMP && !CheckCoredumpSupportedPlatform()) {
         IDE_LOGE("Current platform is not support coredump mode.");
         return ADUMP_FAILED;
     }
 
-    IDE_RUN_LOGI("Set %d dump setting, status: %s, dump switch: %llu", dumpType, dumpConfig.dumpStatus.c_str(),
-        dumpConfig.dumpSwitch);
+    IDE_RUN_LOGI(
+        "Set %s[%d] dump setting, status: %s, dump switch: %llu", DumpConfigConverter::DumpTypeToStr(dumpType).c_str(),
+        dumpType, dumpConfig.dumpStatus.c_str(), dumpConfig.dumpSwitch);
     if (exceptionDumper_.ExceptionDumperInit(dumpType, dumpConfig) != ADUMP_SUCCESS) {
         IDE_LOGW("Failed to initialize the exception dump.");
         return ADUMP_SUCCESS;
     }
     dumpSetting_.InitDumpSwitch(dumpConfig.dumpSwitch & DUMP_SWITCH_MASK);
-    IDE_CTRL_VALUE_WARN(RegsiterExceptionCallback(), return ADUMP_SUCCESS,
+    IDE_CTRL_VALUE_WARN(
+        RegsiterExceptionCallback(), return ADUMP_SUCCESS,
         "Failed to register the args exception dump callback function.");
     if (exceptionDumper_.GetCoredumpStatus()) { // 如果启动了coredump模式
-        IDE_CTRL_VALUE_FAILED(rtRegDeviceStateCallbackEx(COREDUMP_CB_MODULE, &NotifyCoredumpCallback,
-            DEV_CB_POS_BACK) == RT_ERROR_NONE, return ADUMP_FAILED,
-            "Failed to register the coredump callback function to rtSetDevice.");
+        IDE_CTRL_VALUE_FAILED(
+            rtRegDeviceStateCallbackEx(COREDUMP_CB_MODULE, &NotifyCoredumpCallback, DEV_CB_POS_BACK) == RT_ERROR_NONE,
+            return ADUMP_FAILED, "Failed to register the coredump callback function to rtSetDevice.");
     }
     return ADUMP_SUCCESS;
 }
 
-int32_t DumpManager::SetDumpConfig(DumpType dumpType, const DumpConfig &dumpConfig)
+int32_t DumpManager::SetDumpConfig(DumpType dumpType, const DumpConfig& dumpConfig)
 {
     std::lock_guard<std::mutex> lk(resourceMtx_);
     if (dumpType == DumpType::EXCEPTION || dumpType == DumpType::ARGS_EXCEPTION ||
@@ -158,51 +273,77 @@ int32_t DumpManager::SetDumpConfig(DumpType dumpType, const DumpConfig &dumpConf
         return ret;
     }
 
+    // 启动Data Dump Server
+    if (dumpConfig.dumpStatus != ADUMP_DUMP_STATUS_SWITCH_OFF) {
+        IDE_CTRL_VALUE_FAILED(
+            StartDataDumpServer(), return ADUMP_FAILED, "Start data dump server failed! dumpType=%s[%d]",
+            DumpConfigConverter::DumpTypeToStr(dumpType).c_str(), dumpType);
+        // 后续失败不恢复超时时间，不影响功能。
+        IDE_CTRL_VALUE_FAILED(AdjustOpExecuteTimeOut(), return ADUMP_FAILED, "Adjust op execute timeout failed.");
+    }
+
     if (CheckBinValidation() && (isKFCInit_ == false)) {
         auto kfcBind = std::bind(&DumpManager::KFCResourceInit, this);
         std::thread kfcThread(kfcBind);
         kfcThread.join();
         if (!isKFCInit_) {
-            IDE_LOGE("SetDumpConfig failed due to fkc resource initialization error.");
+            IDE_LOGE("SetDumpConfig failed due to kfc resource initialization error.");
             DumpManager::operatorMap_.clear();
             return ADUMP_FAILED;
         }
     }
-    IDE_RUN_LOGI("Set %d dump setting, status: %s, mode: %s, data: %s, dump switch: %llu, path:%s, dump stats:%s.",
-        dumpType, dumpConfig.dumpStatus.c_str(), dumpConfig.dumpMode.c_str(), dumpConfig.dumpData.c_str(),
-        dumpConfig.dumpSwitch, dumpConfig.dumpPath.c_str(), StrUtils::ToString(dumpConfig.dumpStatsItem).c_str());
+
+    ret = OperatorDumper(dumpSetting_).UpdateDevMemCache();
+    IDE_CTRL_VALUE_FAILED(
+        ret == ADUMP_SUCCESS, return ADUMP_FAILED, "Update device memery cache for data dump failed! dumpType=%s[%d]",
+        DumpConfigConverter::DumpTypeToStr(dumpType).c_str(), dumpType);
+
+    IDE_RUN_LOGI(
+        "Set %s[%d] dump setting, status: %s, mode: %s, data: %s, dump switch: %llu, path:%s, dump stats:%s.",
+        DumpConfigConverter::DumpTypeToStr(dumpType).c_str(), dumpType, dumpConfig.dumpStatus.c_str(),
+        dumpConfig.dumpMode.c_str(), dumpConfig.dumpData.c_str(), dumpConfig.dumpSwitch, dumpConfig.dumpPath.c_str(),
+        StrUtils::ToString(dumpConfig.dumpStatsItem).c_str());
     return ADUMP_SUCCESS;
 }
 
-int32_t DumpManager::SetDumpConfig(const char *dumpConfigData, size_t dumpConfigSize)
+int32_t DumpManager::SetDumpConfig(const char* dumpConfigData, size_t dumpConfigSize, const char* dumpConfigPath)
 {
     std::lock_guard<std::mutex> lk(resourceMtx2_);
-    DumpConfig config;
-    if (DumpConfigConverter::EnabledExceptionWithEnv(config)) {
-        IDE_CTRL_VALUE_FAILED(SetDumpConfig(DumpType::EXCEPTION, config) == ADUMP_SUCCESS,
-            return ADUMP_FAILED, "Set exception dump config failed.");
-    }
-
-    if ((dumpConfigData == nullptr) || (dumpConfigSize == 0U)) {
+    if ((dumpConfigData == nullptr) || (dumpConfigSize == 0U) || (dumpConfigPath == nullptr)) {
         IDE_LOGE("Set dump config failed. Config data is null or empty.");
         return ADUMP_FAILED;
     }
     DumpConfig dumpConfig;
+    DumpDfxConfig dumpDfxConfig;
     DumpType dumpType;
     bool needDump = true;
-    DumpConfigConverter converter{dumpConfigData, dumpConfigSize};
-    int32_t ret = converter.Convert(dumpType, dumpConfig, needDump);
+    DumpConfigConverter converter{dumpConfigData, dumpConfigSize, dumpConfigPath};
+    int32_t ret = converter.Convert(dumpType, dumpConfig, needDump, dumpDfxConfig);
     if (ret != ADUMP_SUCCESS) {
         IDE_LOGE("Parse dump config from memory[%s] failed.", dumpConfigData);
         return ADUMP_INPUT_FAILED;
     }
+
+    // 开启KernelDataDump
+    ret = KernelDfxDumper::Instance().EnableDfxDumper(dumpDfxConfig);
+    IDE_CTRL_VALUE_FAILED(ret == ADUMP_SUCCESS, return ret, "Enable kernel dfx dump failed.");
+
     if (!needDump) {
         return ADUMP_SUCCESS;
     }
+
+    // 已开启exception dump：不支持重复使能，不更新配置缓存，不重复回调注册模块组件
+    if (exceptionDumper_.IsRepeatEnableException(dumpType, dumpConfig)) {
+        IDE_LOGW(
+            "Exception dump has been enabled, not support enable exception dump[%s] again",
+            DumpConfigConverter::DumpTypeToStr(dumpType).c_str());
+        return ADUMP_SUCCESS;
+    }
+
     (void)dumpConfigInfo_.assign(dumpConfigData, dumpConfigSize);
     IDE_LOGI("Dump config info set: addr=%p, size=%zu", dumpConfigInfo_.data(), dumpConfigInfo_.size());
     ret = SetDumpConfig(dumpType, dumpConfig);
-    // 同步触发callbcak事件
+    // 同步触发callback事件
     for (auto& item : enableCallbackFunc_) {
         IDE_LOGI("SetDumpConfig HandleDumpEvent start for module [%zu]", item.first);
         HandleDumpEvent(item.first, DumpEnableAction::ENABLE);
@@ -217,35 +358,46 @@ int32_t DumpManager::UnSetDumpConfig()
     std::lock_guard<std::mutex> lk(resourceMtx2_);
     DumpConfig config;
     config.dumpStatus = ADUMP_DUMP_STATUS_SWITCH_OFF;
+    config.dumpSwitch = 0;
     for (const auto dumpType : openedDump_) {
         if (IsEnableDump(dumpType)) {
-           const auto ret = SetDumpConfig(dumpType, config);
-            if (ret != ADUMP_SUCCESS) {
-                IDE_LOGE("[Set][Dump]set dump off failed, dumpType:[%d], errorCode = %d",
-                         static_cast<int32_t>(dumpType), ret);
-                return ADUMP_FAILED;
-            }
-            IDE_LOGI("set dump off successfully, dumpType:[%d].", static_cast<int32_t>(dumpType));
+            const auto ret = SetDumpConfig(dumpType, config);
+            IDE_CTRL_VALUE_FAILED(
+                ret == ADUMP_SUCCESS, return ADUMP_FAILED, "[Set][Dump]Set dump off failed! dumpType=%s[%d], ret=%d",
+                DumpConfigConverter::DumpTypeToStr(dumpType).c_str(), dumpType, ret);
+            IDE_LOGI(
+                "[Set][Dump]Set dump off successfully, dumpType=%s[%d]",
+                DumpConfigConverter::DumpTypeToStr(dumpType).c_str(), dumpType);
         }
     }
     openedDump_.clear();
-    // 同步触发callbcak事件
+    // 同步触发callback事件
     for (auto& item : disableCallbackFunc_) {
         IDE_LOGI("UnSetDumpConfig start for module [%zu]", item.first);
         HandleDumpEvent(item.first, DumpEnableAction::DISABLE);
     }
     dumpConfigInfo_.clear();
     IDE_LOGI("Dump config info cleared.");
+
+    // 等待所有 dump 操作完成并清理资源
+    DumpResourceSafeMap::Instance().waitAndClear();
+    // 释放device资源
+    OperatorDumper::FreeDevMemCache();
+    // 停止data dump server
+    IDE_CTRL_VALUE_FAILED(StopDataDumpServer(), return ADUMP_FAILED, "Stop data dump server failed!");
+    // 恢复算子超时时间
+    IDE_CTRL_VALUE_FAILED(RestoreOpExecuteTimeOut(), return ADUMP_FAILED, "Restore op execute timeout failed!");
+
     return ADUMP_SUCCESS;
 }
 
 std::string DumpManager::GetBinName() const
 {
-    auto it = BIN_NAME_MAP.find(dumpSetting_.GetPlatformType());
-    if (it != BIN_NAME_MAP.cend()) {
-        return it->second;
+    auto plat = PlatformReflection<DataDumpInterface>::CreatePlatform(dumpSetting_.GetPlatformType());
+    if (plat == nullptr) {
+        return "";
     }
-    return "";
+    return plat->GetKfcBinName();
 }
 
 bool DumpManager::CheckBinValidation()
@@ -281,31 +433,20 @@ bool DumpManager::IsEnableDump(DumpType dumpType)
     return false;
 }
 
-int32_t DumpManager::DumpOperator(const std::string &opType, const std::string &opName,
-                                  const std::vector<TensorInfo> &tensors, aclrtStream stream)
+int32_t DumpManager::GetInputOutputTensors(
+    const std::string& opType, const std::string& opName, const std::vector<TensorInfoV2>& tensors,
+    std::vector<DumpTensor>& inputTensors, std::vector<DumpTensor>& outputTensors)
 {
-    return DumpOperatorV2(opType, opName, ConvertTensorInfoToDumpTensorV2(tensors), stream);
-}
-
-int32_t DumpManager::DumpOperatorV2(const std::string &opType, const std::string &opName,
-                                  const std::vector<TensorInfoV2> &tensors, aclrtStream stream)
-{
-    std::lock_guard<std::mutex> lk(resourceMtx_);
-    if (!dumpSetting_.GetDumpStatus() && !dumpSetting_.GetDumpDebugStatus()) {
-        IDE_LOGW("Operator or overflow dump is not enable, can't dump.");
-        return ADUMP_SUCCESS;
-    }
-
-    std::vector<DumpTensor> inputTensors;
-    std::vector<DumpTensor> outputTensors;
-    for (const auto &tensorInfo : tensors) {
+    for (const auto& tensorInfo : tensors) {
         if (tensorInfo.tensorAddr == nullptr || tensorInfo.tensorSize == 0) {
-            IDE_LOGE("Tensor is nullptr.");
-            return ADUMP_FAILED;
+            IDE_LOGW(
+                "Tensor of op=%s[%s] is empty, addr=%p, size=%zu, skip it.", opName.c_str(), opType.c_str(),
+                tensorInfo.tensorAddr, tensorInfo.tensorSize);
+            continue;
         }
 
         if (tensorInfo.placement != TensorPlacement::kOnDeviceHbm) {
-            IDE_LOGW("Tensor of of %s[%s] is on device, skip it.", opName.c_str(), opType.c_str());
+            IDE_LOGW("Tensor of op=%s[%s] is not on device, skip it.", opName.c_str(), opType.c_str());
             continue;
         }
 
@@ -315,32 +456,161 @@ int32_t DumpManager::DumpOperatorV2(const std::string &opType, const std::string
             outputTensors.emplace_back(tensorInfo);
         }
     }
-    OperatorDumper opDumper(opType, opName);
-    int32_t ret = opDumper.SetDumpSetting(dumpSetting_)
-                      .RuntimeStream(stream)
-                      .InputDumpTensor(inputTensors)
-                      .OutputDumpTensor(outputTensors)
-                      .Launch();
-    if (ret != ADUMP_SUCCESS) {
-        IDE_LOGE("Launch dump operator failed.");
-        return ret;
-    }
     return ADUMP_SUCCESS;
 }
 
-void DumpManager::AddExceptionOp(const OperatorInfo &opInfo)
+bool DumpManager::IsEnableDumpOperatorWithCapture(
+    const std::string& opType, const std::string& opName, aclrtStream stream)
 {
-    OperatorInfoV2 operatorInfoV2 = {};
-    ConvertOperatorInfo(opInfo, operatorInfoV2);
-    exceptionDumper_.AddDumpOperator(operatorInfoV2);
+    rtStreamCaptureStatus status = RT_STREAM_CAPTURE_STATUS_MAX;
+    rtModel_t* captureMdl = nullptr;
+    int32_t ret = rtStreamGetCaptureInfo(stream, &status, captureMdl);
+    if (ret != ACL_SUCCESS) {
+        IDE_LOGW("Get stream capture info error: %d, will switch to common dump", ret);
+        return false;
+    }
+    IDE_LOGI("%s[%s] : stream capture status: %d", opName.c_str(), opType.c_str(), status);
+    return status == RT_STREAM_CAPTURE_STATUS_ACTIVE;
 }
 
-void DumpManager::AddExceptionOpV2(const OperatorInfoV2 &opInfo)
+int32_t DumpManager::DumpOperatorWithCfg(
+    const std::string& opType, const std::string& opName, const std::vector<TensorInfo>& tensors, aclrtStream stream,
+    const DumpCfg& dumpCfg)
 {
-    exceptionDumper_.AddDumpOperator(opInfo);
+    std::lock_guard<std::mutex> lk(resourceMtx_);
+    if (!dumpSetting_.GetDumpStatusEx() && !dumpSetting_.GetDumpDebugStatus()) {
+        IDE_LOGW("Operator or overflow dump is not enable, can't dump data.");
+        return ADUMP_SUCCESS;
+    }
+
+    bool isInvalid = dumpCfg.numAttrs != 0UL && dumpCfg.attrs == nullptr;
+    IDE_CTRL_VALUE_FAILED(
+        !isInvalid, return ADUMP_FAILED, "The dump cfg attrs is null pointer! op=%s[%s].", opName.c_str(),
+        opType.c_str());
+
+    std::vector<DumpTensor> inputTensors;
+    std::vector<DumpTensor> outputTensors;
+    int32_t ret =
+        GetInputOutputTensors(opType, opName, ConvertTensorInfoToDumpTensorV2(tensors), inputTensors, outputTensors);
+    IDE_CTRL_VALUE_FAILED(
+        ret == ADUMP_SUCCESS, return ADUMP_FAILED, "Get input and output tensors failed! op=%s[%s].", opName.c_str(),
+        opType.c_str());
+    IDE_CTRL_VALUE_WARN(
+        !inputTensors.empty() || !outputTensors.empty(), return ADUMP_SUCCESS, "No tensor need to dump. op=%s[%s].",
+        opName.c_str(), opType.c_str());
+
+    if (IsEnableDumpOperatorWithCapture(opType, opName, stream)) {
+        if (dumpSetting_.GetDumpDebugStatus() || dumpSetting_.IsDumpDataStats()) {
+            IDE_LOGI("overflow or stats is not allow in capture stream");
+            return ADUMP_SUCCESS;
+        }
+        return DumpOperatorWithCapture(opType, opName, inputTensors, outputTensors, stream);
+    }
+
+    OperatorDumper opDumper(opType, opName);
+    ret = opDumper.SetDumpSetting(dumpSetting_)
+              .RuntimeStream(stream)
+              .InputDumpTensor(inputTensors)
+              .OutputDumpTensor(outputTensors)
+              .LaunchWithCfg(dumpCfg);
+    IDE_CTRL_VALUE_FAILED(
+        ret == ADUMP_SUCCESS, return ret, "Launch dump operator with dump cfg failed! op=%s[%s].", opName.c_str(),
+        opType.c_str());
+    return ADUMP_SUCCESS;
 }
 
-void DumpManager::ConvertOperatorInfo(const OperatorInfo &opInfo, OperatorInfoV2 &operatorInfoV2) const
+int32_t DumpManager::DumpOperator(
+    const std::string& opType, const std::string& opName, const std::vector<TensorInfo>& tensors, aclrtStream stream)
+{
+    return DumpOperatorV2(opType, opName, ConvertTensorInfoToDumpTensorV2(tensors), stream);
+}
+
+int32_t DumpManager::DumpOperatorV2(
+    const std::string& opType, const std::string& opName, const std::vector<TensorInfoV2>& tensors, aclrtStream stream)
+{
+    std::lock_guard<std::mutex> lk(resourceMtx_);
+    if (!dumpSetting_.GetDumpStatus() && !dumpSetting_.GetDumpDebugStatus()) {
+        IDE_LOGW("Operator or overflow dump is not enable, can't dump.");
+        return ADUMP_SUCCESS;
+    }
+
+    std::vector<DumpTensor> inputTensors;
+    std::vector<DumpTensor> outputTensors;
+    int32_t ret = GetInputOutputTensors(opType, opName, tensors, inputTensors, outputTensors);
+    IDE_CTRL_VALUE_FAILED(
+        ret == ADUMP_SUCCESS, return ADUMP_FAILED, "Get input and output tensors failed! opName: %s, opType: %s",
+        opName.c_str(), opType.c_str());
+
+    if (IsEnableDumpOperatorWithCapture(opType, opName, stream)) {
+        if (dumpSetting_.GetDumpDebugStatus() || dumpSetting_.IsDumpDataStats()) {
+            IDE_LOGI("overflow or stats is not allow in capture stream");
+            return ADUMP_SUCCESS;
+        }
+        return DumpOperatorWithCapture(opType, opName, inputTensors, outputTensors, stream);
+    }
+
+    OperatorDumper opDumper(opType, opName);
+    ret = opDumper.SetDumpSetting(dumpSetting_)
+              .RuntimeStream(stream)
+              .InputDumpTensor(inputTensors)
+              .OutputDumpTensor(outputTensors)
+              .Launch();
+    IDE_CTRL_VALUE_FAILED(
+        ret == ADUMP_SUCCESS, return ret, "Launch dump operator failed! op=%s[%s].", opName.c_str(), opType.c_str());
+    return ADUMP_SUCCESS;
+}
+
+int32_t DumpManager::DumpOperatorWithCapture(
+    const std::string& opType, const std::string& opName, const std::vector<DumpTensor>& inputTensors,
+    const std::vector<DumpTensor>& outputTensors, aclrtStream mainStream)
+{
+    if (mainStream == nullptr) {
+        IDE_LOGE("mainStream is nullptr.");
+        return ADUMP_FAILED;
+    }
+
+    if (!isCaptureDumpServerInit_) {
+        IDE_CTRL_VALUE_FAILED(StartDataDumpServer(), return ADUMP_FAILED, "Start data dump server failed!");
+        isCaptureDumpServerInit_ = true;
+    }
+
+    uint32_t streamId = 0;
+    uint32_t taskId = 0;
+    uint32_t deviceId = 0;
+    std::string dumpPath;
+    int32_t ret = CollectStreamContextInfo(mainStream, opName, opType, streamId, taskId, deviceId, dumpPath);
+    if (ret != ADUMP_SUCCESS) {
+        IDE_LOGE("%s(%s) collect stream context info failed.", opName.c_str(), opType.c_str());
+        return ret;
+    }
+
+    std::string mainStreamKey = std::to_string(streamId) + "_" + std::to_string(taskId);
+    DumpInfoParams params = {
+        mainStreamKey, inputTensors, outputTensors, opType, opName, streamId, taskId, deviceId, 0, 0, dumpPath};
+    ret = GetDumpInfoFromMap(params);
+    std::shared_ptr<DumpStreamInfo> dumpInfoPtr = DumpResourceSafeMap::Instance().get(mainStreamKey);
+    if (ret != ADUMP_SUCCESS || dumpInfoPtr == nullptr) {
+        IDE_LOGE("%s(%s) get dump info failed.", opName.c_str(), opType.c_str());
+        return ADUMP_FAILED;
+    }
+    IDE_LOGI("%s(%s) dump data : create DumpStreamInfo success", opName.c_str(), opType.c_str());
+
+    ret = SetupAsyncDump(dumpInfoPtr, opName, opType, mainStream);
+    if (ret != ADUMP_SUCCESS) {
+        return ret;
+    }
+    IDE_LOGI(
+        "%s(%s) set main stream %u, dump stream %u, callback function success", opName.c_str(), opType.c_str(),
+        dumpInfoPtr->streamId, dumpInfoPtr->dumpStmId);
+
+    return ADUMP_SUCCESS;
+}
+
+void DumpManager::AddExceptionOp(const OperatorInfo& opInfo) { exceptionDumper_.AddDumpOperator(opInfo); }
+
+void DumpManager::AddExceptionOpV2(const OperatorInfoV2& opInfo) { exceptionDumper_.AddDumpOperatorV2(opInfo); }
+
+void DumpManager::ConvertOperatorInfo(const OperatorInfo& opInfo, OperatorInfoV2& operatorInfoV2) const
 {
     operatorInfoV2.agingFlag = opInfo.agingFlag;
     operatorInfoV2.taskId = opInfo.taskId;
@@ -354,40 +624,35 @@ void DumpManager::ConvertOperatorInfo(const OperatorInfo &opInfo, OperatorInfoV2
     operatorInfoV2.additionalInfo = opInfo.additionalInfo;
 }
 
-std::vector<TensorInfoV2> DumpManager::ConvertTensorInfoToDumpTensorV2(const std::vector<TensorInfo> &tensorInfos) const
- {
+std::vector<TensorInfoV2> DumpManager::ConvertTensorInfoToDumpTensorV2(const std::vector<TensorInfo>& tensorInfos) const
+{
     std::vector<TensorInfoV2> tensors;
     tensors.reserve(tensorInfos.size());
     for (const auto& tensorInfo : tensorInfos) {
-        TensorInfoV2 tensor ={};
+        TensorInfoV2 tensor = {};
         ConvertTensorInfo(tensorInfo, tensor);
         tensors.emplace_back(tensor);
     }
     return tensors;
 }
- 
-void DumpManager::ConvertTensorInfo(const TensorInfo &tensorInfo, TensorInfoV2 &tensor) const
+
+void DumpManager::ConvertTensorInfo(const TensorInfo& tensorInfo, TensorInfoV2& tensor) const
 {
-    if ( tensorInfo.tensor == nullptr ){
-        return;
-    } 
-    tensor.dataType = static_cast<int32_t>(tensorInfo.tensor->GetDataType());
-    tensor.format = static_cast<int32_t>(tensorInfo.tensor->GetStorageFormat());
-    tensor.placement = static_cast<int32_t>(tensorInfo.tensor->GetPlacement());
-    tensor.tensorAddr = static_cast<int64_t *>(tensorInfo.tensor->GetAddr());
-    tensor.tensorSize = tensorInfo.tensor->GetSize();
+    tensor.dataType = tensorInfo.dataType;
+    tensor.format = tensorInfo.format;
+    tensor.placement = tensorInfo.placement;
+    tensor.tensorAddr = tensorInfo.tensorAddr;
+    tensor.tensorSize = tensorInfo.tensorSize;
     tensor.type = tensorInfo.type;
     tensor.addrType = tensorInfo.addrType;
     tensor.argsOffSet = tensorInfo.argsOffSet;
-    gert::Shape shape = tensorInfo.tensor->GetStorageShape();
-    size_t dimNum = shape.GetDimNum();
-    for (size_t i = 0; i < dimNum; ++i) {
-        tensor.shape.emplace_back(static_cast<uint64_t>(shape[i]));
+    std::vector<int64_t> shape = tensorInfo.shape;
+    for (auto dim : shape) {
+        tensor.shape.emplace_back(static_cast<uint64_t>(dim));
     }
-    gert::Shape originShape = tensorInfo.tensor->GetOriginShape();
-    size_t originDimNum = originShape.GetDimNum();
-    for (size_t i = 0; i < originDimNum; ++i) {
-        tensor.originShape.emplace_back(static_cast<uint64_t>(originShape[i]));
+    std::vector<int64_t> originShape = tensorInfo.originShape;
+    for (auto dim : originShape) {
+        tensor.originShape.emplace_back(static_cast<uint64_t>(dim));
     }
 }
 
@@ -396,7 +661,7 @@ int32_t DumpManager::DelExceptionOp(uint32_t deviceId, uint32_t streamId)
     return exceptionDumper_.DelDumpOperator(deviceId, streamId);
 }
 
-int32_t DumpManager::DumpExceptionInfo(const rtExceptionInfo &exception)
+int32_t DumpManager::DumpExceptionInfo(const rtExceptionInfo& exception)
 {
     return exceptionDumper_.DumpException(exception);
 }
@@ -416,25 +681,23 @@ bool DumpManager::RegsiterExceptionCallback()
     return registered_;
 }
 
-DumpSetting DumpManager::GetDumpSetting() const
-{
-    return dumpSetting_;
-}
+DumpSetting DumpManager::GetDumpSetting() const { return dumpSetting_; }
 
-void DumpManager::ExceptionModeDowngrade()
+void DumpManager::ExceptionModeDowngrade() { exceptionDumper_.ExceptionModeDowngrade(); }
+
+bool DumpManager::IsEnabledExceptionDump()
 {
-    exceptionDumper_.ExceptionModeDowngrade();
+    std::lock_guard<std::mutex> lk(resourceMtx_);
+    return exceptionDumper_.IsEnabledExceptionDump();
 }
 
 int32_t DumpManager::RegisterCallback(uint32_t moduleId, AdumpCallback enableFunc, AdumpCallback disableFunc)
 {
-    if (enableFunc == nullptr)
-    {
+    if (enableFunc == nullptr) {
         IDE_LOGE("Register callback failed: enableFunc is null for module %u", moduleId);
         return ADUMP_FAILED;
     }
-    if (disableFunc == nullptr)
-    {
+    if (disableFunc == nullptr) {
         IDE_LOGE("Register callback failed: disableFunc is null for module %u", moduleId);
         return ADUMP_FAILED;
     }
@@ -445,36 +708,51 @@ int32_t DumpManager::RegisterCallback(uint32_t moduleId, AdumpCallback enableFun
     return HandleDumpEvent(moduleId, DumpEnableAction::AUTO);
 }
 
-int32_t DumpManager::StartDumpArgs(const std::string &dumpPath)
+int32_t DumpManager::StartDumpArgs(const std::string& dumpPath)
 {
-    std::lock_guard<std::mutex> lk(resourceMtx_);
-    uint64_t dumpSwitch = dumpSetting_.GetDumpSwitch();
-    if ((dumpSwitch & OP_INFO_RECORD_DUMP) == OP_INFO_RECORD_DUMP) {
-        IDE_LOGW("Double OpInfoRecord Start Entry");
-        return -1;
-    }
-
-    Adx::Path path(dumpPath);
-    if (path.Empty()) {
-        IDE_LOGE("OpInfoRecord path[%s] is empty", dumpPath.c_str());
-        return -1;
-    }
-    if (!path.Exist()) {
-        if (!path.CreateDirectory(true)) {
-            IDE_LOGE("Create path[%s] failed, strerr: %s", dumpPath.c_str(), strerror(errno));
+    uint64_t dumpSwitch = 0;
+    {
+        std::lock_guard<std::mutex> lk(resourceMtx_);
+        dumpSwitch = dumpSetting_.GetDumpSwitch();
+        if ((dumpSwitch & OP_INFO_RECORD_DUMP) == OP_INFO_RECORD_DUMP) {
+            REPORT_EP0008_API_CALL_SEQUENCE(FUNC_NAME_ACL_OP_START_DUMP_ARGS, ADUMP_REASON_API_CALLED_REPEATEDLY);
             return -1;
         }
-    }
-    if (!path.IsDirectory()) {
-        IDE_LOGE("OpInfoRecord path[%s] is not directory!", dumpPath.c_str());
-        return -1;
-    }
 
-    dumpSwitch |= OP_INFO_RECORD_DUMP;
-    dumpSetting_.InitDumpSwitch(dumpSwitch);
-    opInfoRecordPath_ = path.GetString();
+        Adx::Path path(dumpPath);
+        if (path.Empty()) {
+            REPORT_EP0006_INVALID_ARGUMENT(
+                FUNC_NAME_ACL_OP_START_DUMP_ARGS, dumpPath, FUNC_ACL_OP_START_DUMP_ARGS_PARAM_PATH,
+                ADUMP_REASON_PARAM_PATH_EMPTY);
+            return -1;
+        }
+        if (!path.Exist()) {
+            if (!path.CreateDirectory(true)) {
+                std::string reason = StrUtils::Format(ADUMP_REASON_PARAM_PATH_CREATE_DIR_ERROR, strerror(errno));
+                REPORT_EP0006_INVALID_ARGUMENT(
+                    FUNC_NAME_ACL_OP_START_DUMP_ARGS, dumpPath, FUNC_ACL_OP_START_DUMP_ARGS_PARAM_PATH, reason);
+                return -1;
+            }
+        }
+        if (!path.IsDirectory()) {
+            REPORT_EP0006_INVALID_ARGUMENT(
+                FUNC_NAME_ACL_OP_START_DUMP_ARGS, dumpPath, FUNC_ACL_OP_START_DUMP_ARGS_PARAM_PATH,
+                ADUMP_REASON_PARAM_PATH_NOT_DIRECTORY);
+            return -1;
+        }
+        constexpr uint32_t accessMode = static_cast<uint32_t>(M_R_OK) | static_cast<uint32_t>(M_W_OK);
+        if (!path.Asccess(accessMode)) {
+            REPORT_EP0006_INVALID_ARGUMENT(
+                FUNC_NAME_ACL_OP_START_DUMP_ARGS, dumpPath, FUNC_ACL_OP_START_DUMP_ARGS_PARAM_PATH,
+                ADUMP_REASON_PATH_NO_PERMISSION);
+            return -1;
+        }
 
-    for (auto &item : enableCallbackFunc_) {
+        dumpSwitch |= OP_INFO_RECORD_DUMP;
+        dumpSetting_.InitDumpSwitch(dumpSwitch);
+        opInfoRecordPath_ = path.GetString();
+    }
+    for (auto& item : enableCallbackFunc_) {
         item.second(dumpSwitch, dumpConfigInfo_.data(), dumpConfigInfo_.size());
     }
     IDE_RUN_LOGI("OpInfoRecord start success!");
@@ -483,37 +761,57 @@ int32_t DumpManager::StartDumpArgs(const std::string &dumpPath)
 
 int32_t DumpManager::StopDumpArgs()
 {
-    std::lock_guard<std::mutex> lk(resourceMtx_);
-    uint64_t dumpSwitch = dumpSetting_.GetDumpSwitch();
-    if ((dumpSwitch & OP_INFO_RECORD_DUMP) != OP_INFO_RECORD_DUMP) {
-        return 0;
+    uint64_t dumpSwitch = 0;
+    {
+        std::lock_guard<std::mutex> lk(resourceMtx_);
+        dumpSwitch = dumpSetting_.GetDumpSwitch();
+        if ((dumpSwitch & OP_INFO_RECORD_DUMP) != OP_INFO_RECORD_DUMP) {
+            return 0;
+        }
+        IDE_RUN_LOGI("OpInfoRecord Stop Entry!");
+        dumpSwitch &= ~OP_INFO_RECORD_DUMP;
+        dumpSetting_.InitDumpSwitch(dumpSwitch);
     }
-    IDE_RUN_LOGI("OpInfoRecord Stop Entry!");
-    dumpSwitch &= ~OP_INFO_RECORD_DUMP;
-    dumpSetting_.InitDumpSwitch(dumpSwitch);
-        for (auto &item : disableCallbackFunc_) {
+    for (auto& item : disableCallbackFunc_) {
         item.second(dumpSwitch, dumpConfigInfo_.data(), dumpConfigInfo_.size());
     }
     IDE_RUN_LOGI("OpInfoRecord success!");
     return 0;
 }
 
-int32_t DumpManager::SaveFile(const char *data, size_t dataLen, const char *fileName, SaveType type)
+const char* DumpManager::GetExtraExceptionDumpPath()
 {
-    Adx::Path filePath(opInfoRecordPath_);
-    filePath.Concat(fileName);
-    Adx::Path dirPath = filePath.ParentPath();
-    if (!dirPath.Exist()) {
-        if (!dirPath.CreateDirectory(true)) {
-            IDE_LOGE("create directory[%s] failed", dirPath.GetCString());
-            return -1;
-        }
-    }
-    if (!dirPath.RealPath()) {
-        IDE_LOGE("get real path failed, path:%s", dirPath.GetCString());
-    }
+    std::lock_guard<std::mutex> lk(resourceMtx_);
+    exceptionDumper_.CreateExtraDumpPath();
+    return exceptionDumper_.GetExtraDumpCPath();
+}
 
-    std::string canonicalPath = dirPath.GetString() + "/" + filePath.GetFileName();
+const char* DumpManager::GetDataDumpPath()
+{
+    std::lock_guard<std::mutex> lk(resourceMtx_);
+    return dumpSetting_.GetDumpCPath();
+}
+
+int32_t DumpManager::GetExceptionDumpPath(std::string& path)
+{
+    std::lock_guard<std::mutex> lk(resourceMtx_);
+    return exceptionDumper_.GetExceptionDumpPath(path);
+}
+
+int32_t DumpManager::SaveExceptionInfo(
+    const std::string& fileName, const std::string& userTag, const std::vector<TensorInfo>& tensors)
+{
+    std::lock_guard<std::mutex> lk(resourceMtx_);
+    return exceptionDumper_.SaveExceptionInfo(fileName, userTag, tensors);
+}
+
+int32_t DumpManager::SaveFile(const char* data, size_t dataLen, const char* fileName, SaveType type)
+{
+    std::string canonicalPath;
+    if (!Adx::Path::BuildFullPathUnderRoot(opInfoRecordPath_, fileName, canonicalPath)) {
+        IDE_LOGE("invalid fileName[%s], may escape root path.", fileName);
+        return -1;
+    }
     int32_t openFlag = 0;
     if (type == SaveType::OVERWRITE) {
         openFlag = O_CREAT | O_WRONLY | O_TRUNC;
@@ -533,6 +831,19 @@ int32_t DumpManager::SaveFile(const char *data, size_t dataLen, const char *file
     return 0;
 }
 
+int32_t DumpManager::CallbackEnvExceptionDumpEvent(AdumpCallback callbackFunc)
+{
+    if (isEnvExceptionDump_) {
+        IDE_LOGI("Callback module when exception dump enabled with env.");
+        if (exceptionDumper_.GetArgsExceptionStatus() || exceptionDumper_.GetCoredumpStatus()) {
+            return callbackFunc(DUMP_SWITCH_L0_MACK, nullptr, 0);
+        } else if (exceptionDumper_.GetExceptionStatus()) {
+            return callbackFunc(DUMP_SWITCH_L1_MACK, nullptr, 0);
+        }
+    }
+    return ADUMP_SUCCESS;
+}
+
 // DUMP 配置变化时，触发dump事件，同步回调用户接口
 int32_t DumpManager::HandleDumpEvent(uint32_t moduleId, DumpEnableAction action)
 {
@@ -540,8 +851,12 @@ int32_t DumpManager::HandleDumpEvent(uint32_t moduleId, DumpEnableAction action)
     auto callbackFunc = disableCallbackFunc_[moduleId];
     if (action == DumpEnableAction::ENABLE) {
         callbackFunc = enableCallbackFunc_[moduleId];
+        // 回调环境变量开启exception dump
+        (void)CallbackEnvExceptionDumpEvent(callbackFunc);
     }
     if (action == DumpEnableAction::AUTO) {
+        // 回调环境变量开启exception dump
+        (void)CallbackEnvExceptionDumpEvent(enableCallbackFunc_[moduleId]);
         if (dumpConfigInfo_.data() == nullptr || dumpConfigInfo_.size() == 0U) {
             IDE_LOGW("Config data is null or empty. Not trigger HandleDumpEvent.");
             return ADUMP_SUCCESS;
@@ -555,9 +870,12 @@ int32_t DumpManager::HandleDumpEvent(uint32_t moduleId, DumpEnableAction action)
         IDE_LOGE("No registered callback for module %u", moduleId);
         return ADUMP_FAILED;
     }
+
     IDE_LOGI("HandleDumpEvent callbackFunc start for module [%zu]", moduleId);
     IDE_LOGI("HandleDumpEvent callbackFunc switch [%" PRIu64 "]", dumpSwitch);
-    IDE_LOGI("HandleDumpEvent callbackFunc Dump config info: addr=%p, size=%zu", dumpConfigInfo_.data(), dumpConfigInfo_.size());
+    IDE_LOGI(
+        "HandleDumpEvent callbackFunc Dump config info: addr=%p, size=%zu", dumpConfigInfo_.data(),
+        dumpConfigInfo_.size());
     int32_t result = callbackFunc(dumpSwitch, dumpConfigInfo_.data(), dumpConfigInfo_.size());
     IDE_LOGI("callbackFunc returned: %d", result);
     return result;
@@ -570,14 +888,19 @@ void DumpManager::Reset()
     exceptionDumper_.Reset();
 }
 
-bool DumpManager::GetKFCInitStatus()
+bool DumpManager::GetKFCInitStatus() { return isKFCInit_; }
+
+void DumpManager::SetKFCInitStatus(bool status) { isKFCInit_ = status; }
+#endif
+
+int32_t DumpManager::RegisterExceptionDumpCallback(ExceptionDumpCallback callback)
 {
-    return isKFCInit_;
+    return exceptionDumper_.RegisterExceptionDumpCallback(callback);
 }
 
-void DumpManager::SetKFCInitStatus(bool status)
+int32_t DumpManager::UnregisterExceptionDumpCallback(ExceptionDumpCallback callback)
 {
-    isKFCInit_ = status;
+    return exceptionDumper_.UnregisterExceptionDumpCallback(callback);
 }
-#endif
-}  // namespace Adx
+
+} // namespace Adx

@@ -9,21 +9,17 @@
 # -----------------------------------------------------------------------------------------------------------
 
 add_custom_target(copy_acl_headers_and_libs)
-if (BUILD_WITH_INSTALLED_DEPENDENCY_CANN_PKG AND NOT EXISTS "${CMAKE_BINARY_DIR}/include_acl")
+if (ENABLE_OPEN_SRC AND NOT EXISTS "${CMAKE_BINARY_DIR}/include_acl")
     include(ExternalProject)
     set(ACL_DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/download")
-    set(ACL_SOURCE_DIR "${CMAKE_BINARY_DIR}/acl")
+    set(ACL_SOURCE_DIR "${CMAKE_BINARY_DIR}/acl_compat")
 
-    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" ARCH_LOW)
-    if(ARCH_LOW MATCHES "x86_64|amd64")
-        set(TARGET_ARCH "x86_64")
-    elseif(ARCH_LOW MATCHES "aarch64|arm64")
-        set(TARGET_ARCH "aarch64")
+    file(GLOB LOCAL_TAR_FILE "${CANN_3RD_LIB_PATH}/acl-compat_*_linux-${CMAKE_HOST_SYSTEM_PROCESSOR}.tar.gz")
+    if (LOCAL_TAR_FILE)
+        list(GET LOCAL_TAR_FILE -1 REQ_URL)
     else()
-        message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+        set(REQ_URL "https://cann-3rd.obs.cn-north-4.myhuaweicloud.com/cann/acl-compat/acl-compat_9.1.0_linux-${TARGET_ARCH}.tar.gz")
     endif()
-
-    set(REQ_URL "https://mirrors.huaweicloud.com/artifactory/cann-run/8.5.0/inner/${TARGET_ARCH}/acl-compat_8.5.0_linux-${TARGET_ARCH}.tar.gz")
     include(ExternalProject)
     ExternalProject_Add(acl_compat_tar
             URL ${REQ_URL}
@@ -34,10 +30,11 @@ if (BUILD_WITH_INSTALLED_DEPENDENCY_CANN_PKG AND NOT EXISTS "${CMAKE_BINARY_DIR}
             BUILD_COMMAND ""
             INSTALL_COMMAND ""
             UPDATE_COMMAND ""
+            EXCLUDE_FROM_ALL TRUE
     )
     set(DST_LIB_DIR "${CMAKE_BINARY_DIR}/lib_acl")
     set(DST_INCLUDE_DIR "${CMAKE_BINARY_DIR}/include_acl")
-    add_custom_target(_copy_acl_headers_and_libs ALL
+    add_custom_target(_copy_acl_headers_and_libs
         COMMAND ${CMAKE_COMMAND} -E make_directory "${DST_LIB_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${ACL_SOURCE_DIR}/lib64" "${DST_LIB_DIR}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${DST_INCLUDE_DIR}"

@@ -22,20 +22,17 @@ enum HostTimerHandlerTag {
     PROF_HOST_SYS_CALL = 0,
     PROF_HOST_SYS_PTHREAD,
     PROF_HOST_SYS_DISK,
+    PROF_HOST_CCA_MS,
     PROF_HOST_MAX_TAG
 };
 
-static const std::string PROF_HOST_TOOL_NAME[PROF_HOST_MAX_TAG] = {
-    "perf",
-    "ltrace",
-    "iotop"
-};
+static const std::string PROF_HOST_TOOL_NAME[PROF_HOST_MAX_TAG] = {"perf", "ltrace", "iotop", "cca"};
+
+static const std::string PROF_HOST_PROCESS_CMD[PROF_HOST_MAX_TAG] = {
+    "perf trace -T --syscalls", "ltrace -ttt -T -e pthread_", "iotop -b -d", "cca-ms-collector -freq "};
 
 const std::string PROF_HOST_OUTDATA[PROF_HOST_MAX_TAG] = {
-    "data/host_syscall.data",
-    "data/host_pthreadcall.data",
-    "data/host_disk.data"
-};
+    "data/host_syscall.data", "data/host_pthreadcall.data", "data/host_disk.data", "data/"};
 
 struct ProfHostWriteDoneInfo {
     std::string fileSize;
@@ -48,9 +45,7 @@ constexpr uint32_t PROC_HOST_PROC_DATA_BUF_SIZE = (1 << 13); // 1 << 13  means 8
 // task interface
 class ProfHostDataBase : public ICollectionJob {
 public:
-    ProfHostDataBase() : sampleIntervalNs_(0)
-    {
-    }
+    ProfHostDataBase() : sampleIntervalNs_(0) {}
     ~ProfHostDataBase() override {}
     int32_t Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg) override;
     int32_t Uninit() override;
@@ -69,10 +64,7 @@ public:
     int32_t Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg) override;
     int32_t Process() override;
     int32_t Uninit() override;
-    bool IsGlobalJobLevel() override
-    {
-        return true;
-    }
+    bool IsGlobalJobLevel() override { return true; }
 };
 
 class ProfHostMemJob : public ProfHostDataBase {
@@ -82,10 +74,7 @@ public:
     int32_t Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg) override;
     int32_t Process() override;
     int32_t Uninit() override;
-    bool IsGlobalJobLevel() override
-    {
-        return true;
-    }
+    bool IsGlobalJobLevel() override { return true; }
 };
 
 class ProfHostAllPidJob : public ProfHostDataBase {
@@ -95,10 +84,8 @@ public:
     int32_t Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg) override;
     int32_t Process() override;
     int32_t Uninit() override;
-    bool IsGlobalJobLevel() override
-    {
-        return true;
-    }
+    bool IsGlobalJobLevel() override { return true; }
+
 private:
     TimerHandlerTag tag_ = PROF_NONE;
 };
@@ -110,19 +97,16 @@ public:
     int32_t Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg) override;
     int32_t Process() override;
     int32_t Uninit() override;
-    bool IsGlobalJobLevel() override
-    {
-        return true;
-    }
+    bool IsGlobalJobLevel() override { return true; }
 };
 
 class ProfHostService : public analysis::dvvp::common::thread::Thread {
 public:
     ProfHostService();
     ~ProfHostService() override;
+
 public:
-    int32_t Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg,
-                const HostTimerHandlerTag hostTimerTag);
+    int32_t Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg, const HostTimerHandlerTag hostTimerTag);
     int32_t Process();
     int32_t Uninit();
     int32_t Start() override;
@@ -136,13 +120,14 @@ protected:
     volatile bool isStarted_{false};
 
 private:
-    void Run(const struct error_message::Context &errorContext) override;
+    void Run(const error_message::ErrorManagerContext& errorContext) override;
     int32_t Handler();
     void StoreData() const;
-    int32_t GetCollectSysCallsCmd(int32_t pid, std::string &profHostCmd);
-    int32_t GetCollectPthreadsCmd(int32_t pid, std::string &profHostCmd);
-    int32_t GetCollectIOTopCmd(int32_t pid, std::string &profHostCmd);
-    int32_t GetCmdStr(int32_t hostSysPid, std::string &profHostCmd);
+    int32_t GetCollectSysCallsCmd(int32_t pid, std::string& profHostCmd);
+    int32_t GetCollectPthreadsCmd(int32_t pid, std::string& profHostCmd);
+    int32_t GetCollectIOTopCmd(int32_t pid, std::string& profHostCmd);
+    int32_t GetCollectCcaMSCmd(int32_t pid, std::string& profHostCmd);
+    int32_t GetCmdStr(int32_t hostSysPid, std::string& profHostCmd);
     int32_t CollectToolIsRun();
     int32_t WaitCollectToolStart();
     int32_t WaitCollectToolEnd();
@@ -196,5 +181,19 @@ public:
 private:
     SHARED_PTR_ALIA<ProfHostService> profHostService_{nullptr};
 };
-}}}
+
+class ProfHostCcaMsJob : public ProfHostDataBase {
+public:
+    ProfHostCcaMsJob();
+    ~ProfHostCcaMsJob() override;
+    int32_t Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg) override;
+    int32_t Process() override;
+    int32_t Uninit() override;
+
+private:
+    SHARED_PTR_ALIA<ProfHostService> profHostService_{nullptr};
+};
+} // namespace JobWrapper
+} // namespace Dvvp
+} // namespace Analysis
 #endif

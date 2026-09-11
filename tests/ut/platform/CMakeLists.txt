@@ -1,6 +1,7 @@
 set(CMAKE_CXX_STANDARD 14)
 
 file(GLOB FE_SRC_CPP_1 RELATIVE ${CMAKE_CURRENT_LIST_DIR}
+        "${TOP_DIR}/src/platform/acl_platform.cpp"
         "${TOP_DIR}/src/platform/platform_info.cpp"
         "${TOP_DIR}/src/platform/platform_infos_def.cpp"
         "${TOP_DIR}/src/platform/platform_infos_impl.cpp"
@@ -17,17 +18,11 @@ set_target_properties(platform_llt
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 target_include_directories(platform_llt PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../inc
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../graphengine/inc
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../metadef/inc
-        ${CMAKE_CURRENT_LIST_DIR}/../../../src/platform/inc
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../metadef/inc/common
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../inc/external
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../metadef/inc/external
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../metadef/inc/external/platform
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../graphengine/inc/external
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../inc/toolchain
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../metadef/graph
+        ${TOP_DIR}/include/dfx/base
+        ${TOP_DIR}/include/external
+        ${TOP_DIR}/pkg_inc
+        ${TOP_DIR}/pkg_inc/base
+        ${CMAKE_BINARY_DIR}/proto/platform_infos_proto
 )
 
 target_compile_definitions(platform_llt PRIVATE
@@ -64,8 +59,8 @@ target_link_directories(intf_ut_pub INTERFACE
 )
 
 target_link_libraries(intf_ut_pub INTERFACE
-    GTest::gtest
-    ${OPEN_SOURCE_DIR}/mockcpp/lib/libmockcpp.a
+    GTestShared::gtest
+    mockcpp
     -lpthread
     $<$<BOOL:${ENABLE_GCOV}>:-lgcov>
 )
@@ -73,12 +68,10 @@ target_link_libraries(intf_ut_pub INTERFACE
 target_link_libraries(platform_llt PRIVATE
         $<BUILD_INTERFACE:intf_ut_pub>
         -Wl,--no-as-needed
-        c_sec
         -Wl,--no-as-needed
         -ldl
         ascend_protobuf
 )
-
 
 add_library(platform_llt_tiling SHARED
         ${FE_SRC_CPP_1}
@@ -90,17 +83,11 @@ set_target_properties(platform_llt_tiling
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 target_include_directories(platform_llt_tiling PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../inc
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../graphengine/inc
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../metadef/inc
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../src/platform/inc
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../metadef/inc/common
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../inc/external
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../metadef/inc/external
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../metadef/inc/external/platform
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../graphengine/inc/external
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../inc/toolchain
-        ${CMAKE_CURRENT_LIST_DIR}/../../../../metadef/graph
+        ${TOP_DIR}/include/dfx/base
+        ${TOP_DIR}/include/external
+        ${TOP_DIR}/pkg_inc
+        ${TOP_DIR}/pkg_inc/base
+        ${CMAKE_BINARY_DIR}/proto/platform_infos_proto
 )
 
 target_compile_definitions(platform_llt_tiling PRIVATE
@@ -113,14 +100,15 @@ target_compile_options(platform_llt_tiling PRIVATE
         -D_GLIBCXX_USE_CXX11_ABI=0)
 
 target_link_libraries(platform_llt_tiling PRIVATE
-#       $<BUILD_INTERFACE:intf_llt_pub_no_asan>
         -Wl,--no-as-needed
-        c_sec
         -Wl,--no-as-needed
         -ldl
         ascend_protobuf
 )
 
+add_dependencies(platform_llt platform_infos_proto)
+
+add_dependencies(platform_llt_tiling platform_infos_proto)
 
 set(INSTALL_BASE_DIR "")
 set(INSTALL_INCLUDE_DIR include)

@@ -43,11 +43,11 @@ int32_t MsprofTxReporter::UnInit()
     }
 
     isInit_ = false;
-    MSPROF_LOGI("[UnInit]ReporetCallback UnInit success.");
+    MSPROF_LOGI("[UnInit]ReporterCallback UnInit success.");
     return PROFILING_SUCCESS;
 }
 
-int32_t MsprofTxReporter::Report(MsprofTxInfo &data) const
+int32_t MsprofTxReporter::Report(MsprofTxInfo& data) const
 {
     if (reporterCallback_ == nullptr) {
         MSPROF_LOGE("[TxReport]ReporterCallback_ is nullptr!");
@@ -68,9 +68,6 @@ int32_t MsprofTxReporter::Report(MsprofTxInfo &data) const
     return reporterCallback_(1, &info, sizeof(info));
 }
 
-void MsprofTxReporter::SetReporterCallback(const ProfAdditionalBufPushCallback func)
-{
-    reporterCallback_ = func;
-}
+void MsprofTxReporter::SetReporterCallback(const ProfAdditionalBufPushCallback func) { reporterCallback_ = func; }
 } // namespace MsprofTx
 } // namespace Msprof

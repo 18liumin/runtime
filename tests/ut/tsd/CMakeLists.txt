@@ -1,0 +1,46 @@
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+set(TSD_SRC_PATH
+    ${TOP_DIR}/src/tsd
+)
+
+add_library(intf_tsd_llt_pub INTERFACE)
+target_compile_definitions(intf_tsd_llt_pub INTERFACE
+  _GLIBCXX_USE_CXX11_ABI=0
+)
+target_compile_options(intf_tsd_llt_pub INTERFACE
+  $<$<COMPILE_LANGUAGE:CXX>:-std=c++17>
+  -fpermissive
+  -Wall
+  $<$<BOOL:${ENABLE_GCOV}>:-fprofile-arcs -ftest-coverage>
+  $<$<BOOL:${ENABLE_ASAN}>:-fsanitize=address -fno-omit-frame-pointer -static-libasan -fsanitize=undefined -static-libubsan -fsanitize=leak -static-libtsan>
+  $<$<STREQUAL: ${CMAKE_SYSTEM_PROCESSOR}, aarch64>:-falign-functions=32>
+  -fno-inline
+)
+target_link_options(intf_tsd_llt_pub INTERFACE
+  $<$<BOOL:${ENABLE_GCOV}>:-fprofile-arcs -ftest-coverage>
+  $<$<BOOL:${ENABLE_ASAN}>:-fsanitize=address -static-libasan -fsanitize=undefined  -static-libubsan -fsanitize=leak -static-libtsan>
+
+)
+target_link_libraries(intf_tsd_llt_pub INTERFACE
+    GTestShared::gtest
+    mockcpp
+)
+
+add_subdirectory(tsdclient)
+add_subdirectory(stub_external_deps)
+# 编译 tsd_client_utest 时连带编译 stub_external_deps_utest，
+# 使流水线命令 --target=tsd_client_utest 也能覆盖桩文件 UT
+add_dependencies(tsd_client_utest stub_external_deps_utest)
+set(TSD_UT_TARGET
+  tsd_client_utest
+  stub_external_deps_utest
+)
+add_custom_target(tsd_ut DEPENDS ${TSD_UT_TARGET})

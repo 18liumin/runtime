@@ -1,3 +1,4 @@
+#!/bin/bash
 # -----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2025 Huawei Technologies Co., Ltd.
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
@@ -7,6 +8,13 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
+
+# 本脚本通常以 source 方式加载，记录调用方原始 errexit 状态，避免 set -e 泄漏到调用方 shell。
+case "$-" in
+    *e*) __setenv_errexit_was_set="y" ;;
+    *) __setenv_errexit_was_set="n" ;;
+esac
+set -e
 
 append_env() {
     local name="$1"
@@ -54,15 +62,11 @@ EOF
 }
 
 setenv_main() {
-    local version_dirpath install_dirpath ld_library_path path driver_install_path_param dep_hal_path
+    local version_dirpath install_dirpath my_ld_library_path my_path driver_install_path_param dep_hal_path
     local dep_hal_name="libascend_hal.so"
     local dep_info_file="/etc/ascend_install.info"
     local is_install_driver="n"
     local architecture remove_regex
-    if [ "$BASH_SOURCE" = "" ]; then
-        echo "error: BASH_SOURCE is empty, Please confirm that the current shell is bash."
-        return 1
-    fi
 
     version_dirpath="$(dirname "$(readlink -f "$BASH_SOURCE")")"
     install_dirpath="$(dirname "$version_dirpath")"
@@ -73,13 +77,13 @@ setenv_main() {
     remove_env "PYTHONPATH" "$remove_regex"
 
     # 判断driver包是否存在
-    ld_library_path="$LD_LIBRARY_PATH"
-    if [ ! -z "$ld_library_path" ]; then
-        ld_library_path="$(echo "$ld_library_path" | tr ':' ' ')"
-        for path in ${ld_library_path}; do
-            if echo "$path" | grep -q "driver"; then
-                if [ -d "$path" ]; then
-                    dep_hal_path="$(find "$path" -name "$dep_hal_name" 2> /dev/null)"
+    my_ld_library_path="$LD_LIBRARY_PATH"
+    if [ ! -z "$my_ld_library_path" ]; then
+        my_ld_library_path="$(echo "$my_ld_library_path" | tr ':' ' ')"
+        for my_path in ${my_ld_library_path}; do
+            if echo "$my_path" | grep -q "driver"; then
+                if [ -d "$my_path" ]; then
+                    dep_hal_path="$(find "$my_path" -name "$dep_hal_name" 2> /dev/null || true)"
                     if [ ! -z "${dep_hal_path}" ]; then
                         is_install_driver="y"
                     fi
@@ -91,9 +95,9 @@ setenv_main() {
     if [ -f "$dep_info_file" ]; then
         driver_install_path_param="$(grep -iw driver_install_path_param $dep_info_file | cut --only-delimited -d"=" -f2-)"
         if [ ! -z "${driver_install_path_param}" ]; then
-            path="${driver_install_path_param}/driver"
-            if [ -d "$path" ]; then
-                dep_hal_path="$(find "$path" -name "$dep_hal_name" 2> /dev/null)"
+            my_path="${driver_install_path_param}/driver/lib64"
+            if [ -d "$my_path" ]; then
+                dep_hal_path="$(find "$my_path" -name "$dep_hal_name" 2> /dev/null || true)"
                 if [ ! -z "${dep_hal_path}" ]; then
                     is_install_driver="y"
                 fi
@@ -120,7 +124,7 @@ setenv_main() {
     fi
 
     prepend_env "PATH" "$version_dirpath/bin:$version_dirpath/tools/ccec_compiler/bin:$version_dirpath/tools/profiler/bin:$version_dirpath/tools/ascend_system_advisor/asys:$version_dirpath/tools/show_kernel_debug_data:$version_dirpath/tools/msobjdump"
-    prepend_env "LD_LIBRARY_PATH" "$version_dirpath/lib64:$version_dirpath/lib64/plugin/opskernel:$version_dirpath/lib64/plugin/nnengine:$version_dirpath/opp/built-in/op_impl/ai_core/tbe/op_tiling/lib/linux/$architecture:$version_dirpath/tools/aml/lib64:$version_dirpath/tools/aml/lib64/plugin:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver"
+    prepend_env "LD_LIBRARY_PATH" "$version_dirpath/lib64:$version_dirpath/lib64/plugin/opskernel:$version_dirpath/lib64/plugin/nnengine:$version_dirpath/opp/built-in/op_impl/ai_core/tbe/op_tiling/lib/linux/$architecture:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver"
     # make compatibility with older versions of behavior
     export PYTHONPATH="$version_dirpath/python/site-packages:$version_dirpath/opp/built-in/op_impl/ai_core/tbe:$PYTHONPATH"
 
@@ -138,3 +142,9 @@ setenv_main() {
 }
 
 setenv_main "$@"
+
+# 恢复调用方原始 errexit 状态，避免污染 source 本脚本的 shell。
+if [ "$__setenv_errexit_was_set" = "n" ]; then
+    set +e
+fi
+unset __setenv_errexit_was_set

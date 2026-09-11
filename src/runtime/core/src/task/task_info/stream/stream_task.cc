@@ -1,0 +1,387 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include "thread_local_container.hpp"
+#include "inner_thread_local.hpp"
+#include "runtime_task_manager.h"
+#include "stream_sqcq_manage.hpp"
+#include "stream_task.h"
+#include "stub_task.hpp"
+#include "error_message_manage.hpp"
+#include "task.hpp"
+
+namespace cce {
+namespace runtime {
+
+TIMESTAMP_EXTERN(rtStreamCreate_drvDeviceGetBareTgid);
+
+rtError_t InitFuncCallParaForStreamActiveTask(
+    TaskInfo* taskInfo, rtStarsStreamActiveFcPara_t& fcPara, const rtChipType_t chipType)
+{
+    StreamActiveTaskInfo* streamActiveTask = &(taskInfo->u.streamactiveTask);
+    const uint32_t activeStreamSqId = streamActiveTask->activeStreamSqId;
+    uint16_t* const execTimesSvm = streamActiveTask->activeStream->GetExecutedTimesSvm();
+    fcPara.streamExecTimesAddr = RtPtrToValue<uint16_t*>(execTimesSvm);
+    fcPara.sqId = activeStreamSqId;
+    fcPara.dfxAddr = RtPtrToValue<void*>(streamActiveTask->dfxPtr);
+
+    RT_LOG(RT_LOG_INFO, "Active streamId=%u,active sqId=%u", streamActiveTask->activeStreamId, activeStreamSqId);
+    const uint64_t sqVirtualAddr = streamActiveTask->activeStream->GetSqRegVirtualAddr();
+
+    Driver* const driver = taskInfo->stream->Device_()->Driver_();
+    DevProperties props;
+    rtError_t error = GET_DEV_PROPERTIES(chipType, props);
+    COND_RETURN_ERROR_MSG_INNER(
+        error != RT_ERROR_NONE, RT_ERROR_INVALID_VALUE, "GetDevProperties failed, chip type=%d.", chipType);
+    if (props.isSupportInitFuncCallPara) {
+        fcPara.rtSqFsmStateAddr = props.rtsqVirtualAddr.rtSqFsmStateAddr;
+        fcPara.rtSqEnableAddr = props.rtsqVirtualAddr.rtSqEnableAddr + sqVirtualAddr;
+        fcPara.rtSqTailAddr = props.rtsqVirtualAddr.rtSqTailAddr + sqVirtualAddr;
+        fcPara.rtSqHeadAddr = props.rtsqVirtualAddr.rtSqHeadAddr + sqVirtualAddr;
+
+        if (props.rtsqFsmStateAddrCalMethod == RtsqFsmStateAddrCalMethod::FSM_ADDR_CALCULATE_BY_DEVICE_INFO) {
+            int64_t chipId;
+            int64_t dieId;
+            const uint32_t deviceId = streamActiveTask->activeStream->Device_()->Id_();
+            error = driver->GetDevInfo(deviceId, MODULE_TYPE_SYSTEM, INFO_TYPE_PHY_CHIP_ID, &chipId);
+            ERROR_RETURN_MSG_INNER(error, "Failed to get chip id, device_id=%u.", deviceId);
+            error = driver->GetDevInfo(deviceId, MODULE_TYPE_SYSTEM, INFO_TYPE_PHY_DIE_ID, &dieId);
+            ERROR_RETURN_MSG_INNER(error, "Failed to get die id, device_id=%u.", deviceId);
+
+            const uint64_t chipAddr = taskInfo->stream->Device_()->GetChipAddr();
+            const uint64_t chipOffset = taskInfo->stream->Device_()->GetChipOffset();
+            const uint64_t dieOffset = taskInfo->stream->Device_()->GetDieOffset();
+            fcPara.rtSqFsmStateAddr = props.rtsqVirtualAddr.rtSqFsmStateAddr +
+                                      (chipOffset * static_cast<uint64_t>(chipId)) +
+                                      (dieOffset * static_cast<uint64_t>(dieId)) + chipAddr;
+
+            RT_LOG(
+                RT_LOG_DEBUG, "Get device info ok, deviceId=%u, chipId=%" PRId64 ", dieId=%" PRId64 "fsm=0x%llx",
+                deviceId, chipId, dieId, fcPara.rtSqFsmStateAddr);
+        }
+
+        if (props.starsBaseAddrMethod == StarsBaseAddrMethod::STARS_BASE_CALCULATE_BY_DRIVER) {
+            const uint64_t baseAddr = taskInfo->stream->Device_()->GetStarsRegBaseAddr();
+            if (baseAddr == 0ULL) {
+                RT_LOG(
+                    RT_LOG_ERROR, "invalid device_id, physic chip_id=%u, die_id=%u, stream_id=%d.",
+                    taskInfo->stream->Device_()->Id_(), taskInfo->stream->Device_()->GetPhyChipId(),
+                    taskInfo->stream->Device_()->GetPhyDieId(), taskInfo->stream->Id_());
+                return RT_ERROR_DEVICE_INVALID;
+            }
+            fcPara.rtSqFsmStateAddr = props.rtsqVirtualAddr.rtSqFsmStateAddr + baseAddr;
+            RT_LOG(RT_LOG_INFO, "active stream_id=%u, rtSqFsmState=0x%llx", activeStreamSqId, fcPara.rtSqFsmStateAddr);
+        }
+
+        if (props.rtSqEnableAddrCalMethod == RtSqEnableAddrCalMethod::RT_SQ_ENABLE_ADDR_CAL_BY_TRUE_SQID) {
+            fcPara.rtSqEnableAddr = props.rtsqVirtualAddr.rtSqEnableAddr +
+                                    RT_SIMPLE_SQ_OFFSET_1000 * static_cast<uint64_t>(activeStreamSqId);
+            fcPara.rtSqTailAddr =
+                props.rtsqVirtualAddr.rtSqTailAddr + RT_SIMPLE_SQ_OFFSET_1000 * static_cast<uint64_t>(activeStreamSqId);
+            fcPara.rtSqHeadAddr =
+                props.rtsqVirtualAddr.rtSqHeadAddr + RT_SIMPLE_SQ_OFFSET_1000 * static_cast<uint64_t>(activeStreamSqId);
+        }
+    } else {
+        RT_LOG(RT_LOG_DEBUG, "current chipType[%d] does not support init func call para", chipType);
+        return RT_ERROR_FEATURE_NOT_SUPPORT;
+    }
+    return RT_ERROR_NONE;
+}
+
+#if F_DESC("CreateStreamTask")
+rtError_t CreateStreamTaskInit(TaskInfo* const taskInfo, const uint32_t flag)
+{
+    CreateStreamTaskInfo* createStreamTaskInfo = &(taskInfo->u.createStreamTaskInfo);
+    TaskCommonInfoInit(taskInfo);
+
+    taskInfo->type = TS_TASK_TYPE_CREATE_STREAM;
+    taskInfo->typeName = "CREATE_STREAM";
+    createStreamTaskInfo->streamAttr = flag;
+    return RT_ERROR_NONE;
+}
+
+void ToCommandBodyForCreateStreamTask(TaskInfo* const taskInfo, rtCommand_t* const command)
+{
+    uint32_t pid;
+    uint8_t groupId;
+    CreateStreamTaskInfo* createStreamTaskInfo = &(taskInfo->u.createStreamTaskInfo);
+    Stream* const stream = taskInfo->stream;
+
+    TIMESTAMP_BEGIN(rtStreamCreate_drvDeviceGetBareTgid);
+    Driver* const dev = stream->Device_()->Driver_();
+    (void)dev->DeviceGetBareTgid(&pid);
+    TIMESTAMP_END(rtStreamCreate_drvDeviceGetBareTgid);
+    command->u.creatStream.pid = pid;
+    command->u.creatStream.vfId = 0U;
+    command->u.creatStream.vStreamId = 0U;
+    command->u.creatStream.runtimeVersion = RUNTIME_BUILD_VERSION;
+    command->u.creatStream.supportLogToHost = stream->Device_()->GetTsLogToHostFlag();
+    if (Runtime::Instance()->GetDisableThread()) {
+        command->u.creatStream.shareLogicCqId = static_cast<uint16_t>(stream->Device_()->GetShareLogicCqId());
+    } else {
+        command->u.creatStream.shareLogicCqId = 0U;
+    }
+
+    command->u.creatStream.l2BaseVaddr = RtPtrToValue<void*>(stream->L2BaseVaddr());
+    command->u.creatStream.asid = static_cast<uint16_t>((stream->Device_()->GetTTBR_()) >> 48U); // shift 48 bit
+    command->u.creatStream.asid_baddr = static_cast<uint64_t>((stream->Device_()->GetTTBR_()) & (0x0000FFFFFFFFFFFFU));
+    command->u.creatStream.SMMU_subStreamID = static_cast<uint16_t>(stream->Device_()->GetSSID_());
+    command->u.creatStream.SQ_id = 0U;
+    command->u.creatStream.priority = static_cast<uint8_t>(stream->GetPriority());
+    command->u.creatStream.threadId = taskInfo->tid;
+    command->u.creatStream.streamAttr = static_cast<uint8_t>(createStreamTaskInfo->streamAttr);
+    command->u.creatStream.group_id = stream->GetGroupId();
+    command->u.creatStream.deviceId = stream->Device_()->Id_();
+
+    if (stream->Device_()->IsSupportFeature(RtOptionalFeatureType::RT_FEATURE_DEVICE_GROUP_THREAD_LOCAL)) {
+        const uint8_t tmp = InnerThreadLocalContainer::GetGroupId();
+        groupId = (tmp != UNINIT_GROUP_ID) ? tmp : stream->Device_()->GetGroupId();
+    } else {
+        groupId = stream->Device_()->GetGroupId();
+    }
+
+    command->u.creatStream.group_id = groupId;
+    RT_LOG(
+        RT_LOG_DEBUG,
+        "bare tgid=%u, user pid=%d, l2BaseVaddr=%#" PRIx64 ", asid=%u, SMMU_subStreamID=%u,"
+        " runtimeVersion=%u, thread_id=%u, group_id=%u, deviceId=%u,streamId:%d",
+        pid, mmGetPid(), command->u.creatStream.l2BaseVaddr, static_cast<uint32_t>(command->u.creatStream.asid),
+        static_cast<uint32_t>(command->u.creatStream.SMMU_subStreamID),
+        static_cast<uint32_t>(command->u.creatStream.runtimeVersion), command->u.creatStream.threadId,
+        static_cast<uint32_t>(command->u.creatStream.group_id), command->u.creatStream.deviceId, stream->Id_());
+}
+
+#endif
+
+#if F_DESC("SetSqLockUnlockTask")
+rtError_t SqLockUnlockTaskInit(TaskInfo* taskInfo, const bool isLock)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->typeName = isLock ? "SQ_LOCK" : "SQ_UNLOCK";
+    taskInfo->type = TS_TASK_TYPE_SET_SQ_LOCK_UNLOCK;
+    taskInfo->u.sqLockUnlockTask.sqLock = isLock ? 1U : 0U;
+    taskInfo->u.sqLockUnlockTask.sqUnlock = isLock ? 0U : 1U;
+    return RT_ERROR_NONE;
+}
+#endif
+
+#if F_DESC("ActiveAicpuStreamTask")
+rtError_t ActiveAicpuStreamTaskInit(
+    TaskInfo* taskInfo, const uint64_t argsParam, const uint32_t argsSizeLen, const uint64_t func,
+    const uint32_t kernelTypeId)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->typeName = "ACTIVE_AICPU_STREAM";
+    taskInfo->type = TS_TASK_TYPE_ACTIVE_AICPU_STREAM;
+    taskInfo->u.activeAicpuStreamTask.args = argsParam;
+    taskInfo->u.activeAicpuStreamTask.funcName = func;
+    taskInfo->u.activeAicpuStreamTask.kernelType = kernelTypeId;
+    taskInfo->u.activeAicpuStreamTask.argsSize = argsSizeLen;
+    RT_LOG(
+        RT_LOG_DEBUG, "Create active aicpu stream task,task_id=%u,task_type=%d(%s),stream_id=%d", taskInfo->id,
+        taskInfo->type, taskInfo->typeName, taskInfo->stream->Id_());
+    return RT_ERROR_NONE;
+}
+
+void ToCmdBodyForActiveAicpuStreamTask(TaskInfo* const taskInfo, rtCommand_t* const command)
+{
+    command->u.kernelTask.priority = taskInfo->stream->Priority();
+    command->u.kernelTask.L2_size = 0U;
+    command->u.kernelTask.L2PreloadCtrl = 0UL;
+    command->u.kernelTask.funcPtr = taskInfo->u.activeAicpuStreamTask.funcName;
+    command->u.kernelTask.funcDesc = taskInfo->u.activeAicpuStreamTask.args;
+    command->u.kernelTask.literalSrcAddr = 0UL;
+    command->u.kernelTask.literalDstBase = taskInfo->u.activeAicpuStreamTask.kernelType;
+    command->u.kernelTask.literalSize = taskInfo->u.activeAicpuStreamTask.argsSize;
+    command->u.kernelTask.blockDim = 1U;
+    command->u.kernelTask.l2PreloadVirAddr = MAX_UINT32_NUM >> 6U; // move right 6 bits
+}
+
+#endif
+
+#if F_DESC("OverflowSwitchSetTask")
+
+rtError_t OverflowSwitchSetTaskInit(TaskInfo* taskInfo, Stream* const stm, const uint32_t flags)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->typeName = "OVERFLOW_SWTICH_SET";
+    taskInfo->type = TS_TASK_TYPE_SET_OVERFLOW_SWITCH;
+    taskInfo->u.overflowSwitchSetTask.targetStm = stm;
+    taskInfo->u.overflowSwitchSetTask.switchFlag = (flags == 0U) ? false : true;
+    return RT_ERROR_NONE;
+}
+#endif
+
+#if F_DESC("StreamTagSetTask")
+rtError_t StreamTagSetTaskInit(TaskInfo* taskInfo, Stream* const stm, const uint32_t geOpTag)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->typeName = "STREAM_TAG_SET";
+    taskInfo->type = TS_TASK_TYPE_SET_STREAM_GE_OP_TAG;
+    taskInfo->isNeedStreamSync = true;
+
+    taskInfo->u.stmTagSetTask.targetStm = stm;
+    taskInfo->u.stmTagSetTask.geOpTag = geOpTag;
+    return RT_ERROR_NONE;
+}
+#endif
+
+#if F_DESC("SetStreamModeTask")
+rtError_t SetStreamModeTaskInit(TaskInfo* taskInfo, const uint64_t mode)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->typeName = "SET_STREAM_MODE";
+    taskInfo->type = TS_TASK_TYPE_SET_STREAM_MODE;
+    taskInfo->u.setStmModeTask.mode = mode;
+    return RT_ERROR_NONE;
+}
+
+void ToCmdBodyForSetStreamModeTask(TaskInfo* taskInfo, rtCommand_t* const command)
+{
+    command->u.setStreamModeTask.mode = taskInfo->u.setStmModeTask.mode;
+}
+#endif
+
+#if F_DESC("CallbackLaunchTask")
+rtError_t CallbackLaunchTaskInit(
+    TaskInfo* taskInfo, const rtCallback_t callBackFunction, void* const functionData, const bool isBlockFlag,
+    const int32_t evtId)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->typeName = "HOSTFUNC_CALLBACK";
+    taskInfo->type = TS_TASK_TYPE_HOSTFUNC_CALLBACK;
+    taskInfo->u.callbackLaunchTask.callBackFunc = callBackFunction;
+    taskInfo->u.callbackLaunchTask.fnData = functionData;
+    taskInfo->u.callbackLaunchTask.isBlock = isBlockFlag;
+    taskInfo->u.callbackLaunchTask.eventId = evtId;
+    return RT_ERROR_NONE;
+}
+
+void ToCmdBodyForCallbackLaunchTask(TaskInfo* taskInfo, rtCommand_t* const command)
+{
+    command->u.hostFuncCBTask.hostFuncCBPtr = RtPtrToValue<rtCallback_t>(taskInfo->u.callbackLaunchTask.callBackFunc);
+    command->u.hostFuncCBTask.fnDataPtr = RtPtrToValue<void*>(taskInfo->u.callbackLaunchTask.fnData);
+    command->u.hostFuncCBTask.cbRptCqid = static_cast<uint32_t>(taskInfo->stream->GetCbRptCqid());
+    command->u.hostFuncCBTask.isBlock = static_cast<uint8_t>(taskInfo->u.callbackLaunchTask.isBlock);
+}
+#endif
+
+#if F_DESC("SqeUpdateTask")
+rtError_t SqeUpdateTaskInit(TaskInfo* taskInfo, TaskInfo* const updateTask, void* const updateArgHandle)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_TASK_SQE_UPDATE;
+    taskInfo->typeName = "TASK_SQE_UPDATE";
+    AicTaskInfo* aicTaskInfo = &(updateTask->u.aicTaskInfo);
+    taskInfo->u.sqeUpdateTask.funcPtr = aicTaskInfo->funcAddr;
+    taskInfo->u.sqeUpdateTask.funcDesc = RtPtrToValue(aicTaskInfo->comm.args);
+    taskInfo->u.sqeUpdateTask.literalSrcAddr = static_cast<uint64_t>(aicTaskInfo->blockDimOffset);
+    taskInfo->u.sqeUpdateTask.literalSize = 0;
+    taskInfo->u.sqeUpdateTask.literalSize |= static_cast<uint32_t>(aicTaskInfo->infMode);
+    taskInfo->u.sqeUpdateTask.blockDim = aicTaskInfo->comm.dim;
+    taskInfo->u.sqeUpdateTask.desStreamId = updateTask->stream->Id_();
+    taskInfo->u.sqeUpdateTask.desTaskId = updateTask->id;
+    taskInfo->u.sqeUpdateTask.schemMode = aicTaskInfo->schemMode;
+    taskInfo->u.sqeUpdateTask.updateArgHandle = updateArgHandle;
+    return RT_ERROR_NONE;
+}
+
+void ToCommandBodyForSqeUpdateTask(TaskInfo* taskInfo, rtCommand_t* const command)
+{
+    SqeUpdateTaskInfo* sqeUpdateTaskInfo = &(taskInfo->u.sqeUpdateTask);
+    command->u.sqeUpdateTask.funcPtr = sqeUpdateTaskInfo->funcPtr;
+    command->u.sqeUpdateTask.funcDesc = sqeUpdateTaskInfo->funcDesc;
+    command->u.sqeUpdateTask.literalSrcAddr = sqeUpdateTaskInfo->literalSrcAddr;
+    command->u.sqeUpdateTask.literalSize = sqeUpdateTaskInfo->literalSize;
+    command->u.sqeUpdateTask.blockDim = sqeUpdateTaskInfo->blockDim;
+    command->u.sqeUpdateTask.desStreamId = sqeUpdateTaskInfo->desStreamId;
+    command->u.sqeUpdateTask.desTaskId = sqeUpdateTaskInfo->desTaskId;
+    command->u.sqeUpdateTask.schemMode = sqeUpdateTaskInfo->schemMode;
+    return;
+}
+#endif
+
+#if F_DESC("FlipTask")
+void FlipTaskInit(TaskInfo* taskInfo, const uint16_t flipNum, const uint16_t streamId, const uint16_t subType)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_FLIP;
+    taskInfo->typeName = "FLIP_TASK";
+    taskInfo->u.flipTask.flipNumReport = flipNum;
+    taskInfo->u.flipTask.streamId = streamId;
+    taskInfo->u.flipTask.subType = subType;
+    return;
+}
+
+void ToCmdBodyForFlipTask(TaskInfo* const taskInfo, rtCommand_t* const command)
+{
+    command->u.flipTask.flipNumReport = taskInfo->u.flipTask.flipNumReport;
+}
+
+rtError_t SendFlipTaskWithStreamId(Stream* stream)
+{
+    if (!stream->IsSoftwareSqEnable() || !Runtime::Instance()->GetTrackProfFlag()) {
+        RT_LOG(
+            RT_LOG_DEBUG, "TrackProfFlag is false or stream is not in aclgraph scenario, stream_id=%d", stream->Id_());
+        return RT_ERROR_NONE;
+    }
+
+    Device* dev = stream->Device_();
+    NULL_PTR_RETURN(dev, RT_ERROR_DEVICE_NULL);
+    if (!dev->CheckFeatureSupport(TS_FEATURE_FLIP_TASK_WITH_STREAM_ID)) {
+        RT_LOG(RT_LOG_DEBUG, "TS does not support stream destroy flip task, stream_id=%d", stream->Id_());
+        return RT_ERROR_NONE;
+    }
+    Stream* ctrlStream = dev->GetCtrlStream(stream);
+    if (ctrlStream == nullptr) {
+        RT_LOG(RT_LOG_WARNING, "CtrlStream is null, stream_id=%d", stream->Id_());
+        return RT_ERROR_STREAM_NULL;
+    }
+
+    rtError_t errorReason;
+    TaskInfo taskTmp = {};
+    TaskInfo* flipTask =
+        ctrlStream->AllocTask(&taskTmp, TS_TASK_TYPE_FLIP, errorReason, 1U, UpdateTaskFlag::NOT_SUPPORT_AND_SKIP);
+    if (flipTask == nullptr) {
+        RT_LOG(RT_LOG_WARNING, "Alloc flip task on ctrl stream failed for stream_id=%d", stream->Id_());
+        return errorReason;
+    }
+
+    FlipTaskInit(flipTask, RT_MILAN_TASK_ID_MAX, static_cast<uint16_t>(stream->Id_()), RT_FLIP_TASK_STREAM_ID);
+    rtError_t error = dev->SubmitTask(flipTask);
+    if (error != RT_ERROR_NONE) {
+        (void)dev->GetTaskFactory()->Recycle(flipTask);
+        RT_LOG(
+            RT_LOG_WARNING,
+            "Submit destroy flip task on ctrl stream failed, "
+            "stream_id=%d, flipNum=%hu, retCode=%#x",
+            stream->Id_(), flipTask->u.flipTask.flipNumReport, static_cast<uint32_t>(error));
+        return error;
+    }
+    RT_LOG(RT_LOG_INFO, "Task send succ.");
+    error = ctrlStream->Synchronize(false);
+    if (error != RT_ERROR_NONE) {
+        RT_LOG(
+            RT_LOG_WARNING,
+            "Sync ctrl stream after flip task failed, "
+            "stream_id=%d, ctrl_stream_id=%d, retCode=%#x.",
+            stream->Id_(), ctrlStream->Id_(), static_cast<uint32_t>(error));
+        return error;
+    }
+    RT_LOG(
+        RT_LOG_INFO, "sync succ, stream_id=%d, ctrl_stream_id=%d, task_id=%hu, device_id=%u", stream->Id_(),
+        ctrlStream->Id_(), flipTask->id, dev->Id_());
+
+    return RT_ERROR_NONE;
+}
+#endif
+
+} // namespace runtime
+} // namespace cce

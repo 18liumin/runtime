@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <sys/syslog.h>
 #include "mmpa_api.h"
-#include "slog.h"
+#include "dlog_pub.h"
 namespace Adx {
 const int32_t ADX_MODULE_NAME = IDEDD;
 const int32_t MAX_ERRSTR_LEN  = 128;
@@ -45,7 +45,8 @@ inline void AdxLogFlush()
 #define IDE_LOGD(format, ...) do {             \
 } while (0)
 
-#define IDE_LOGI(format, ...) do {             \
+#define IDE_LOGI(format, ...) do {                                                                                  \
+    syslog(LOG_INFO, "[tid:%ld] %s:%d: " format "\n", syscall(SYS_gettid), __FILE__, __LINE__, ##__VA_ARGS__);   \
 } while (0)
 
 #define IDE_LOGW(format, ...) do {                                                                                  \

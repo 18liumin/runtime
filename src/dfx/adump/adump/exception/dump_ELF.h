@@ -22,22 +22,23 @@
 namespace Adx {
 namespace ELF {
 
-#define ASCEND_SHTYPE_GLOBAL                (SHT_LOUSER + 1)
-#define ASCEND_SHTYPE_LOCAL                 (SHT_LOUSER + 2)
-#define ASCEND_SHTYPE_REGS                  (SHT_LOUSER + 3)
-#define ASCEND_SHTYPE_DEVTBL                (SHT_LOUSER + 4)
-#define ASCEND_SHTYPE_AUXINFO_GLOABL        (SHT_LOUSER + 5)
-#define ASCEND_SHTYPE_AUXINFO_LOCAL         (SHT_LOUSER + 6)
-#define ASCEND_SHTYPE_HOST_KERNEL_OBJECT    (SHT_LOUSER + 7)
-#define ASCEND_SHTYPE_FILE_KERNEL_OBJECT    (SHT_LOUSER + 8)
-#define ASCEND_SHTYPE_FILE_KERNEL_JSON      (SHT_LOUSER + 9)
+#define ASCEND_SHTYPE_GLOBAL (SHT_LOUSER + 1)
+#define ASCEND_SHTYPE_LOCAL (SHT_LOUSER + 2)
+#define ASCEND_SHTYPE_REGS (SHT_LOUSER + 3)
+#define ASCEND_SHTYPE_DEVTBL (SHT_LOUSER + 4)
+#define ASCEND_SHTYPE_AUXINFO_GLOABL (SHT_LOUSER + 5)
+#define ASCEND_SHTYPE_AUXINFO_LOCAL (SHT_LOUSER + 6)
+#define ASCEND_SHTYPE_HOST_KERNEL_OBJECT (SHT_LOUSER + 7)
+#define ASCEND_SHTYPE_FILE_KERNEL_OBJECT (SHT_LOUSER + 8)
+#define ASCEND_SHTYPE_FILE_KERNEL_JSON (SHT_LOUSER + 9)
+#define ASCEND_SHTYPE_KERNEL_INFO (SHT_LOUSER + 10)
 
 class Section {
 public:
     explicit Section(Elf64_Word type);
     ~Section() = default;
 
-    void SetData(std::string &data);
+    void SetData(std::string& data);
     void SetAddr(Elf64_Addr addr);
     void SetOffSet(Elf64_Off offset);
     void SetEntSize(Elf64_Word entSize);
@@ -46,14 +47,14 @@ public:
     void SetInfo(Elf64_Word info);
     void SetIndex(uint32_t index);
     uint32_t GetIndex() const;
-    Elf64_Word GetSize() const;
-    void SetAddrAlign(Elf64_Word addrAlign);
-    Elf64_Word GetAddrAlign() const;
-    void Save(std::ofstream &ofs, std::streampos headerPosition);
+    Elf64_Xword GetSize() const;
+    void SetAddrAlign(Elf64_Xword addrAlign);
+    Elf64_Xword GetAddrAlign() const;
+    void Save(std::ofstream& ofs, std::streampos headerPosition);
 
 private:
-    void SaveHeader(std::ofstream &ofs, std::streampos offset);
-    void SaveData(std::ofstream &ofs);
+    void SaveHeader(std::ofstream& ofs, std::streampos offset);
+    void SaveData(std::ofstream& ofs);
 
     Elf64_Shdr header_{};
     std::string data_;
@@ -67,9 +68,9 @@ public:
     DumpELF();
     ~DumpELF() = default;
 
-    SectionPtr AddSection(Elf64_Word type, const std::string &name);
+    SectionPtr AddSection(Elf64_Word type, const std::string& name);
     SectionPtr GetSectionByIndex(uint32_t index) const;
-    void Save(const std::string &filename);
+    void Save(const std::string& filename);
 
 private:
     void CreateMandatorySection();
@@ -77,14 +78,14 @@ private:
     void LayoutSections();
     void LayoutSectionTable();
     void SetSectionHeaderStringTable();
-    bool SaveHeader(std::ofstream &ofs) const;
-    void SaveSections(std::ofstream &ofs);
+    bool SaveHeader(std::ofstream& ofs) const;
+    void SaveSections(std::ofstream& ofs);
 
     Elf64_Ehdr header_{};
     std::vector<SectionPtr> sections_;
     std::stringstream sectionNameStream_;
     std::map<std::string, Elf64_Word> sectionNameTable_;
-    Elf64_Word currentFilePos_{0};
+    Elf64_Off currentFilePos_{0};
 };
 
 } // namespace ELF

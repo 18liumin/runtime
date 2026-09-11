@@ -15,16 +15,7 @@ set(MSPROF_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(INSTALL_LIBRARY_DIR lib)
 set(INSTALL_CONFIG_DIR  ${CMAKE_CURRENT_BINARY_DIR}/lib/cmake)
 
-add_library(msprof_headers INTERFACE)
-
-target_include_directories(msprof_headers INTERFACE
-    $<BUILD_INTERFACE:${MSPROF_DIR}/inc>
-    $<BUILD_INTERFACE:${MSPROF_DIR}/inc/toolchain>
-    $<BUILD_INTERFACE:${MSPROF_DIR}/inc/external>
-    $<INSTALL_INTERFACE:include>
-    $<INSTALL_INTERFACE:include/msprof>
-    $<INSTALL_INTERFACE:include/msprof/toolchain>
-)
+include(msprof_headers.cmake)
 
 add_subdirectory(collector)
 

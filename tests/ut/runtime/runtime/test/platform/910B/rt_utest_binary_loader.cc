@@ -28,22 +28,21 @@
 using namespace testing;
 using namespace cce::runtime;
 
-static bool CreateFile(std::string &fileName, std::string content);
-static void DeleteFile(std::string &fileName);
+static bool CreateFile(std::string& fileName, std::string content);
+static void DeleteFile(std::string& fileName);
 
-std::string binaryTxtFileName("../tests/ut/runtime/runtime/test/data/GatherV3_9e31943a1a48bf81ddff1fc6379e0be3_high_performance.txt");
-std::string binaryFileName("../tests/ut/runtime/runtime/test/data/GatherV3_9e31943a1a48bf81ddff1fc6379e0be3_high_performance.o");
+std::string binaryTxtFileName(
+    "llt/ace/npuruntime/runtime/ut/runtime/test/data/GatherV3_9e31943a1a48bf81ddff1fc6379e0be3_high_performance.txt");
+std::string binaryFileName(
+    "llt/ace/npuruntime/runtime/ut/runtime/test/data/GatherV3_9e31943a1a48bf81ddff1fc6379e0be3_high_performance.o");
 
-class BinaryLoaderTest : public testing::Test
-{
+class BinaryLoaderTest : public testing::Test {
 protected:
     static void SetUpTestCase()
     {
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
+        std::cout << "BinaryLoaderTest test start start." << std::endl;
 
-        std::cout<<"BinaryLoaderTest test start start. disbale=%d. "<<rtInstance->GetDisableThread()<<std::endl;
-
-        // Create GatherV3.o binary file 
+        // Create GatherV3.o binary file
         std::ifstream binaryTxtFile(binaryTxtFileName);
         if (!binaryTxtFile.is_open()) {
             std::cout << "Failed to open file: " << binaryTxtFileName << std::endl;
@@ -75,15 +74,11 @@ protected:
 
     static void TearDownTestCase()
     {
-        std::cout<<"BinaryLoaderTest test start end. "<<std::endl;
+        std::cout << "BinaryLoaderTest test start end. " << std::endl;
         DeleteFile(binaryFileName);
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
     }
 
-    virtual void SetUp()
-    {
-        (void)rtSetDevice(0);
-    }
+    virtual void SetUp() { (void)rtSetDevice(0); }
 
     virtual void TearDown()
     {
@@ -91,7 +86,7 @@ protected:
         rtDeviceReset(0);
     };
 
-    static bool CreateFile(std::string &fileName, std::string content)
+    static bool CreateFile(std::string& fileName, std::string content)
     {
         std::ofstream file(fileName);
         if (!file.is_open()) {
@@ -112,10 +107,7 @@ protected:
         return true;
     }
 
-    static void DeleteFile(std::string &fileName)
-    {
-        std::remove(fileName.c_str());
-    }
+    static void DeleteFile(std::string& fileName) { std::remove(fileName.c_str()); }
 };
 
 TEST_F(BinaryLoaderTest, TestUtilsReadPathEmpty)
@@ -169,8 +161,8 @@ TEST_F(BinaryLoaderTest, TestLoadFromDataWithMetainfoError)
     BinaryLoader binaryLoader(nullptr, 0, nullptr);
 
     MOCKER_CPP(&Program::Register).stubs().will(returnValue(RT_ERROR_NONE));
-    Program * prg = binaryLoader.LoadFromData();
-    EXPECT_EQ(prg, nullptr);
+    Program* prg = binaryLoader.LoadFromData();
+    EXPECT_NE(prg, nullptr);
 }
 
 TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromData_CpuKernel_Success)
@@ -181,89 +173,14 @@ TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromData_CpuKernel_Success)
     option.value.cpuKernelMode = 2;
     cfg.numOpt = 1;
     cfg.options = &option;
-    uint64_t data = 1024U;;
-    BinaryLoader binaryLoader(static_cast<void *>(&data), sizeof(uint64_t), &cfg);
-    Program *prog = nullptr;
+    uint64_t data = 1024U;
+    ;
+    BinaryLoader binaryLoader(static_cast<void*>(&data), sizeof(uint64_t), &cfg);
+    Program* prog = nullptr;
     rtError_t ret = binaryLoader.Load(&prog);
     EXPECT_EQ(ret, RT_ERROR_NONE);
     ret = rtsBinaryUnload(prog);
     EXPECT_EQ(ret, RT_ERROR_NONE);
-}
-
-TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromFile_OnlyJson_Success_1)
-{
-    char *path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
-    rtLoadBinaryConfig_t cfg;
-    rtLoadBinaryOption_t option;
-    option.optionId = RT_LOAD_BINARY_OPT_CPU_KERNEL_MODE;
-    option.value.cpuKernelMode = 0;
-    cfg.numOpt = 1;
-    cfg.options = &option;
-    void *handle = nullptr;
-    rtError_t error = rtsBinaryLoadFromFile(path, &cfg, &handle);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    Program *prog = static_cast<Program *>(handle);
-    EXPECT_EQ(2, prog->soNameDevAddrMap_.size());
-    EXPECT_EQ(true, prog->soNameDevAddrMap_.end() != prog->soNameDevAddrMap_.find(std::string("libcust_aicpu_kernels.so")));
-    EXPECT_EQ(true, prog->soNameDevAddrMap_.end() != prog->soNameDevAddrMap_.find(std::string("")));   // no so name
-    EXPECT_EQ(true, prog->soNameDevAddrMap_[std::string("libcust_aicpu_kernels.so")] != nullptr);
-    EXPECT_EQ(3, prog->funcNameDevAddrMap_.size());
-    EXPECT_EQ(true, prog->funcNameDevAddrMap_.end() != prog->funcNameDevAddrMap_.find(std::string("RunCpuKernelWithBlock")));
-    EXPECT_EQ(true, prog->funcNameDevAddrMap_.end() != prog->funcNameDevAddrMap_.find(std::string("RunCpuKernel")));
-    EXPECT_EQ(true, prog->funcNameDevAddrMap_.end() != prog->funcNameDevAddrMap_.find(std::string("")));   // no func name
-    EXPECT_EQ(true, prog->funcNameDevAddrMap_[std::string("")] != nullptr);
-    
-    error = rtsBinaryUnload(handle);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-}
-
-TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromFile_OnlyJson_Success_2)
-{
-    char *path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
-    rtLoadBinaryConfig_t cfg;
-    rtLoadBinaryOption_t option;
-    option.optionId = RT_LOAD_BINARY_OPT_CPU_KERNEL_MODE;
-    option.value.cpuKernelMode = 0;
-    cfg.numOpt = 1;
-    cfg.options = &option;
-
-    MOCKER_CPP(&Program::StoreKernelLiteralNameToDevice).stubs().will(returnValue(ACL_ERROR_RT_DEVICE_MEM_ERROR));
-    void *handle = nullptr;
-    rtError_t error = rtsBinaryLoadFromFile(path, &cfg, &handle);
-    Program *prog = static_cast<Program *>(handle);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-    EXPECT_EQ(true, prog != nullptr);
-    EXPECT_EQ(0, prog->kernelNameMap_.size());
-
-    MOCKER_CPP(&Program::FreeKernelLiteralNameDevMem).stubs().will(returnValue(ACL_ERROR_RT_DEVICE_MEM_ERROR));
-    error = rtsBinaryUnload(handle);
-    EXPECT_EQ(error, ACL_ERROR_RT_DEVICE_MEM_ERROR);
-    delete prog;
-}
-
-TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromFile_OnlyJson_Success_3)
-{
-    char *path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
-    rtLoadBinaryConfig_t cfg;
-    rtLoadBinaryOption_t option;
-    option.optionId = RT_LOAD_BINARY_OPT_CPU_KERNEL_MODE;
-    option.value.cpuKernelMode = 0;
-    cfg.numOpt = 1;
-    cfg.options = &option;
-
-    Driver *driver = ((Runtime *)Runtime::Instance())->driverFactory_.GetDriver(NPU_DRIVER);
-    MOCKER_CPP_VIRTUAL(driver, &Driver::MemCopySync).stubs().will(returnValue(ACL_ERROR_RT_DEVICE_MEM_ERROR));
-
-    void *handle = nullptr;
-    rtError_t error = rtsBinaryLoadFromFile(path, &cfg, &handle);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-    Program *prog = static_cast<Program *>(handle);
-    EXPECT_EQ(0, prog->soNameDevAddrMap_.size());
-    EXPECT_EQ(0, prog->funcNameDevAddrMap_.size());
-
-    error = rtsBinaryUnload(handle);
-    EXPECT_EQ(error, RT_ERROR_NONE);
 }
 
 TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromData_CpuKernel_Failed)
@@ -274,9 +191,10 @@ TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromData_CpuKernel_Failed)
     option.value.cpuKernelMode = 2;
     cfg.numOpt = 1;
     cfg.options = &option;
-    uint64_t data = 1024U;;
-    BinaryLoader binaryLoader(static_cast<void *>(&data), sizeof(uint64_t), &cfg);
-    Program *prog = nullptr;
+    uint64_t data = 1024U;
+    ;
+    BinaryLoader binaryLoader(static_cast<void*>(&data), sizeof(uint64_t), &cfg);
+    Program* prog = nullptr;
     MOCKER_CPP(&Program::ProcCpuKernelH2DMem).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
     rtError_t ret = binaryLoader.Load(&prog);
     EXPECT_EQ(ret, RT_ERROR_INVALID_VALUE);
@@ -284,43 +202,23 @@ TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromData_CpuKernel_Failed)
 
 TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromFile_CpuKernel_JsonAndSo)
 {
-    char *path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
+    char* path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
     rtLoadBinaryConfig_t cfg;
     rtLoadBinaryOption_t option;
     option.optionId = RT_LOAD_BINARY_OPT_CPU_KERNEL_MODE;
     option.value.cpuKernelMode = 1;
     cfg.numOpt = 1;
     cfg.options = &option;
-    void *handle = nullptr;
+    void* handle = nullptr;
     rtError_t error = rtsBinaryLoadFromFile(path, &cfg, &handle);
     EXPECT_NE(error, RT_ERROR_NONE);
 }
 
-TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromFile_CpuKernel_Mode1_Success)
-{
-    char *path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
-    MOCKER_CPP(&BinaryLoader::ReadBinaryFile).stubs().will(returnValue(RT_ERROR_NONE));
-    MOCKER_CPP(&Program::ProcCpuKernelH2DMem).stubs().will(returnValue(RT_ERROR_NONE));
-
-    rtLoadBinaryConfig_t cfg;
-    rtLoadBinaryOption_t option;
-    option.optionId = RT_LOAD_BINARY_OPT_CPU_KERNEL_MODE;
-    option.value.cpuKernelMode = 1;
-    cfg.numOpt = 1;
-    cfg.options = &option;
-
-    void *handle = nullptr;
-    rtError_t ret = rtsBinaryLoadFromFile(path, &cfg, &handle);
-    EXPECT_EQ(ret, RT_ERROR_NONE);
-    ret = rtsBinaryUnload(handle);
-    EXPECT_EQ(ret, RT_ERROR_NONE);
-}
-
 TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromFile_CpuKernel_Mode1_Fail_01)
 {
-    char *path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
+    char* path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
     MOCKER_CPP(&BinaryLoader::ReadBinaryFile).stubs().will(returnValue(RT_ERROR_NONE));
-    PlainProgram * prog = nullptr;
+    PlainProgram* prog = nullptr;
     MOCKER_CPP(&BinaryLoader::ParseJsonAndRegisterCpuKernel).stubs().will(returnValue(prog));
 
     rtLoadBinaryConfig_t cfg;
@@ -330,16 +228,34 @@ TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromFile_CpuKernel_Mode1_Fail_01)
     cfg.numOpt = 1;
     cfg.options = &option;
 
-    void *handle = nullptr;
+    void* handle = nullptr;
+    rtError_t ret = rtsBinaryLoadFromFile(path, &cfg, &handle);
+    EXPECT_NE(ret, RT_ERROR_NONE);
+}
+
+TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromFile_CpuKernel_Mode1_Fail_02)
+{
+    char* path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
+    MOCKER_CPP(&BinaryLoader::ReadBinaryFile).stubs().will(returnValue(RT_ERROR_NONE));
+    PlainProgram* prog = nullptr;
+    MOCKER_CPP(&Program::ProcCpuKernelH2DMem).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+    rtLoadBinaryConfig_t cfg;
+    rtLoadBinaryOption_t option;
+    option.optionId = RT_LOAD_BINARY_OPT_CPU_KERNEL_MODE;
+    option.value.cpuKernelMode = 1;
+    cfg.numOpt = 1;
+    cfg.options = &option;
+
+    void* handle = nullptr;
     rtError_t ret = rtsBinaryLoadFromFile(path, &cfg, &handle);
     EXPECT_NE(ret, RT_ERROR_NONE);
 }
 
 TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromFile_CpuKernel_Mode0_Fail_01)
 {
-    char *path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
+    char* path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
     MOCKER_CPP(&BinaryLoader::ReadBinaryFile).stubs().will(returnValue(RT_ERROR_NONE));
-    PlainProgram * prog = nullptr;
+    PlainProgram* prog = nullptr;
     MOCKER_CPP(&BinaryLoader::ParseJsonAndRegisterCpuKernel).stubs().will(returnValue(prog));
 
     rtLoadBinaryConfig_t cfg;
@@ -349,21 +265,21 @@ TEST_F(BinaryLoaderTest, TestRtsBinaryLoadFromFile_CpuKernel_Mode0_Fail_01)
     cfg.numOpt = 1;
     cfg.options = &option;
 
-    void *handle = nullptr;
+    void* handle = nullptr;
     rtError_t ret = rtsBinaryLoadFromFile(path, &cfg, &handle);
     EXPECT_NE(ret, RT_ERROR_NONE);
 }
 
 TEST_F(BinaryLoaderTest, TestRtsBinaryLoad_CpuKernel_InvalidMode)
 {
-    char *path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
+    char* path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
     rtLoadBinaryConfig_t cfg;
     rtLoadBinaryOption_t option;
     option.optionId = RT_LOAD_BINARY_OPT_CPU_KERNEL_MODE;
     option.value.cpuKernelMode = 3;
     cfg.numOpt = 1;
     cfg.options = &option;
-    void *handle = nullptr;
+    void* handle = nullptr;
     rtError_t error = rtsBinaryLoadFromFile(path, &cfg, &handle);
     EXPECT_NE(error, RT_ERROR_NONE);
 }
@@ -371,28 +287,49 @@ TEST_F(BinaryLoaderTest, TestRtsBinaryLoad_CpuKernel_InvalidMode)
 TEST_F(BinaryLoaderTest, TestRtsBinaryLoad_CpuKernel_ParseJsonAndRegisterCpuKernel_01)
 {
     BinaryLoader binaryLoader("", nullptr);
-    PlainProgram *prog = binaryLoader.ParseJsonAndRegisterCpuKernel();
+    PlainProgram* prog = binaryLoader.ParseJsonAndRegisterCpuKernel();
     EXPECT_EQ(prog, nullptr);
 }
 
 TEST_F(BinaryLoaderTest, TestRtsBinaryLoad_CpuKernel_ParseJsonAndRegisterCpuKernel_02)
 {
-    char *path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
+    char* path = "../tests/ut/runtime/runtime/test/data/libcust_aicpu_kernels.json";
     MOCKER_CPP(&Program::RegisterCpuKernel).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
     BinaryLoader binaryLoader(path, nullptr);
-    PlainProgram *prog = binaryLoader.ParseJsonAndRegisterCpuKernel();
+    PlainProgram* prog = binaryLoader.ParseJsonAndRegisterCpuKernel();
     EXPECT_EQ(prog, nullptr);
 }
 
-TEST_F(BinaryLoaderTest, TestLoadFromFileWithLoadFromFileError)
+TEST_F(BinaryLoaderTest, TestRtsBinaryLoad_CpuKernel_ArgsUserByMem)
 {
-    std::string file = "";
+    PlainProgram prog;
+    prog.SetKernelRegType(RT_KERNEL_REG_TYPE_CPU);
+    prog.SetSoName("libcust_aicpu_kernels.so");
+    Program* programBase = &prog;
+    rtBinHandle progHandle = rt_ut::InitAndExportHandle<rtBinHandle>(programBase);
+    rtFuncHandle funcHandle = nullptr;
+    rtError_t error = rtsRegisterCpuFunc(progHandle, "RunCpuKernel", "Abs", &funcHandle);
+    EXPECT_EQ(error, RT_ERROR_NONE);
 
-    BinaryLoader binaryLoader(file.c_str(), nullptr);
-    Program *prog;
-    rtError_t ret = binaryLoader.Load(&prog);
-    EXPECT_EQ(ret, RT_ERROR_INVALID_VALUE);
-    delete prog;
+    rtFuncHandle funcHandle1 = nullptr;
+    error = rtsRegisterCpuFunc(progHandle, "RunCpuKernel", "Abs", &funcHandle1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    size_t memSize = 0U;
+    error = rtsKernelArgsGetHandleMemSize(funcHandle, &memSize);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    size_t actualArgsSize = 0U;
+    error = rtsKernelArgsGetMemSize(funcHandle, 30, &actualArgsSize);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    uint8_t* userHostMem = new (std::nothrow) uint8_t[actualArgsSize];
+    uint8_t* argsHandle = new (std::nothrow) uint8_t[memSize];
+    error = rtsKernelArgsInitByUserMem(funcHandle, argsHandle, userHostMem, actualArgsSize);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    delete[] argsHandle;
+    delete[] userHostMem;
 }
 
 TEST_F(BinaryLoaderTest, TestLoadFromFileWithParseKernelJsonFileError)
@@ -402,31 +339,34 @@ TEST_F(BinaryLoaderTest, TestLoadFromFileWithParseKernelJsonFileError)
     MOCKER_CPP(&Program::Register).stubs().will(returnValue(RT_ERROR_NONE));
 
     BinaryLoader binaryLoader(file.c_str(), nullptr);
-    Program *prog = binaryLoader.LoadFromFile();
-    EXPECT_EQ(prog, nullptr);
+    Program* prog = binaryLoader.LoadFromFile();
+    EXPECT_NE(prog, nullptr);
     delete prog;
 }
 
 TEST_F(BinaryLoaderTest, TestLoadFromFileWithNoMagicInfoError)
 {
-    std::string file = "../tests/ut/runtime/runtime/test/data/elf.o";
+    std::string file = "llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.o";
 
     BinaryLoader binaryLoader(file.c_str(), nullptr);
-    Program *prog;
+    Program* prog;
     rtError_t ret = binaryLoader.Load(&prog);
     EXPECT_EQ(ret, RT_ERROR_INVALID_VALUE);
     delete prog;
 }
 
-
 TEST_F(BinaryLoaderTest, TestLoadFromFileWithMagicInfoError)
 {
-    std::string file = "../tests/ut/runtime/runtime/test/data/elf.o";
+    std::string file = "llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.o";
     std::string jsonFile = "llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.json";
-    std::string content = "{\"binFileName\":\"test_kernel\",\"binFileSuffix\":\".o\",\"blockDim\":40,\"coreType\":\"VectorCore\",\"deterministic\":\"ignore\",\"intercoreSync\":0,\"kernelName\":\"test_kernel\",\"magic\":\"RT_DEV_BINARY_MAGIC_ELF_AIVEC_INVALID\",\"memoryStamping\":[],\"opParaSize\":0,\"parameters\":[null,null],\"sha256\":\"23673556afa3860402a84eda043f19ffbd350a39a08ac94635dbbfeb35a2024d\"}";
+    std::string content =
+        "{\"binFileName\":\"test_kernel\",\"binFileSuffix\":\".o\",\"blockDim\":40,\"coreType\":\"VectorCore\","
+        "\"deterministic\":\"ignore\",\"intercoreSync\":0,\"kernelName\":\"test_kernel\",\"magic\":\"RT_DEV_BINARY_"
+        "MAGIC_ELF_AIVEC_INVALID\",\"memoryStamping\":[],\"opParaSize\":0,\"parameters\":[null,null],\"sha256\":"
+        "\"23673556afa3860402a84eda043f19ffbd350a39a08ac94635dbbfeb35a2024d\"}";
     CreateFile(jsonFile, content);
     BinaryLoader binaryLoader(file.c_str(), nullptr);
-    Program *prog;
+    Program* prog;
     rtError_t ret = binaryLoader.Load(&prog);
     EXPECT_EQ(ret, RT_ERROR_INVALID_VALUE);
     delete prog;
@@ -435,12 +375,17 @@ TEST_F(BinaryLoaderTest, TestLoadFromFileWithMagicInfoError)
 
 TEST_F(BinaryLoaderTest, TestLoadFromFileWithJsonFileInvalid)
 {
-    std::string file = "../tests/ut/runtime/runtime/test/data/elf.o";
+    std::string file = "llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.o";
     std::string jsonFile = "llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.json";
-    std::string content = "error 123 test for error\"binFileName\":\"test_kernel\",\"binFileSuffix\":\".o\",\"blockDim\":40,\"coreType\":\"VectorCore\",\"deterministic\":\"ignore\",\"intercoreSync\":0,\"kernelName\":\"test_kernel\",\"magic\":\"RT_DEV_BINARY_MAGIC_ELF_AIVEC_INVALID\",\"memoryStamping\":[],\"opParaSize\":0,\"parameters\":[null,null],\"sha256\":\"23673556afa3860402a84eda043f19ffbd350a39a08ac94635dbbfeb35a2024d\"}";
+    std::string content =
+        "error 123 test for "
+        "error\"binFileName\":\"test_kernel\",\"binFileSuffix\":\".o\",\"blockDim\":40,\"coreType\":\"VectorCore\","
+        "\"deterministic\":\"ignore\",\"intercoreSync\":0,\"kernelName\":\"test_kernel\",\"magic\":\"RT_DEV_BINARY_"
+        "MAGIC_ELF_AIVEC_INVALID\",\"memoryStamping\":[],\"opParaSize\":0,\"parameters\":[null,null],\"sha256\":"
+        "\"23673556afa3860402a84eda043f19ffbd350a39a08ac94635dbbfeb35a2024d\"}";
     CreateFile(jsonFile, content);
     BinaryLoader binaryLoader(file.c_str(), nullptr);
-    Program *prog;
+    Program* prog;
     rtError_t ret = binaryLoader.Load(&prog);
     EXPECT_EQ(ret, RT_ERROR_INVALID_VALUE);
     delete prog;
@@ -449,27 +394,34 @@ TEST_F(BinaryLoaderTest, TestLoadFromFileWithJsonFileInvalid)
 
 TEST_F(BinaryLoaderTest, TestLoadFromFileWithNoMagicError)
 {
-    std::string file = "../tests/ut/runtime/runtime/test/data/elf.o";
+    std::string file = "llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.o";
     std::string jsonFile = "llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.json";
-    std::string content = "{\"binFileName\":\"test_kernel\",\"binFileSuffix\":\".o\",\"blockDim\":40,\"coreType\":\"VectorCore\",\"deterministic\":\"ignore\",\"intercoreSync\":0,\"kernelName\":\"test_kernel\",\"magic_error\":\"RT_DEV_BINARY_MAGIC_ELF_AIVEC_INVALID\",\"memoryStamping\":[],\"opParaSize\":0,\"parameters\":[null,null],\"sha256\":\"23673556afa3860402a84eda043f19ffbd350a39a08ac94635dbbfeb35a2024d\"}";
+    std::string content =
+        "{\"binFileName\":\"test_kernel\",\"binFileSuffix\":\".o\",\"blockDim\":40,\"coreType\":\"VectorCore\","
+        "\"deterministic\":\"ignore\",\"intercoreSync\":0,\"kernelName\":\"test_kernel\",\"magic_error\":\"RT_DEV_"
+        "BINARY_MAGIC_ELF_AIVEC_INVALID\",\"memoryStamping\":[],\"opParaSize\":0,\"parameters\":[null,null],\"sha256\":"
+        "\"23673556afa3860402a84eda043f19ffbd350a39a08ac94635dbbfeb35a2024d\"}";
     CreateFile(jsonFile, content);
     BinaryLoader binaryLoader(file.c_str(), nullptr);
-    Program *prog;
+    Program* prog;
     rtError_t ret = binaryLoader.Load(&prog);
     EXPECT_EQ(ret, RT_ERROR_INVALID_VALUE);
     delete prog;
     DeleteFile(jsonFile);
 }
 
-
 TEST_F(BinaryLoaderTest, TestLoadFromFileWithNoPrintfError)
 {
-    std::string file = "../tests/ut/runtime/runtime/test/data/elf.o";
+    std::string file = "llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.o";
     std::string jsonFile = "llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.json";
-    std::string content = "{\"binFileName\":\"test_kernel\",\"binFileSuffix\":\".o\",\"blockDim\":40,\"coreType\":\"VectorCore\",\"deterministic\":\"ignore\",\"intercoreSync\":0,\"kernelName\":\"test_kernel\",\"magic\":\"RT_DEV_BINARY_MAGIC_ELF_AIVEC_INVALID\",\"memoryStamping\":[],\"opParaSize\":0,\"parameters\":[null,null],\"debugOptions\":\"printf\",\"sha256\":\"23673556afa3860402a84eda043f19ffbd350a39a08ac94635dbbfeb35a2024d\"}";
+    std::string content =
+        "{\"binFileName\":\"test_kernel\",\"binFileSuffix\":\".o\",\"blockDim\":40,\"coreType\":\"VectorCore\","
+        "\"deterministic\":\"ignore\",\"intercoreSync\":0,\"kernelName\":\"test_kernel\",\"magic\":\"RT_DEV_BINARY_"
+        "MAGIC_ELF_AIVEC_INVALID\",\"memoryStamping\":[],\"opParaSize\":0,\"parameters\":[null,null],\"debugOptions\":"
+        "\"printf\",\"sha256\":\"23673556afa3860402a84eda043f19ffbd350a39a08ac94635dbbfeb35a2024d\"}";
     CreateFile(jsonFile, content);
     BinaryLoader binaryLoader(file.c_str(), nullptr);
-    Program *prog;
+    Program* prog;
     rtError_t ret = binaryLoader.Load(&prog);
     EXPECT_EQ(ret, RT_ERROR_INVALID_VALUE);
     delete prog;
@@ -481,8 +433,6 @@ TEST_F(BinaryLoaderTest, TestParseKernelJsonFile)
     std::string file = "file_not_exist";
     BinaryLoader binaryLoader(file.c_str(), nullptr);
     ElfProgram program;
-    program.elfData_->containsAscendMeta = true;
-    program.isSupportMix_ = true;
     rtError_t ret = binaryLoader.ParseKernelJsonFile(&program);
     EXPECT_EQ(ret, RT_ERROR_NONE);
 }
@@ -490,7 +440,7 @@ TEST_F(BinaryLoaderTest, TestParseKernelJsonFile)
 TEST_F(BinaryLoaderTest, TestCheckLoaded2DeviceSuccess)
 {
     MOCKER_CPP(&Runtime::BinaryLoad).stubs().will(returnValue(RT_ERROR_NONE));
-    ElfProgram program(Program::MACH_AI_MIX_KERNEL);
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
     program.SetIsLazyLoad(true);
     rtError_t ret = program.CheckLoaded2Device();
     EXPECT_EQ(ret, RT_ERROR_NONE);
@@ -499,7 +449,7 @@ TEST_F(BinaryLoaderTest, TestCheckLoaded2DeviceSuccess)
 TEST_F(BinaryLoaderTest, TestCheckLoaded2DeviceFailed)
 {
     MOCKER_CPP(&Runtime::BinaryLoad).stubs().will(returnValue(RT_ERROR_PROGRAM_SIZE));
-    ElfProgram program(Program::MACH_AI_MIX_KERNEL);
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
     program.SetIsLazyLoad(true);
     rtError_t ret = program.CheckLoaded2Device();
     EXPECT_EQ(ret, RT_ERROR_PROGRAM_SIZE);
@@ -508,124 +458,35 @@ TEST_F(BinaryLoaderTest, TestCheckLoaded2DeviceFailed)
 TEST_F(BinaryLoaderTest, TestAdjustKernelNameAndGetMixType)
 {
     RtKernel kernel;
+    rtKernelAttrType kernelAttrType =
+        static_cast<rtKernelAttrType>(static_cast<rtKernelAttrType>(RT_KERNEL_ATTR_TYPE_INVALID));
     uint8_t mixType = 0;
     ElfProgram program;
 
-    char *name = "test_kernel_mix_aiv_00001";
+    char* name = "test_kernel_mix_aiv_00001";
     kernel.name = "test_kernel_mix_aiv_00001";
-    std::string kernelName = program.AdjustKernelNameAndGetMixType(&kernel, mixType);
+    std::string kernelName = program.AdjustKernelName(kernel.name);
     EXPECT_EQ(kernelName, "test_kernel_00001");
+    program.GetKernelTypeAndMixTypeByName(kernel.name, kernelAttrType, mixType);
     EXPECT_EQ(mixType, MIX_AIV);
+    EXPECT_EQ(kernelAttrType, RT_KERNEL_ATTR_TYPE_VECTOR);
 
     kernel.name = "test_kernel_mix_aic_00001";
-    kernelName = program.AdjustKernelNameAndGetMixType(&kernel, mixType);
+    std::string kernelName = program.AdjustKernelName(kernel.name);
     EXPECT_EQ(kernelName, "test_kernel_00001");
+    program.GetKernelTypeAndMixTypeByName(kernel.name, kernelAttrType, mixType);
     EXPECT_EQ(mixType, MIX_AIC);
-
-    kernel.name = "test_kernel_mix_aic_mix_aiv_00001";
-    kernelName = program.AdjustKernelNameAndGetMixType(&kernel, mixType);
-    EXPECT_EQ(kernelName, "test_kernel_00001");
-    EXPECT_EQ(mixType, MIX_AIC_AIV_MAIN_AIC);
-}
-
-TEST_F(BinaryLoaderTest, TestLoadFromDataWithMixKernelNotFound)
-{
-    ElfProgram prog;
-    Kernel * k1 = new Kernel(nullptr, "f1", "", &prog, 10);
-    rtError_t ret = prog.MixKernelRemove(k1);
-    EXPECT_EQ(ret, RT_ERROR_NONE);
-    delete k1;
-}
-
-
-TEST_F(BinaryLoaderTest, TestFindAndProcMixKernelV1)
-{
-    ElfProgram prog;
-    Kernel kernelAicObj(nullptr, "testKernelName", 1, &prog, 2048, 0, 0, 0, 0);
-    Kernel *kernelAicPtr = &kernelAicObj;
-    rtError_t ret = prog.MixKernelAdd(kernelAicPtr);
-    EXPECT_EQ(ret, RT_ERROR_NONE);
-
-    RtKernel kernelAiv;
-    uint32_t procVersion = 1;
-    bool mixRet = prog.FindAndProcMixKernel(&kernelAiv, "testKernelName", 1, procVersion);
-    EXPECT_EQ(mixRet, true);
-
-    ret = prog.MixKernelRemove(kernelAicPtr);
-    EXPECT_EQ(ret, RT_ERROR_NONE);
-}
-
-TEST_F(BinaryLoaderTest, TestFindAndProcMixKernelWithConflict)
-{
-    ElfProgram prog;
-    Kernel kernelAicObj(nullptr, "testKernelName", 1, &prog, 2048, 1024, 0, 0, 0);
-    Kernel *kernelAicPtr = &kernelAicObj;
-    rtError_t ret = prog.MixKernelAdd(kernelAicPtr);
-    EXPECT_EQ(ret, RT_ERROR_NONE);
-
-    RtKernel kernelAiv;
-    uint32_t procVersion = 1;
-    bool mixRet = prog.FindAndProcMixKernel(&kernelAiv, "testKernelName", 1, procVersion);
-    EXPECT_EQ(mixRet, false);
-
-    ret = prog.MixKernelRemove(kernelAicPtr);
-    EXPECT_EQ(ret, RT_ERROR_NONE);
-}
-
-TEST_F(BinaryLoaderTest, TestFindAndProcMixKernelAndAjustOffset1Offset2)
-{
-    ElfProgram prog;
-    Kernel kernelAivObj(nullptr, "testKernelName", 1, &prog, 2048, 0, 2, 0, 0);
-    Kernel *kernelAivPtr = &kernelAivObj;
-    rtError_t ret = prog.MixKernelAdd(kernelAivPtr);
-    EXPECT_EQ(ret, RT_ERROR_NONE);
-
-    RtKernel kernelAic;
-    kernelAic.offset = 1024;
-    uint32_t procVersion = 1;
-    bool mixRet = prog.FindAndProcMixKernel(&kernelAic, "testKernelName", 1, procVersion);
-    EXPECT_EQ(mixRet, true);
-    EXPECT_EQ(kernelAivObj.Offset_(), 1024);
-    EXPECT_EQ(kernelAivObj.Offset2_(), 2048);
-
-    ret = prog.MixKernelRemove(kernelAivPtr);
-    EXPECT_EQ(ret, RT_ERROR_NONE);
-}
-
-TEST_F(BinaryLoaderTest, TestFindAndProcMixKernelV2)
-{
-    ElfProgram prog;
-    Kernel kernelAicObj(nullptr, "testKernelName", 1, &prog, 2048, 0, 0, 0, 0);
-    Kernel *kernelAicPtr = &kernelAicObj;
-    rtError_t ret = prog.MixKernelAdd(kernelAicPtr);
-    EXPECT_EQ(ret, RT_ERROR_NONE);
-
-    RtKernel kernelAiv;
-    uint32_t procVersion = 2;
-    bool mixRet = prog.FindAndProcMixKernel(&kernelAiv, "testKernelName", 1, procVersion);
-    EXPECT_EQ(mixRet, true);
-
-    ret = prog.MixKernelRemove(kernelAicPtr);
-    EXPECT_EQ(ret, RT_ERROR_NONE);
-}
-
-TEST_F(BinaryLoaderTest, TestDegenerateMixType)
-{
-    ElfProgram prog;
-    uint8_t mixType = MIX_AIC;
-    prog.elfData_->degenerateFlag = true;
-    prog.DegenerateMixType(mixType);
-    EXPECT_EQ(NO_MIX, mixType);
+    EXPECT_EQ(kernelAttrType, RT_KERNEL_ATTR_TYPE_CUBE);
 }
 
 TEST_F(BinaryLoaderTest, TestFuncGetAddrWithOnlyAiv)
 {
     ElfProgram prog;
-    Kernel kernelAicObj(nullptr, "testKernelName", 1, &prog, 2048, 0, 0, 0, 0);
-    prog.SetMachine(Program::MACH_AI_VECTOR);
+    Kernel kernelAicObj("testKernelName", 1, &prog, RT_KERNEL_ATTR_TYPE_VECTOR, 2048, 0, 0, 0, 0);
+    prog.SetDefaultKernelAttrType(RT_KERNEL_ATTR_TYPE_VECTOR);
 
-    void *aicAddr;
-    void *aivAddr;
+    void* aicAddr;
+    void* aivAddr;
     rtsFuncGetAddr(&kernelAicObj, &aicAddr, &aivAddr);
     EXPECT_EQ(aicAddr, nullptr);
     EXPECT_NE(aivAddr, nullptr);
@@ -634,12 +495,11 @@ TEST_F(BinaryLoaderTest, TestFuncGetAddrWithOnlyAiv)
 TEST_F(BinaryLoaderTest, TestFuncGetAddrWithOnlyAivWithKernelType)
 {
     ElfProgram prog;
-    Kernel kernelObj(nullptr, "testKernelName", 1, &prog, 2048, 0, 0, 0, 0);
-    prog.SetMachine(Program::MACH_AI_MIX_KERNEL);
-    kernelObj.SetKernelType_(Program::MACH_AI_VECTOR);
+    Kernel kernelObj("testKernelName", 1, &prog, RT_KERNEL_ATTR_TYPE_VECTOR, 2048, 0, 0, 0, 0);
+    kernelObj.SetKernelAttrType(RT_KERNEL_ATTR_TYPE_VECTOR);
 
-    void *aicAddr;
-    void *aivAddr;
+    void* aicAddr;
+    void* aivAddr;
     rtsFuncGetAddr(&kernelObj, &aicAddr, &aivAddr);
     EXPECT_EQ(aicAddr, nullptr);
     EXPECT_NE(aivAddr, nullptr);
@@ -648,12 +508,12 @@ TEST_F(BinaryLoaderTest, TestFuncGetAddrWithOnlyAivWithKernelType)
 TEST_F(BinaryLoaderTest, TestFuncGetAddrWithMixOnlyAiv)
 {
     ElfProgram prog;
-    Kernel kernelObj(nullptr, "testKernelName", 1, &prog, 2048, 0, 0, 0, 0);
-    prog.SetMachine(Program::MACH_AI_CORE);
+    Kernel kernelObj("testKernelName", 1, &prog, RT_KERNEL_ATTR_TYPE_AICORE, 2048, 0, 0, 0, 0);
+    prog.SetDefaultKernelAttrType(RT_KERNEL_ATTR_TYPE_AICORE);
     kernelObj.SetMixType(MIX_AIV);
 
-    void *aicAddr;
-    void *aivAddr;
+    void* aicAddr;
+    void* aivAddr;
     rtsFuncGetAddr(&kernelObj, &aicAddr, &aivAddr);
     EXPECT_EQ(aicAddr, nullptr);
     EXPECT_NE(aivAddr, nullptr);
@@ -665,50 +525,7 @@ TEST_F(BinaryLoaderTest, TestLoadFromData)
 
     MOCKER_CPP(&Program::Register).stubs().will(returnValue(RT_ERROR_NONE));
     binaryLoader.magic_ = RT_DEV_BINARY_MAGIC_ELF;
-    Program * prg = binaryLoader.LoadFromData();
+    Program* prg = binaryLoader.LoadFromData();
     EXPECT_NE(prg, nullptr);
-    delete(prg);
-}
-
-TEST_F(BinaryLoaderTest, TestAdaptKernelAttrType)
-{
-    ElfProgram program;
-    uint64_t tilingKey = 0;
-    Kernel kernel(nullptr, "testKernelName", tilingKey, &program, 2048, 1024, 0, 0, 0);
-
-    RtKernel kernelInput;
-    kernelInput.name = "test_mix_aic";
-    program.AdaptKernelAttrType(&kernelInput, &kernel);
-    EXPECT_EQ(kernel.GetKernelAttrType(), RT_KERNEL_ATTR_TYPE_CUBE);
-
-    kernelInput.name = "test_mix_aiv";
-    program.AdaptKernelAttrType(&kernelInput, &kernel);
-    EXPECT_EQ(kernel.GetKernelAttrType(), RT_KERNEL_ATTR_TYPE_VECTOR);
-
-    program.elfData_->containsAscendMeta = true;
-    kernelInput.name = "test_kernel";
-    kernelInput.funcType = KERNEL_FUNCTION_TYPE_AICORE;
-    program.AdaptKernelAttrType(&kernelInput, &kernel);
-    EXPECT_EQ(kernel.GetKernelAttrType(), RT_KERNEL_ATTR_TYPE_AICORE);
-
-    kernelInput.funcType = KERNEL_FUNCTION_TYPE_AIC;
-    program.AdaptKernelAttrType(&kernelInput, &kernel);
-    EXPECT_EQ(kernel.GetKernelAttrType(), RT_KERNEL_ATTR_TYPE_CUBE);
-
-    kernelInput.funcType = KERNEL_FUNCTION_TYPE_AIV;
-    program.AdaptKernelAttrType(&kernelInput, &kernel);
-    EXPECT_EQ(kernel.GetKernelAttrType(), RT_KERNEL_ATTR_TYPE_VECTOR);
-
-    program.elfData_->containsAscendMeta = false;
-    program.SetElfMagic(RT_DEV_BINARY_MAGIC_ELF);
-    program.AdaptKernelAttrType(&kernelInput, &kernel);
-    EXPECT_EQ(kernel.GetKernelAttrType(), RT_KERNEL_ATTR_TYPE_AICORE);
-
-    program.SetElfMagic(RT_DEV_BINARY_MAGIC_ELF_AICUBE);
-    program.AdaptKernelAttrType(&kernelInput, &kernel);
-    EXPECT_EQ(kernel.GetKernelAttrType(), RT_KERNEL_ATTR_TYPE_CUBE);
-
-    program.SetElfMagic(RT_DEV_BINARY_MAGIC_ELF_AIVEC);
-    program.AdaptKernelAttrType(&kernelInput, &kernel);
-    EXPECT_EQ(kernel.GetKernelAttrType(), RT_KERNEL_ATTR_TYPE_VECTOR);
+    delete (prg);
 }

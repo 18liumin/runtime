@@ -48,11 +48,10 @@ STATIC void PrintOutPutDir()
         return;
     }
     auto& outputDirInfo = MsprofManager::instance()->rMode_->jobResultDir_;
-    CmdLog::CmdInfoLog("Process profiling data complete. Data is saved in %s",
-        outputDirInfo.c_str());
+    CmdLog::CmdInfoLog("Process profiling data complete. Data is saved in %s", outputDirInfo.c_str());
 }
 
-STATIC void SetEnvList(CONST_CHAR_PTR &envp, std::vector<std::string> &envpList)
+STATIC void SetEnvList(CONST_CHAR_PTR& envp, std::vector<std::string>& envpList)
 {
     uint32_t envpLen = 0;
     constexpr uint32_t maxEnvpLen = 4096;
@@ -68,16 +67,16 @@ STATIC void SetEnvList(CONST_CHAR_PTR &envp, std::vector<std::string> &envpList)
 }
 
 #ifdef __PROF_LLT
-int LltMain(int argc, const char **argv, const char **envp)
+int LltMain(int argc, const char** argv, const char** envp)
 #else
-int main(int argc, const char **argv, const char **envp)
+int main(int argc, const char** argv, const char** envp)
 #endif
 {
     std::vector<std::string> envpList;
     SetEnvList(*envp, envpList);
     EnvManager::instance()->SetGlobalEnv(envpList);
     if (Platform::instance()->PlatformInitByDriver() != PROFILING_SUCCESS) {
-        CmdLog::CmdErrorLog("Init platform by driver faild!");
+        CmdLog::CmdErrorLog("Init platform by driver failed!");
         return PROFILING_FAILED;
     }
     if (Platform::instance()->Init() != PROFILING_SUCCESS) {

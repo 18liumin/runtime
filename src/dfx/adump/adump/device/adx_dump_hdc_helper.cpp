@@ -7,18 +7,19 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
-
-#include "adx_dump_hdc_helper.h"
 #include "ascend_hal.h"
 #include "protocol/adx_msg_proto.h"
 #include "adx_datadump_callback.h"
 #include "log/adx_log.h"
 #include "memory_utils.h"
 #include "hdc_api.h"
+#include "adcore_api.h"
 #include "string_utils.h"
 #include "create_func.h"
 #include "sys_utils.h"
 #include "config.h"
+#include "adx_dump_hdc_helper.h"
+
 namespace Adx {
 AdxDumpHdcHelper::AdxDumpHdcHelper() : init_(false)
 {
@@ -29,23 +30,19 @@ AdxDumpHdcHelper::AdxDumpHdcHelper() : init_(false)
     client_.client = nullptr;
 }
 
-AdxDumpHdcHelper::~AdxDumpHdcHelper()
-{
-    UnInit();
-}
+AdxDumpHdcHelper::~AdxDumpHdcHelper() { UnInit(); }
 
 bool AdxDumpHdcHelper::Init()
 {
     if (!init_) {
-        std::unique_ptr<AdxCommOpt> opt (CreateAdxCommOpt(OptType::COMM_HDC));
+        std::unique_ptr<AdxCommOpt> opt(CreateAdxCommOpt(OptType::COMM_HDC));
         IDE_CTRL_VALUE_FAILED(opt != nullptr, return false, "create hdc commopt exception");
         bool ret = AdxCommOptManager::Instance().CommOptsRegister(opt);
         IDE_CTRL_VALUE_FAILED(ret, return false, "register hdc failed");
         std::map<std::string, std::string> info;
         info[OPT_SERVICE_KEY] = std::to_string(HDC_SERVICE_TYPE_DUMP);
         client_ = AdxCommOptManager::Instance().OpenClient(OptType::COMM_HDC, info);
-        IDE_CTRL_VALUE_FAILED(client_.session != ADX_OPT_INVALID_HANDLE, return false,
-            "open client failed");
+        IDE_CTRL_VALUE_FAILED(client_.session != ADX_OPT_INVALID_HANDLE, return false, "open client failed");
         IDE_LOGI("dump data client init end<%lu, %d>", client_.session, static_cast<int32_t>(client_.type));
         init_ = true;
     }
@@ -70,8 +67,8 @@ void AdxDumpHdcHelper::UnInit()
  *      IDE_DAEMON_NONE_ERROR: parse connect info success
  *      IDE_DAEMON_INVALID_PARAM_ERROR: parse connect info failed
  */
-IdeErrorT AdxDumpHdcHelper::ParseConnectInfo(const std::string &connectInfo,
-    std::map<std::string, std::string> &proto) const
+IdeErrorT AdxDumpHdcHelper::ParseConnectInfo(
+    const std::string& connectInfo, std::map<std::string, std::string>& proto) const
 {
     std::string hostId;
     std::string hostPid;
@@ -83,11 +80,11 @@ IdeErrorT AdxDumpHdcHelper::ParseConnectInfo(const std::string &connectInfo,
         hostPid = helperHostPid;
     }
     proto[OPT_DEVICE_KEY] = hostId;
-    proto[OPT_PID_KEY] =  hostPid;
+    proto[OPT_PID_KEY] = hostPid;
     return IDE_DAEMON_NONE_ERROR;
 }
 
-IdeErrorT AdxDumpHdcHelper::HandShake(const std::string &info, IDE_SESSION &session) const
+IdeErrorT AdxDumpHdcHelper::HandShake(const std::string& info, IDE_SESSION& session) const
 {
     uint16_t devId = 0;
     std::map<std::string, std::string> proto;
@@ -95,8 +92,8 @@ IdeErrorT AdxDumpHdcHelper::HandShake(const std::string &info, IDE_SESSION &sess
     IDE_CTRL_VALUE_FAILED(err == IDE_DAEMON_NONE_ERROR, return err, "parse connect info failed");
     IDE_LOGI("proto: hostId: %s, hostPid: %s", proto[OPT_DEVICE_KEY].c_str(), proto[OPT_PID_KEY].c_str());
     CommHandle handle = AdxCommOptManager::Instance().Connect(client_, proto);
-    IDE_CTRL_VALUE_FAILED(handle.session != ADX_OPT_INVALID_HANDLE,
-        return IDE_DAEMON_INVALID_PARAM_ERROR, "dump data connect failed");
+    IDE_CTRL_VALUE_FAILED(
+        handle.session != ADX_OPT_INVALID_HANDLE, return IDE_DAEMON_INVALID_PARAM_ERROR, "dump data connect failed");
     err = AdxMsgProto::SendResponse(handle, IDE_DUMP_REQ, devId, MsgStatus::MSG_STATUS_HAND_SHAKE);
     IDE_CTRL_VALUE_FAILED(err == IDE_DAEMON_NONE_ERROR, return err, "dump data hand shake failed");
 
@@ -108,52 +105,74 @@ IdeErrorT AdxDumpHdcHelper::HandShake(const std::string &info, IDE_SESSION &sess
     return IDE_DAEMON_NONE_ERROR;
 }
 
-IdeErrorT AdxDumpHdcHelper::DataProcess(const IDE_SESSION &session, const IdeDumpChunk &dumpChunk)
+IdeErrorT AdxDumpHdcHelper::DataProcess(const IDE_SESSION& session, const IdeDumpChunk& dumpChunk)
 {
     uint32_t dataLen = 0;
     // malloc memory for save user data
-    IDE_RETURN_IF_CHECK_ASSIGN_32U_ADD(sizeof(DumpChunk),
-        dumpChunk.bufLen, dataLen, return IDE_DAEMON_INTERGER_REVERSED_ERROR);
-    MsgProto *msg = AdxMsgProto::CreateMsgPacket(IDE_DUMP_REQ, 0, nullptr, dataLen);
+    IDE_RETURN_IF_CHECK_ASSIGN_32U_ADD(
+        sizeof(DumpChunk), dumpChunk.bufLen, dataLen, return IDE_DAEMON_INTERGER_REVERSED_ERROR);
+    MsgProto* msg = AdxMsgProto::CreateMsgPacket(IDE_DUMP_REQ, 0, nullptr, dataLen);
     IDE_CTRL_VALUE_FAILED(msg != nullptr, return IDE_DAEMON_MALLOC_ERROR, "create message failed");
     std::unique_ptr<MsgProto, decltype(&IdeXfree)> sendDataMsgPtr(msg, IdeXfree);
     msg = nullptr;
     DumpChunk* data = reinterpret_cast<DumpChunk*>(sendDataMsgPtr->data);
     // check file name length, not longer than IDE_MAX_FILE_PATH
-    IDE_CTRL_VALUE_FAILED(strlen(dumpChunk.fileName) < IDE_MAX_FILE_PATH, return IDE_DAEMON_INVALID_PATH_ERROR,
+    IDE_CTRL_VALUE_FAILED(
+        strlen(dumpChunk.fileName) < IDE_MAX_FILE_PATH, return IDE_DAEMON_INVALID_PATH_ERROR,
         "fileName is too long, not longer than %d length", IDE_MAX_FILE_PATH);
     int32_t err = strcpy_s(data->fileName, MAX_FILE_PATH_LENGTH, dumpChunk.fileName);
-    IDE_CTRL_VALUE_FAILED(err == EOK, return IDE_DAEMON_INVALID_PATH_ERROR,
-        "copy file name failed, err=%d, strerr=%s", err, strerror(errno));
+    IDE_CTRL_VALUE_FAILED(
+        err == EOK, return IDE_DAEMON_INVALID_PATH_ERROR, "copy file name failed, err=%d, strerr=%s", err,
+        strerror(errno));
     data->bufLen = dumpChunk.bufLen;
     data->flag = dumpChunk.flag;
     data->isLastChunk = dumpChunk.isLastChunk;
     data->offset = dumpChunk.offset;
-    IDE_LOGI("dataLen: %u, bufLen: %u, flag: %d, isLastChunk: %u, offset: %ld, fileName: %s",
-        dataLen, data->bufLen, data->flag, data->isLastChunk, data->offset, data->fileName);
+    IDE_LOGI(
+        "dataLen: %u, bufLen: %u, flag: %d, isLastChunk: %u, offset: %ld, fileName: %s", dataLen, data->bufLen,
+        data->flag, data->isLastChunk, data->offset, data->fileName);
     err = memcpy_s(data->dataBuf, data->bufLen, dumpChunk.dataBuf, dumpChunk.bufLen);
     IDE_CTRL_VALUE_FAILED(err == EOK, return IDE_DAEMON_MEMCPY_ERROR, "memcpy_s data buffer failed, err=%d", err);
     IDE_LOGI("the data to be sent has been assembled");
     CommHandle handle;
     handle.type = client_.type;
     handle.session = reinterpret_cast<OptHandle>(session);
-    uint32_t ret = AdxCommOptManager::Instance().Write(handle, sendDataMsgPtr.get(),
-        sendDataMsgPtr->sliceLen + sizeof(MsgProto), COMM_OPT_BLOCK);
-    IDE_CTRL_VALUE_FAILED(ret == IDE_DAEMON_OK, return IDE_DAEMON_WRITE_ERROR, "write dump file error");
-    IdeErrorT code = AdxMsgProto::RecvResponse(handle);
-    IDE_CTRL_VALUE_FAILED((code == IDE_DAEMON_NONE_ERROR) || (code == IDE_DAEMON_DUMP_QUEUE_FULL),
-        return code, "send file shake response failed, ret=%d", static_cast<int32_t>(code));
+    IdeErrorT code = SessionIsConnected(handle);
+    IDE_CTRL_VALUE_WARN(
+        code == IDE_DAEMON_NONE_ERROR, return code, "check session status failed, err=%d", static_cast<int32_t>(code));
+    uint32_t ret = AdxCommOptManager::Instance().Write(
+        handle, sendDataMsgPtr.get(), sendDataMsgPtr->sliceLen + sizeof(MsgProto), COMM_OPT_BLOCK);
+    IDE_CTRL_VALUE_WARN(
+        ret != IDE_DAEMON_SOCK_CLOSE, return IDE_DAEMON_CHANNEL_ERROR,
+        "write dump data error, session[%zu] has been closed, ret: %d", handle.session, ret);
+    IDE_CTRL_VALUE_FAILED(
+        ret == IDE_DAEMON_OK, return IDE_DAEMON_WRITE_ERROR, "write dump data error, session: %zu, ret: %d",
+        handle.session, ret);
+    code = AdxMsgProto::RecvResponse(handle);
+    IDE_CTRL_VALUE_FAILED(
+        (code == IDE_DAEMON_NONE_ERROR) || (code == IDE_DAEMON_DUMP_QUEUE_FULL), return code,
+        "send file shake response failed, ret=%d", static_cast<int32_t>(code));
     IDE_LOGD("dump data process normal");
     return code;
 }
 
-IdeErrorT AdxDumpHdcHelper::Finish(IDE_SESSION &session)
+IdeErrorT AdxDumpHdcHelper::SessionIsConnected(const CommHandle handle) const
+{
+    int32_t status = 0;
+    int32_t ret = AdxGetAttrByCommHandle(&handle, HDC_SESSION_ATTR_STATUS, &status);
+    if (ret != IDE_DAEMON_OK || status != HDC_SESSION_STATUS_CONNECT) {
+        IDE_LOGW("session[%zu] is not connected, ret: %d, status: %d", handle.session, ret, status);
+        return IDE_DAEMON_CHANNEL_ERROR;
+    }
+    return IDE_DAEMON_NONE_ERROR;
+}
+
+IdeErrorT AdxDumpHdcHelper::Finish(IDE_SESSION& session)
 {
     CommHandle handle;
     handle.type = client_.type;
     handle.session = reinterpret_cast<OptHandle>(session);
-    IdeErrorT err = AdxMsgProto::SendResponse(handle, IDE_DUMP_REQ, 0, MsgStatus::MSG_STATUS_DATA_END);
-    IDE_CTRL_VALUE_FAILED(err == IDE_DAEMON_NONE_ERROR, return err, "dump data hand shake failed");
+    // 直接关闭会话，不再发送MSG_STATUS_DATA_END消息
     AdxCommOptManager::Instance().Close(handle);
     session = nullptr;
     return IDE_DAEMON_NONE_ERROR;
@@ -167,10 +186,10 @@ IdeErrorT AdxDumpHdcHelper::Finish(IDE_SESSION &session)
  *      not NULL: Handle used by hdc
  *      NULL:     dump start failed
  */
-IDE_SESSION HdcDumpStart(const char *connectInfo)
+IDE_SESSION HdcDumpStart(const char* connectInfo)
 {
-    IDE_CTRL_VALUE_FAILED(connectInfo != nullptr && strlen(connectInfo) != 0,
-        return nullptr, "dump start msg is empty");
+    IDE_CTRL_VALUE_FAILED(
+        connectInfo != nullptr && strlen(connectInfo) != 0, return nullptr, "dump start msg is empty");
     if (!Adx::AdxDumpHdcHelper::Instance().Init()) {
         return nullptr;
     }
@@ -189,7 +208,7 @@ IDE_SESSION HdcDumpStart(const char *connectInfo)
  *      IDE_DAEMON_UNKNOW_ERROR: write data failed
  *      IDE_DAEMON_NONE_ERROR:   write data succ
  */
-IdeErrorT HdcDumpData(const IDE_SESSION session, const IdeDumpChunk *dumpChunk)
+IdeErrorT HdcDumpData(const IDE_SESSION session, const IdeDumpChunk* dumpChunk)
 {
     IdeErrorT ret;
     IDE_CTRL_VALUE_FAILED(session != nullptr, return IDE_DAEMON_INVALID_PARAM_ERROR, "session is nullptr");
@@ -221,4 +240,4 @@ IdeErrorT HdcDumpEnd(IDE_SESSION session)
     IDE_LOGI("dump data finish");
     return Adx::AdxDumpHdcHelper::Instance().Finish(session);
 }
-}
+} // namespace Adx

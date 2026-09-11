@@ -8,6 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include "uploader.h"
+#include <chrono>
 #include "config/config.h"
 #include "errno/error_code.h"
 #include "msprof_dlog.h"
@@ -20,15 +21,15 @@ using namespace analysis::dvvp::common::error;
 using namespace analysis::dvvp::common::config;
 using namespace Analysis::Dvvp::MsprofErrMgr;
 
-Uploader::Uploader(SHARED_PTR_ALIA<analysis::dvvp::transport::ITransport> transport)
-    : transport_(transport), queue_(nullptr), isInited_(false), forceQuit_(false), isStopped_(false)
-{
+namespace {
+constexpr unsigned long UPLOADER_SLEEP_TIME_IN_US = 100000;
 }
 
-Uploader::~Uploader()
-{
-    Uinit();
-}
+Uploader::Uploader(SHARED_PTR_ALIA<analysis::dvvp::transport::ITransport> transport)
+    : transport_(transport), queue_(nullptr), isInited_(false), forceQuit_(false), isStopped_(false)
+{}
+
+Uploader::~Uploader() { Uinit(); }
 
 int32_t Uploader::Init(size_t size)
 {
@@ -64,13 +65,11 @@ int32_t Uploader::UploadData(CONST_VOID_PTR data, int32_t len)
 {
     if (!isInited_) {
         MSPROF_LOGE("Uploader was not inited.");
-        MSPROF_INNER_ERROR("EK9999", "Uploader was not inited.");
         return PROFILING_FAILED;
     }
 
     if (data == nullptr) {
         MSPROF_LOGE("[Uploader::UploadData]data is nullptr.");
-        MSPROF_INNER_ERROR("EK9999", "data is nullptr.");
         return PROFILING_FAILED;
     }
 
@@ -86,30 +85,26 @@ int32_t Uploader::UploadData(SHARED_PTR_ALIA<analysis::dvvp::ProfileFileChunk> f
 {
     if (!isInited_) {
         MSPROF_LOGE("Uploader was not inited.");
-        MSPROF_INNER_ERROR("EK9999", "Uploader was not inited.");
         return PROFILING_FAILED;
     }
 
     if (fileChunkReq == nullptr) {
         MSPROF_LOGE("[Uploader::UploadData]data is nullptr.");
-        MSPROF_INNER_ERROR("EK9999", "data is nullptr.");
         return PROFILING_FAILED;
     }
     if (!queue_->Push(fileChunkReq)) {
         MSPROF_LOGE("[Uploader::UploadData]Push data failed.");
-        MSPROF_INNER_ERROR("EK9999", "Push data failed.");
         return PROFILING_FAILED;
     }
 
     return PROFILING_SUCCESS;
 }
 
-void Uploader::Run(const struct error_message::Context &errorContext)
+void Uploader::Run(const error_message::ErrorManagerContext& errorContext)
 {
     MsprofErrorManager::instance()->SetErrorContext(errorContext);
     if (!isInited_) {
         MSPROF_LOGE("Uploader was not inited.");
-        MSPROF_INNER_ERROR("EK9999", "Uploader was not inited.");
         return;
     }
 
@@ -131,15 +126,12 @@ void Uploader::Run(const struct error_message::Context &errorContext)
                 pipeTransport_->SendBuffer(fileChunkReq->chunk.c_str(), fileChunkReq->chunkSize);
             }
             if (sentLen != static_cast<int32_t>(fileChunkReq->chunkSize)) {
-                MSPROF_LOGE("Failed to upload data, data_len=%zu bytes, sent len=%d bytes",
-                    fileChunkReq->chunkSize, sentLen);
-                MSPROF_INNER_ERROR("EK9999", "Failed to upload data, data_len=%zu bytes, sent len=%d bytes",
-                    fileChunkReq->chunkSize, sentLen);
+                MSPROF_LOGE(
+                    "Failed to upload data, data_len=%zu bytes, sent len=%d bytes", fileChunkReq->chunkSize, sentLen);
             }
         } else {
             if (transport_->SendBuffer(fileChunkReq) != PROFILING_SUCCESS) {
                 MSPROF_LOGE("Failed to upload data");
-                MSPROF_INNER_ERROR("EK9999", "Failed to upload data");
             }
             if (pipeTransport_ != nullptr && pipeTransport_->IsRegisterRawDataCallback()) {
                 int32_t ret = pipeTransport_->SendBuffer(fileChunkReq);
@@ -152,7 +144,6 @@ void Uploader::Run(const struct error_message::Context &errorContext)
 
     MSPROF_LOGI("queue size remaining: %zu, force_quit:%d", queue_->Size(), (forceQuit_ ? 1 : 0));
 }
-
 
 // Before you invoke stop, all data should already been enqueued
 int32_t Uploader::Stop(bool force)
@@ -167,21 +158,15 @@ int32_t Uploader::Stop(bool force)
         int32_t ret = Thread::Stop();
         if (ret != PROFILING_SUCCESS) {
             MSPROF_LOGE("Failed to stop uploader");
-            MSPROF_INNER_ERROR("EK9999", "Failed to stop uploader");
         }
     }
 
     return PROFILING_SUCCESS;
 }
 
-void Uploader::SetTransportStopped()
-{
-    transport_->SetStopped();
-}
+void Uploader::SetTransportStopped() { transport_->SetStopped(); }
 
-void Uploader::SetPipeTransport(SHARED_PTR_ALIA<ITransport> trans) {
-    pipeTransport_ = trans;
-}
+void Uploader::SetPipeTransport(SHARED_PTR_ALIA<ITransport> trans) { pipeTransport_ = trans; }
 
 int32_t Uploader::RegisterPipeTransportCallback(MsprofRawDataCallback callback)
 {
@@ -214,15 +199,29 @@ void Uploader::RegisterTransportGenHashIdFuncPtr(HashDataGenIdFuncPtr* ptr)
 void Uploader::Flush() const
 {
     while (queue_->Size() != 0) {
-        const unsigned long UPLOADER_SLEEP_TIME_IN_US = 100000;
         analysis::dvvp::common::utils::Utils::UsleepInterupt(UPLOADER_SLEEP_TIME_IN_US);
     }
 }
 
-SHARED_PTR_ALIA<analysis::dvvp::transport::ITransport> Uploader::GetTransport()
+int32_t Uploader::Flush(uint32_t timeoutSec) const
 {
-    return transport_;
+    if (queue_ == nullptr) {
+        MSPROF_LOGE("Uploader queue is nullptr.");
+        return PROFILING_FAILED;
+    }
+    const auto startTime = std::chrono::steady_clock::now();
+    const auto timeout = std::chrono::seconds(timeoutSec);
+    while (queue_->Size() != 0) {
+        if (timeoutSec == 0 || std::chrono::steady_clock::now() - startTime >= timeout) {
+            MSPROF_LOGE("Wait uploader queue empty timeout, timeoutSec:%u, remaining:%zu.", timeoutSec, queue_->Size());
+            return PROFILING_FAILED;
+        }
+        analysis::dvvp::common::utils::Utils::UsleepInterupt(UPLOADER_SLEEP_TIME_IN_US);
+    }
+    return PROFILING_SUCCESS;
 }
-}  // namespace transport
-}  // namespace dvvp
-}  // namespace analysis
+
+SHARED_PTR_ALIA<analysis::dvvp::transport::ITransport> Uploader::GetTransport() { return transport_; }
+} // namespace transport
+} // namespace dvvp
+} // namespace analysis

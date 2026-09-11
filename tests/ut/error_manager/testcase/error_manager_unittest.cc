@@ -12,45 +12,34 @@
 #include <memory>
 #include <fstream>
 #include <thread>
+#include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <dlfcn.h>
 #include <nlohmann/json.hpp>
 #include "mmpa/mmpa_api.h"
-#include "tests/depends/mmpa/src/mmpa_stub.h"
 #include "base/err_msg.h"
 #include "base/err_mgr.h"
-#include "graph/def_types.h"
-#include "common/util/error_manager/error_manager.h"
+#include "error_manager.h"
 
-namespace ge
+template <typename TI, typename TO>
+inline TO* PtrToPtr(TI* const ptr)
 {
+    return reinterpret_cast<TO*>(ptr);
+}
+
+template <typename TI, typename TO>
+inline const TO* PtrToPtr(const TI* const ptr)
+{
+    return reinterpret_cast<const TO*>(ptr);
+}
+
+namespace error_message {
 namespace {
-  int32_t system_time_ret = 0;
-  int32_t time_of_day_ret = 0;
-  class MockMmpa : public ge::MmpaStubApi {
-    public:
-      INT32 mmGetSystemTime(mmSystemTime_t *sysTime) override {
-        if (system_time_ret == -1) {
-          return EN_ERR;
-        }
-        sysTime->wYear = 2023;
-        sysTime->wMonth = 8;
-        sysTime->wDay = 8;
-        sysTime->wHour = 20;
-        sysTime->wMinute = 8;
-        sysTime->wSecond = 0;
-        return EN_OK;
-      }
-      INT32 mmGetTimeOfDay(mmTimeval *timeVal, mmTimezone *timeZone) override {
-        if (time_of_day_ret == -1) {
-          return EN_ERR;
-        }
-        timeVal->tv_usec = 1001;
-        timeVal->tv_sec = 1001;
-        return EN_OK;
-      }
-  };
-  std::string g_msg1 = R"(
+int32_t system_time_ret = 0;
+int32_t time_of_day_ret = 0;
+
+std::string g_msg1 = R"(
 {
   "error_info_list": [
     {
@@ -78,7 +67,7 @@ namespace {
   ]
 }
 )";
-  std::string g_msg2 = R"(
+std::string g_msg2 = R"(
 {
   "error_info_list": [
     {
@@ -106,338 +95,417 @@ namespace {
   ]
 }
 )";
+std::string g_msg3 = R"(
+{
+  "error_info_list": [
+    {
+      "errClass": "GE Errors",
+      "errTitle": "Invalid_Argument",
+      "ErrCode": "E10001",
+      "ErrMessage": "Value [%s] for parameter [%s] is invalid. Reason: %s",
+      "Arglist": "value,parameter,reason",
+      "suggestion": {
+        "Possible Cause": "N/A",
+        "Solution": "Try again with a valid argument."
+      }
+    },
+    {
+      "errClass": "GE Errors",
+      "errTitle": "Config_Error_Weight_Configuration",
+      "ErrCode": "W11002",
+      "ErrMessage": "In the compression weight configuration file [%s], some nodes do not exist in graph: %s.",
+      "Arglist": "filename, opnames",
+      "suggestion": {
+        "Possible Cause": "N/A",
+        "Solution": "Check whether the weight file matches the model file."
+      }
+    }
+  ]
+}
+)";
 REG_FORMAT_ERROR_MSG(g_msg1.c_str(), g_msg1.size());
 REG_FORMAT_ERROR_MSG(g_msg2.c_str(), g_msg2.size());
-}
+REG_FORMAT_ERROR_MSG(g_msg3.c_str(), g_msg3.size());
 
-  class UtestErrorManager : public testing::Test {
-    protected:
-    void SetUp() {
-      MmpaStub::GetInstance().SetImpl(std::make_shared<MockMmpa>());
-      auto &instance = ErrorManager::GetInstance();
-      EXPECT_FALSE(instance.is_init_);
-      std::string error_code_json_path = METADEF_DIR + std::string("/error_manager/error_code.json");
-      nlohmann::json json_file;
-      EXPECT_EQ(instance.ReadJsonFile(error_code_json_path, &json_file), 0);
-      EXPECT_EQ(instance.ParseJsonFormatString(ge::PtrToPtr<nlohmann::json, void>(&json_file)), 0);
-      instance.is_init_ = true;
+const char kStringArgFormat[] = "%s";
+const char kErrMsgFormat[] = "errmsg:%s";
+
+template <typename FuncPtr>
+void ExpectCInterfaceSymbolName(FuncPtr func_ptr, const char* expected_symbol_name)
+{
+    Dl_info info{};
+    ASSERT_NE(dladdr(reinterpret_cast<const void*>(func_ptr), &info), 0);
+    ASSERT_NE(info.dli_sname, nullptr);
+    EXPECT_STREQ(info.dli_sname, expected_symbol_name);
+}
+} // namespace
+
+class UtestErrorManager : public testing::Test {
+protected:
+    void SetUp()
+    {
+        auto& instance = ErrorManager::GetInstance();
+        EXPECT_FALSE(instance.is_init_);
+        std::string error_code_json_path = BASE_DIR + std::string("/src/dfx/error_manager/error_code.json");
+        nlohmann::json json_file;
+        EXPECT_EQ(instance.ReadJsonFile(error_code_json_path, &json_file), 0);
+        EXPECT_EQ(instance.ParseJsonFormatString(PtrToPtr<nlohmann::json, void>(&json_file)), 0);
+        instance.is_init_ = true;
     }
-    void TearDown() {
+    void TearDown()
+    {
         ErrorManager::GetInstance().is_init_ = false;
         ErrorManager::GetInstance().compile_failed_msg_map_.clear();
         ErrorManager::GetInstance().compile_failed_msg_map_.clear();
         ErrorManager::GetInstance().error_message_per_work_id_.clear();
         ErrorManager::GetInstance().warning_messages_per_work_id_.clear();
-        MmpaStub::GetInstance().Reset();
     }
-  };
+};
 
-TEST_F(UtestErrorManager, Init_faild) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_EQ(instance.Init(""), -1);
-  instance.is_init_ = true;
-  EXPECT_EQ(instance.Init(""), -1);
-  EXPECT_EQ(instance.Init(), -1);
-  EXPECT_EQ(error_message::ErrMgrInit(error_message::ErrorMessageMode::ERR_MSG_MODE_MAX), -1);
+TEST_F(UtestErrorManager, Init_faild)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_EQ(instance.Init(""), -1);
+    instance.is_init_ = true;
+    EXPECT_EQ(instance.Init(""), -1);
+    EXPECT_EQ(instance.Init(), -1);
+    EXPECT_EQ(error_message::ErrMgrInit(error_message::ErrorMessageMode::ERR_MSG_MODE_MAX), -1);
 }
 
-TEST_F(UtestErrorManager, FormatErrorMessage) {
-  char buf[10] = {0};
-  EXPECT_TRUE(error_message::FormatErrorMessage(buf, 10, "test") > 0);
+TEST_F(UtestErrorManager, FormatErrorMessage)
+{
+    char buf[10] = {0};
+    EXPECT_TRUE(error_message::FormatErrorMessage(buf, 10, "test") > 0);
 }
 
-TEST_F(UtestErrorManager, TrimPath) {
-  std::string file = "error_manager_unittest.cc";
-  EXPECT_EQ(error_message::TrimPath(file), file);
+TEST_F(UtestErrorManager, TrimPath)
+{
+    std::string file = "error_manager_unittest.cc";
+    EXPECT_EQ(error_message::TrimPath(file), file);
 }
 
-TEST_F(UtestErrorManager, GetInstance) {
-  EXPECT_NO_THROW(ErrorManager::GetInstance());
+TEST_F(UtestErrorManager, GetInstance) { EXPECT_NO_THROW(ErrorManager::GetInstance()); }
+
+TEST_F(UtestErrorManager, ReportInterErrMessage)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.error_context_.work_stream_id = 0;
+    EXPECT_EQ(instance.ReportInterErrMessage("errcode", "errmsg"), -1);
+    instance.is_init_ = true;
+    EXPECT_EQ(instance.ReportInterErrMessage("600000", "errmsg"), -1);
 }
 
-TEST_F(UtestErrorManager, ReportInterErrMessage) {
-  auto &instance = ErrorManager::GetInstance();
-  instance.error_context_.work_stream_id = 0;
-  EXPECT_EQ(instance.ReportInterErrMessage("errcode", "errmsg"), -1);
-  instance.is_init_ = true;
-  EXPECT_EQ(instance.ReportInterErrMessage("600000", "errmsg"), -1);
+TEST_F(UtestErrorManager, ReportInterErrMessage_WorkStreamId)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.is_init_ = true;
+    auto id = instance.error_context_.work_stream_id;
+    instance.error_context_.work_stream_id = 0;
+    EXPECT_EQ(instance.ReportInterErrMessage("609999", "errmsg"), 0);
+
+    // error_messages.size() > kMaxWorkSize
+    instance.error_message_per_work_id_[instance.error_context_.work_stream_id].resize(1010U);
+    EXPECT_EQ(instance.ReportInterErrMessage("609999", "errmsg"), -1);
+
+    // error_message_per_work_id_.size() > kMaxWorkSize
+    instance.error_context_.work_stream_id = id;
+    for (int i = 0; i < 1002; i++) {
+        instance.error_message_per_work_id_[i] = std::vector<ErrorManager::ErrorItem>();
+    }
+    EXPECT_EQ(instance.ReportInterErrMessage("609999", "errmsg"), -1);
 }
 
-TEST_F(UtestErrorManager, ReportInterErrMessage_WorkStreamId) {
-  auto &instance = ErrorManager::GetInstance();
-  instance.is_init_ = true;
-  auto id = instance.error_context_.work_stream_id;
-  instance.error_context_.work_stream_id = 0;
-  EXPECT_EQ(instance.ReportInterErrMessage("609999", "errmsg"), 0);
-
-  // error_messages.size() > kMaxWorkSize
-  instance.error_message_per_work_id_[instance.error_context_.work_stream_id].resize(1010U);
-  EXPECT_EQ(instance.ReportInterErrMessage("609999", "errmsg"), -1);
-
-  // error_message_per_work_id_.size() > kMaxWorkSize
-  instance.error_context_.work_stream_id = id;
-  for (int i = 0; i < 1002; i++){
-    instance.error_message_per_work_id_[i] = std::vector<ErrorManager::ErrorItem>();
-  }
-  EXPECT_EQ(instance.ReportInterErrMessage("609999", "errmsg"), -1);
+TEST_F(UtestErrorManager, ReportErrMessage)
+{
+    auto& instance = ErrorManager::GetInstance();
+    std::string error_code = "error";
+    std::map<std::string, std::string> args_map;
+    system_time_ret = -1;
+    EXPECT_EQ(instance.ReportErrMessage(error_code, args_map), -1);
+    system_time_ret = 0;
+    instance.is_init_ = true;
+    time_of_day_ret = -1;
+    EXPECT_EQ(instance.ReportErrMessage(error_code, args_map), -1);
+    time_of_day_ret = 0;
 }
 
-TEST_F(UtestErrorManager, ReportErrMessage) {
-  auto &instance = ErrorManager::GetInstance();
-  std::string error_code = "error";
-  std::map<std::string, std::string> args_map;
-  system_time_ret = -1;
-  EXPECT_EQ(instance.ReportErrMessage(error_code, args_map), -1);
-  system_time_ret = 0;
-  instance.is_init_ = true;
-  time_of_day_ret = -1;
-  EXPECT_EQ(instance.ReportErrMessage(error_code, args_map), -1);
-  time_of_day_ret = 0;
+TEST_F(UtestErrorManager, ReportErrMessage_Normal)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.is_init_ = true;
+    std::string error_code = "error";
+    std::map<std::string, std::string> args_map;
+    args_map["argv1"] = "val1";
+    auto conf = ErrorManager::ErrorInfoConfig();
+    instance.error_map_[error_code] = conf;
+    EXPECT_EQ(instance.ReportErrMessage(error_code, args_map), 0);
+    instance.error_map_[error_code].arg_list.push_back("argv1");
+    EXPECT_EQ(instance.ReportErrMessage(error_code, args_map), -1);
+    instance.error_map_[error_code].arg_list.clear();
+    instance.error_map_[error_code].arg_list.push_back("");
+    EXPECT_EQ(instance.ReportErrMessage(error_code, args_map), 0);
 }
 
-TEST_F(UtestErrorManager, ReportErrMessage_Normal) {
-  auto &instance = ErrorManager::GetInstance();
-  instance.is_init_ = true;
-  std::string error_code = "error";
-  std::map<std::string, std::string> args_map;
-  args_map["argv1"] = "val1";
-  auto conf = ErrorManager::ErrorInfoConfig();
-  instance.error_map_[error_code] = conf;
-  EXPECT_EQ(instance.ReportErrMessage(error_code, args_map), 0);
-  instance.error_map_[error_code].arg_list.push_back("argv1");
-  EXPECT_EQ(instance.ReportErrMessage(error_code, args_map), -1);
-  instance.error_map_[error_code].arg_list.clear();
-  instance.error_map_[error_code].arg_list.push_back("");
-  EXPECT_EQ(instance.ReportErrMessage(error_code, args_map), 0);
+TEST_F(UtestErrorManager, SetRawErrorMessages)
+{
+    auto& instance = ErrorManager::GetInstance();
+    std::vector<ErrorManager::ErrorItem> vec;
+    vec.push_back(ErrorManager::ErrorItem());
+    instance.error_context_.work_stream_id = 0;
+    EXPECT_EQ(instance.SetRawErrorMessages(vec), 0);
+    EXPECT_NE(instance.GetErrorMessage(), "");
 }
 
-TEST_F(UtestErrorManager, SetRawErrorMessages) {
-  auto &instance = ErrorManager::GetInstance();
-  std::vector<ErrorManager::ErrorItem> vec;
-  vec.push_back(ErrorManager::ErrorItem());
-  instance.error_context_.work_stream_id = 0;
-  EXPECT_EQ(instance.SetRawErrorMessages(vec), 0);
-  EXPECT_NE(instance.GetErrorMessage(), "");
+TEST_F(UtestErrorManager, GetErrorMessage)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_EQ(instance.GetErrorMessage(), "");
+    std::vector<ErrorManager::ErrorItem> vec;
+    vec.push_back(ErrorManager::ErrorItem());
+    instance.error_message_per_work_id_[0] = vec;
+    instance.error_context_.work_stream_id = 0;
+    EXPECT_NE(instance.GetErrorMessage(), "");
+    vec.push_back(ErrorManager::ErrorItem());
+    instance.error_message_per_work_id_[1] = vec;
+    instance.error_context_.work_stream_id = 1;
+    EXPECT_NE(instance.GetErrorMessage(), "");
 }
 
-TEST_F(UtestErrorManager, GetErrorMessage) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_EQ(instance.GetErrorMessage(), "");
-  std::vector<ErrorManager::ErrorItem> vec;
-  vec.push_back(ErrorManager::ErrorItem());
-  instance.error_message_per_work_id_[0] = vec;
-  instance.error_context_.work_stream_id = 0;
-  EXPECT_NE(instance.GetErrorMessage(), "");
-  vec.push_back(ErrorManager::ErrorItem());
-  instance.error_message_per_work_id_[1] = vec;
-  instance.error_context_.work_stream_id = 1;
-  EXPECT_NE(instance.GetErrorMessage(), "");
+TEST_F(UtestErrorManager, GetErrorMessageOk)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_EQ(instance.GetErrorMessage(), "");
+    std::vector<ErrorManager::ErrorItem> vec;
+    vec.push_back(ErrorManager::ErrorItem());
+    vec[0].error_id = "E10001";
+    vec[0].error_message = "Device id was not set";
+    vec.push_back(ErrorManager::ErrorItem());
+    vec[1].error_id = "E10002";
+    vec[1].error_message = "Device id was not set";
+    instance.error_message_per_work_id_[0] = vec;
+    instance.error_context_.work_stream_id = 0;
+    EXPECT_NE(instance.GetErrorMessage(), "");
 }
 
-TEST_F(UtestErrorManager, GetErrorMessageOk) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_EQ(instance.GetErrorMessage(), "");
-  std::vector<ErrorManager::ErrorItem> vec;
-  vec.push_back(ErrorManager::ErrorItem());
-  vec[0].error_id = "E10001";
-  vec[0].error_message = "Device id was not set";
-  vec.push_back(ErrorManager::ErrorItem());
-  vec[1].error_id = "E10002";
-  vec[1].error_message = "Device id was not set";
-  instance.error_message_per_work_id_[0] = vec;
-  instance.error_context_.work_stream_id = 0;
-  EXPECT_NE(instance.GetErrorMessage(), "");
+TEST_F(UtestErrorManager, GetErrorOtherMessage)
+{
+    auto& instance = ErrorManager::GetInstance();
+    std::vector<ErrorManager::ErrorItem> vec;
+    ErrorManager::ErrorItem item;
+    item.error_id = "E18888";
+    item.error_message = "ERROR";
+    vec.push_back(item);
+    ErrorManager::ErrorItem item1;
+    item1.error_id = "E19999";
+    item1.error_message = "ERROR";
+    vec.push_back(item1);
+    instance.error_message_per_work_id_[0] = vec;
+    instance.error_context_.work_stream_id = 0;
+    EXPECT_NE(instance.GetErrorMessage(), "");
 }
 
-TEST_F(UtestErrorManager, GetErrorOtherMessage) {
-  auto &instance = ErrorManager::GetInstance();
-  std::vector<ErrorManager::ErrorItem> vec;
-  ErrorManager::ErrorItem item;
-  item.error_id = "E18888";
-  item.error_message = "ERROR";
-  vec.push_back(item);
-  ErrorManager::ErrorItem item1;
-  item1.error_id = "E19999";
-  item1.error_message = "ERROR";
-  vec.push_back(item1);
-  instance.error_message_per_work_id_[0] = vec;
-  instance.error_context_.work_stream_id = 0;
-  EXPECT_NE(instance.GetErrorMessage(), "");
+TEST_F(UtestErrorManager, GetWarningMessage)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_EQ(instance.GetWarningMessage(), "");
+    auto warn_msg = error_message::GetErrMgrWarningMessage();
+    EXPECT_NE(warn_msg, nullptr);
+    EXPECT_EQ(std::string(warn_msg.get()), "");
 }
 
-TEST_F(UtestErrorManager, GetWarningMessage) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_EQ(instance.GetWarningMessage(), "");
-  auto warn_msg = error_message::GetErrMgrWarningMessage();
-  EXPECT_NE(warn_msg, nullptr);
-  EXPECT_EQ(std::string(warn_msg.get()), "");
+TEST_F(UtestErrorManager, OutputErrMessage)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_EQ(instance.OutputErrMessage(1), 0);
+    EXPECT_EQ(instance.OutputErrMessage(10000), -1);
 }
 
-TEST_F(UtestErrorManager, OutputErrMessage) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_EQ(instance.OutputErrMessage(1), 0);
-  EXPECT_EQ(instance.OutputErrMessage(10000), -1);
+TEST_F(UtestErrorManager, OutputMessage)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_EQ(instance.OutputMessage(1), 0);
 }
 
-TEST_F(UtestErrorManager, OutputMessage) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_EQ(instance.OutputMessage(1), 0);
+TEST_F(UtestErrorManager, ATCReportErrMessage)
+{
+    auto& instance = ErrorManager::GetInstance();
+    std::vector<std::string> key;
+    std::vector<std::string> value;
+    EXPECT_NO_THROW(instance.ATCReportErrMessage("error", key, value));
+    instance.is_init_ = true;
+    EXPECT_NO_THROW(instance.ATCReportErrMessage("error", key, value));
+    key.push_back("key");
+    EXPECT_NO_THROW(instance.ATCReportErrMessage("error", key, value));
+    value.push_back("123");
+    EXPECT_NO_THROW(instance.ATCReportErrMessage("error", key, value));
 }
 
-TEST_F(UtestErrorManager, ATCReportErrMessage) {
-  auto &instance = ErrorManager::GetInstance();
-  std::vector<std::string> key;
-  std::vector<std::string> value;
-  EXPECT_NO_THROW(instance.ATCReportErrMessage("error", key, value));
-  instance.is_init_ = true;
-  EXPECT_NO_THROW(instance.ATCReportErrMessage("error", key, value));
-  key.push_back("key");
-  EXPECT_NO_THROW(instance.ATCReportErrMessage("error", key, value));
-  value.push_back("123");
-  EXPECT_NO_THROW(instance.ATCReportErrMessage("error", key, value));
+TEST_F(UtestErrorManager, ClassifyCompileFailedMsg)
+{
+    auto& instance = ErrorManager::GetInstance();
+    std::map<std::string, std::string> msg;
+    std::map<std::string, std::vector<std::string>> classified_msg;
+    msg["code"] = "error";
+    EXPECT_NO_THROW(instance.ClassifyCompileFailedMsg(msg, classified_msg));
+    classified_msg["code"] = std::vector<std::string>();
+    EXPECT_NO_THROW(instance.ClassifyCompileFailedMsg(msg, classified_msg));
 }
 
-TEST_F(UtestErrorManager, ClassifyCompileFailedMsg) {
-  auto &instance = ErrorManager::GetInstance();
-  std::map<std::string, std::string> msg;
-  std::map<std::string, std::vector<std::string>> classified_msg;
-  msg["code"] = "error";
-  EXPECT_NO_THROW(instance.ClassifyCompileFailedMsg(msg, classified_msg));
-  classified_msg["code"] = std::vector<std::string>();
-  EXPECT_NO_THROW(instance.ClassifyCompileFailedMsg(msg, classified_msg));
+TEST_F(UtestErrorManager, Context)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.error_context_.work_stream_id = 0;
+    auto context = instance.GetErrorManagerContext();
+    EXPECT_NE(instance.error_context_.work_stream_id, 0);
+    instance.SetErrorContext(context);
 }
 
-TEST_F(UtestErrorManager, Context) {
-  auto &instance = ErrorManager::GetInstance();
-  instance.error_context_.work_stream_id = 0;
-  auto context = instance.GetErrorManagerContext();
-  EXPECT_NE(instance.error_context_.work_stream_id, 0);
-  instance.SetErrorContext(context);
+TEST_F(UtestErrorManager, GenWorkStreamIdBySessionGraph)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_NO_THROW(instance.GenWorkStreamIdBySessionGraph(1, 2));
 }
 
-TEST_F(UtestErrorManager, GenWorkStreamIdBySessionGraph) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_NO_THROW(instance.GenWorkStreamIdBySessionGraph(1, 2));
+TEST_F(UtestErrorManager, GenWorkStreamIdWithSessionIdGraphId)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_NO_THROW(instance.GenWorkStreamIdWithSessionIdGraphId(1, 2));
 }
 
-TEST_F(UtestErrorManager, GenWorkStreamIdWithSessionIdGraphId) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_NO_THROW(instance.GenWorkStreamIdWithSessionIdGraphId(1, 2));
+TEST_F(UtestErrorManager, GetMstuneCompileFailedMsg)
+{
+    auto& instance = ErrorManager::GetInstance();
+    std::string graph_name = "graph";
+    std::map<std::string, std::vector<std::string>> msg_map;
+    EXPECT_EQ(instance.GetMstuneCompileFailedMsg(graph_name, msg_map), -1);
+    msg_map["msg"] = std::vector<std::string>();
+    EXPECT_EQ(instance.GetMstuneCompileFailedMsg(graph_name, msg_map), -1);
+    instance.is_init_ = true;
+    EXPECT_EQ(instance.GetMstuneCompileFailedMsg(graph_name, msg_map), -1);
+    msg_map.clear();
+    instance.compile_failed_msg_map_["graph"] = std::map<std::string, std::vector<std::string>>();
+    EXPECT_EQ(instance.GetMstuneCompileFailedMsg(graph_name, msg_map), 0);
 }
 
-TEST_F(UtestErrorManager, GetMstuneCompileFailedMsg) {
-  auto &instance = ErrorManager::GetInstance();
-  std::string graph_name = "graph";
-  std::map<std::string, std::vector<std::string>> msg_map;
-  EXPECT_EQ(instance.GetMstuneCompileFailedMsg(graph_name, msg_map), -1);
-  msg_map["msg"] = std::vector<std::string>();
-  EXPECT_EQ(instance.GetMstuneCompileFailedMsg(graph_name, msg_map), -1);
-  instance.is_init_ = true;
-  EXPECT_EQ(instance.GetMstuneCompileFailedMsg(graph_name, msg_map), -1);
-  msg_map.clear();
-  instance.compile_failed_msg_map_["graph"] = std::map<std::string, std::vector<std::string>>();
-  EXPECT_EQ(instance.GetMstuneCompileFailedMsg(graph_name, msg_map), 0);
+TEST_F(UtestErrorManager, ReportMstuneCompileFailedMsg)
+{
+    auto& instance = ErrorManager::GetInstance();
+    std::string root_graph_name = "root_graph";
+    std::map<std::string, std::string> msg;
+    EXPECT_EQ(instance.ReportMstuneCompileFailedMsg(root_graph_name, msg), -1);
+    instance.is_init_ = true;
+    EXPECT_EQ(instance.ReportMstuneCompileFailedMsg(root_graph_name, msg), -1);
 }
 
-TEST_F(UtestErrorManager, ReportMstuneCompileFailedMsg) {
-  auto &instance = ErrorManager::GetInstance();
-  std::string root_graph_name = "root_graph";
-  std::map<std::string, std::string> msg;
-  EXPECT_EQ(instance.ReportMstuneCompileFailedMsg(root_graph_name, msg), -1);
-  instance.is_init_ = true;
-  EXPECT_EQ(instance.ReportMstuneCompileFailedMsg(root_graph_name, msg), -1);
+TEST_F(UtestErrorManager, ReportMstuneCompileFailedMsg_Success)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.is_init_ = true;
+    std::string root_graph_name = "root_graph_name";
+    std::map<std::string, std::string> msg;
+    msg["root_graph_name"] = "message";
+    EXPECT_EQ(instance.ReportMstuneCompileFailedMsg(root_graph_name, msg), 0);
+    instance.compile_failed_msg_map_["root_graph_name"] = std::map<std::string, std::vector<std::string>>();
+    EXPECT_EQ(instance.ReportMstuneCompileFailedMsg(root_graph_name, msg), 0);
 }
 
-TEST_F(UtestErrorManager, ReportMstuneCompileFailedMsg_Success) {
-  auto &instance = ErrorManager::GetInstance();
-  instance.is_init_ = true;
-  std::string root_graph_name = "root_graph_name";
-  std::map<std::string, std::string> msg;
-  msg["root_graph_name"] = "message";
-  EXPECT_EQ(instance.ReportMstuneCompileFailedMsg(root_graph_name, msg), 0);
-  instance.compile_failed_msg_map_["root_graph_name"] = std::map<std::string, std::vector<std::string>>();
-  EXPECT_EQ(instance.ReportMstuneCompileFailedMsg(root_graph_name, msg), 0);
+TEST_F(UtestErrorManager, ReadJsonFile)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_EQ(instance.ReadJsonFile("", nullptr), -1);
+    EXPECT_EQ(instance.ReadJsonFile("json", nullptr), -1);
+    std::ofstream out("out.json");
+    if (out.is_open()) {
+        out << "{\"name\":\"value\"}\n";
+        out.close();
+    }
+    nlohmann::json json_file;
+    EXPECT_EQ(instance.ReadJsonFile("out.json", &json_file), 0);
 }
 
-TEST_F(UtestErrorManager, ReadJsonFile) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_EQ(instance.ReadJsonFile("", nullptr), -1);
-  EXPECT_EQ(instance.ReadJsonFile("json", nullptr), -1);
-  std::ofstream out("out.json");
-  if (out.is_open()){
-    out << "{\"name\":\"value\"}\n";
-    out.close();
-  }
-  nlohmann::json json_file;
-  EXPECT_EQ(instance.ReadJsonFile("out.json", &json_file), 0);
+TEST_F(UtestErrorManager, ReadJsonFile_Failed_incorrent_format_json_file)
+{
+    auto& instance = ErrorManager::GetInstance();
+    std::ofstream out("out.json");
+    if (out.is_open()) {
+        out << "{\"name\":\"value\"\n"; // lack }
+        out.close();
+    }
+    nlohmann::json json_file;
+    EXPECT_NE(instance.ReadJsonFile("out.json", &json_file), 0);
 }
 
-TEST_F(UtestErrorManager, ParseJsonFile) {
-  auto &instance = ErrorManager::GetInstance();
-  std::ofstream out("out.json");
-  if (out.is_open()){
-    out << "{\"name\":\"value\"}\n";
-    out.close();
-  }
-  nlohmann::json json_file;
-  EXPECT_EQ(instance.ReadJsonFile("out.json", &json_file), 0);
-  EXPECT_EQ(instance.ParseJsonFormatString(ge::PtrToPtr<nlohmann::json, void>(&json_file)), -1);
+TEST_F(UtestErrorManager, ParseJsonFile)
+{
+    auto& instance = ErrorManager::GetInstance();
+    std::ofstream out("out.json");
+    if (out.is_open()) {
+        out << "{\"name\":\"value\"}\n";
+        out.close();
+    }
+    nlohmann::json json_file;
+    EXPECT_EQ(instance.ReadJsonFile("out.json", &json_file), 0);
+    EXPECT_EQ(instance.ParseJsonFormatString(PtrToPtr<nlohmann::json, void>(&json_file)), -1);
 
-  std::ofstream out1("out1.json");
-  if (out1.is_open()){
-    out1 << "{\"error_info_list\":[\"err1\"]}";
-    out1.close();
-  }
-  EXPECT_EQ(instance.ReadJsonFile("out1.json", &json_file), 0);
-  EXPECT_EQ(instance.ParseJsonFormatString(ge::PtrToPtr<nlohmann::json, void>(&json_file)), -1);
-  std::ofstream out2("out2.json");
-  if (out2.is_open()){
-    out2 << "{\"error_info_list\":\"err1\"}";
-    out2.close();
-  }
-  EXPECT_EQ(instance.ReadJsonFile("out2.json", &json_file), 0);
-  EXPECT_EQ(instance.ParseJsonFormatString(ge::PtrToPtr<nlohmann::json, void>(&json_file)), -1);
-  std::ofstream out3("out3.json");
-  if (out3.is_open()){
-    out3 << "{\"error_info_list\":[{\"ErrCode\":\"1\", \"ErrMessage\":\"message\", \"Arglist\":\"1,2,3\"}]}";
-    out3.close();
-  }
-  EXPECT_EQ(instance.ReadJsonFile("out3.json", &json_file), 0);
-  EXPECT_EQ(instance.ParseJsonFormatString(ge::PtrToPtr<nlohmann::json, void>(&json_file)), 0);
-  instance.error_map_["1"] = ErrorManager::ErrorInfoConfig();
+    std::ofstream out1("out1.json");
+    if (out1.is_open()) {
+        out1 << "{\"error_info_list\":[\"err1\"]}";
+        out1.close();
+    }
+    EXPECT_EQ(instance.ReadJsonFile("out1.json", &json_file), 0);
+    EXPECT_EQ(instance.ParseJsonFormatString(PtrToPtr<nlohmann::json, void>(&json_file)), -1);
+    std::ofstream out2("out2.json");
+    if (out2.is_open()) {
+        out2 << "{\"error_info_list\":\"err1\"}";
+        out2.close();
+    }
+    EXPECT_EQ(instance.ReadJsonFile("out2.json", &json_file), 0);
+    EXPECT_EQ(instance.ParseJsonFormatString(PtrToPtr<nlohmann::json, void>(&json_file)), -1);
+    std::ofstream out3("out3.json");
+    if (out3.is_open()) {
+        out3 << "{\"error_info_list\":[{\"ErrCode\":\"1\", \"ErrMessage\":\"message\", \"Arglist\":\"1,2,3\"}]}";
+        out3.close();
+    }
+    EXPECT_EQ(instance.ReadJsonFile("out3.json", &json_file), 0);
+    EXPECT_EQ(instance.ParseJsonFormatString(PtrToPtr<nlohmann::json, void>(&json_file)), 0);
+    instance.error_map_["1"] = ErrorManager::ErrorInfoConfig();
 
-  EXPECT_EQ(instance.ReadJsonFile("out3.json", &json_file), 0);
-  EXPECT_EQ(instance.ParseJsonFormatString(ge::PtrToPtr<nlohmann::json, void>(&json_file)), 0);
+    EXPECT_EQ(instance.ReadJsonFile("out3.json", &json_file), 0);
+    EXPECT_EQ(instance.ParseJsonFormatString(PtrToPtr<nlohmann::json, void>(&json_file)), 0);
 }
 
-TEST_F(UtestErrorManager, ParseJsonFileSuccess) {
-  std::string error_code_json_path = METADEF_DIR + std::string("/error_manager/error_code.json");
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_EQ(instance.ParseJsonFile(error_code_json_path), 0);
+TEST_F(UtestErrorManager, ParseJsonFileSuccess)
+{
+    std::string error_code_json_path = BASE_DIR + std::string("/src/dfx/error_manager/error_code.json");
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_EQ(instance.ParseJsonFile(error_code_json_path), 0);
 }
 
-TEST_F(UtestErrorManager, ClearErrorMsgContainerByWorkId) {
-  auto &instance = ErrorManager::GetInstance();
-  instance.error_message_per_work_id_[0] = std::vector<ErrorManager::ErrorItem>();
-  EXPECT_NO_THROW(instance.ClearErrorMsgContainerByWorkId(0));
+TEST_F(UtestErrorManager, ClearErrorMsgContainerByWorkId)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.error_message_per_work_id_[0] = std::vector<ErrorManager::ErrorItem>();
+    EXPECT_NO_THROW(instance.ClearErrorMsgContainerByWorkId(0));
 }
 
-TEST_F(UtestErrorManager, GetErrorMsgContainerByWorkId) {
-  auto &instance = ErrorManager::GetInstance();
-  std::vector<ErrorManager::ErrorItem> vec;
-  vec.push_back(ErrorManager::ErrorItem());
-  instance.error_message_per_work_id_[0] = vec;
-  EXPECT_EQ(instance.GetErrorMsgContainerByWorkId(0).size(), 1);
+TEST_F(UtestErrorManager, GetErrorMsgContainerByWorkId)
+{
+    auto& instance = ErrorManager::GetInstance();
+    std::vector<ErrorManager::ErrorItem> vec;
+    vec.push_back(ErrorManager::ErrorItem());
+    instance.error_message_per_work_id_[0] = vec;
+    EXPECT_EQ(instance.GetErrorMsgContainerByWorkId(0).size(), 1);
 }
 
-TEST_F(UtestErrorManager, TestReportInnerErrorFail) {
-  std::shared_ptr<char[]> msg(new (std::nothrow) char[LIMIT_PER_MESSAGE]());
-  std::fill_n(msg.get(), LIMIT_PER_MESSAGE, 'T');
-  msg[LIMIT_PER_MESSAGE - 1U] = '\0';
-  EXPECT_NO_THROW(REPORT_INNER_ERR_MSG("E19999", "error is %s", msg.get()));
+TEST_F(UtestErrorManager, TestReportInnerErrorFail)
+{
+    std::shared_ptr<char[]> msg(new (std::nothrow) char[LIMIT_PER_MESSAGE]());
+    std::fill_n(msg.get(), LIMIT_PER_MESSAGE, 'T');
+    msg[LIMIT_PER_MESSAGE - 1U] = '\0';
+    EXPECT_NO_THROW(REPORT_INNER_ERR_MSG("E19999", "error is %s", msg.get()));
 
-  msg[LIMIT_PER_MESSAGE - 15U] = '\0';
-  EXPECT_NO_THROW(REPORT_INNER_ERR_MSG("E19999", "error is %s", msg.get()));
+    msg[LIMIT_PER_MESSAGE - 15U] = '\0';
+    EXPECT_NO_THROW(REPORT_INNER_ERR_MSG("E19999", "error is %s", msg.get()));
 }
 
 std::mutex mu;
@@ -446,502 +514,522 @@ bool done = false;
 
 void thread1()
 {
-  auto &instance = ErrorManager::GetInstance();
-  std::map<std::string, std::string> args_map;
-  args_map["argv1"] = "thread1";
-  EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
-  EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_1"), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_1"), 0);
+    auto& instance = ErrorManager::GetInstance();
+    std::map<std::string, std::string> args_map;
+    args_map["argv1"] = "thread1";
+    EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
+    EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_1"), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_1"), 0);
 }
+
 void thread2()
 {
-  auto &instance = ErrorManager::GetInstance();
-  std::map<std::string, std::string> args_map;
-  args_map["argv1"] = "thread2";
-  EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
-  EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_2"), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_2"), 0);
+    auto& instance = ErrorManager::GetInstance();
+    std::map<std::string, std::string> args_map;
+    args_map["argv1"] = "thread2";
+    EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
+    EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_2"), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_2"), 0);
 }
 
 void thread3()
 {
-  std::unique_lock<std::mutex> lck(mu);
-  auto &instance = ErrorManager::GetInstance();
-  std::map<std::string, std::string> args_map;
-  args_map["argv1"] = "thread1";
-  EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
-  EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_1"), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_1"), 0);
-  cv.wait(lck, []{return done;});
+    std::unique_lock<std::mutex> lck(mu);
+    auto& instance = ErrorManager::GetInstance();
+    std::map<std::string, std::string> args_map;
+    args_map["argv1"] = "thread1";
+    EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
+    EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_1"), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_1"), 0);
+    cv.wait(lck, [] { return done; });
 
-  EXPECT_EQ(instance.error_message_process_.size(), 4);
-  EXPECT_EQ(instance.warning_messages_process_.size(), 4);
-  auto err = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err, nullptr);
-  auto error_str = std::string(err.get());
-  EXPECT_NE(error_str.find("thread1"), std::string::npos);
-  EXPECT_NE(error_str.find("thread2"), std::string::npos);
-  EXPECT_NE(error_str.find("thread_1"), std::string::npos);
-  EXPECT_NE(error_str.find("thread_2"), std::string::npos);
-  EXPECT_NE(error_str.find(std::to_string(mmGetTid())), std::string::npos);
+    EXPECT_EQ(instance.error_message_process_.size(), 4);
+    EXPECT_EQ(instance.warning_messages_process_.size(), 4);
+    auto err = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err, nullptr);
+    auto error_str = std::string(err.get());
+    EXPECT_NE(error_str.find("thread1"), std::string::npos);
+    EXPECT_NE(error_str.find("thread2"), std::string::npos);
+    EXPECT_NE(error_str.find("thread_1"), std::string::npos);
+    EXPECT_NE(error_str.find("thread_2"), std::string::npos);
+    EXPECT_NE(error_str.find(std::to_string(mmGetTid())), std::string::npos);
 
-  auto war = error_message::GetErrMgrWarningMessage();
-  EXPECT_NE(war, nullptr);
-  auto warnig_str = std::string(war.get());
-  EXPECT_NE(warnig_str.find("thread1"), std::string::npos);
-  EXPECT_NE(warnig_str.find("thread2"), std::string::npos);
-  EXPECT_NE(warnig_str.find("thread_1"), std::string::npos);
-  EXPECT_NE(warnig_str.find("thread_2"), std::string::npos);
-  EXPECT_NE(warnig_str.find(std::to_string(mmGetTid()).c_str()), std::string::npos);
-  EXPECT_EQ(instance.error_message_process_.size(), 0);
-  EXPECT_EQ(instance.warning_messages_process_.size(), 0);
-  lck.unlock();
+    auto war = error_message::GetErrMgrWarningMessage();
+    EXPECT_NE(war, nullptr);
+    auto warnig_str = std::string(war.get());
+    EXPECT_NE(warnig_str.find("thread1"), std::string::npos);
+    EXPECT_NE(warnig_str.find("thread2"), std::string::npos);
+    EXPECT_NE(warnig_str.find("thread_1"), std::string::npos);
+    EXPECT_NE(warnig_str.find("thread_2"), std::string::npos);
+    EXPECT_NE(warnig_str.find(std::to_string(mmGetTid()).c_str()), std::string::npos);
+    EXPECT_EQ(instance.error_message_process_.size(), 0);
+    EXPECT_EQ(instance.warning_messages_process_.size(), 0);
+    lck.unlock();
 }
 
 void thread4()
 {
-  std::lock_guard<std::mutex> lck(mu);
-  auto &instance = ErrorManager::GetInstance();
-  std::map<std::string, std::string> args_map;
-  args_map["argv1"] = "thread2";
-  EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
-  EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_2"), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_2"), 0);
-  done = true;
-  cv.notify_one();
+    std::lock_guard<std::mutex> lck(mu);
+    auto& instance = ErrorManager::GetInstance();
+    std::map<std::string, std::string> args_map;
+    args_map["argv1"] = "thread2";
+    EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
+    EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_2"), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_2"), 0);
+    done = true;
+    cv.notify_one();
 }
 
 void thread5()
 {
-  std::unique_lock<std::mutex> lck(mu);
-  auto &instance = ErrorManager::GetInstance();
-  std::map<std::string, std::string> args_map;
-  args_map["argv1"] = "thread1";
-  EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
-  EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_1"), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_1"), 0);
-  cv.wait(lck, []{return done;});
+    std::unique_lock<std::mutex> lck(mu);
+    auto& instance = ErrorManager::GetInstance();
+    std::map<std::string, std::string> args_map;
+    args_map["argv1"] = "thread1";
+    EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
+    EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_1"), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_1"), 0);
+    cv.wait(lck, [] { return done; });
 
-  EXPECT_EQ(instance.error_message_process_.size(), 0);
-  EXPECT_EQ(instance.warning_messages_process_.size(), 0);
-  auto err = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err, nullptr);
-  auto error_str = std::string(err.get());
-  EXPECT_NE(error_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread2"), std::string::npos);
-  EXPECT_NE(error_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
-  auto war = error_message::GetErrMgrWarningMessage();
-  EXPECT_NE(war, nullptr);
-  auto warnig_str = std::string(war.get());
-  EXPECT_NE(warnig_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
-  EXPECT_NE(warnig_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
+    EXPECT_EQ(instance.error_message_process_.size(), 0);
+    EXPECT_EQ(instance.warning_messages_process_.size(), 0);
+    auto err = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err, nullptr);
+    auto error_str = std::string(err.get());
+    EXPECT_NE(error_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread2"), std::string::npos);
+    EXPECT_NE(error_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
+    auto war = error_message::GetErrMgrWarningMessage();
+    EXPECT_NE(war, nullptr);
+    auto warnig_str = std::string(war.get());
+    EXPECT_NE(warnig_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
+    EXPECT_NE(warnig_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
 
-  // 读清
-  err = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err, nullptr);
-  error_str = std::string(err.get());
-  EXPECT_EQ(error_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
-  war = error_message::GetErrMgrWarningMessage();
-  EXPECT_NE(war, nullptr);
-  warnig_str = std::string(war.get());
-  EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
-  lck.unlock();
+    // 读清
+    err = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err, nullptr);
+    error_str = std::string(err.get());
+    EXPECT_EQ(error_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
+    war = error_message::GetErrMgrWarningMessage();
+    EXPECT_NE(war, nullptr);
+    warnig_str = std::string(war.get());
+    EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
+    lck.unlock();
 }
 
 void thread6()
 {
-  std::lock_guard<std::mutex> lck(mu);
-  auto &instance = ErrorManager::GetInstance();
-  instance.error_context_.work_stream_id = 10000;
-  std::map<std::string, std::string> args_map;
-  args_map["argv1"] = "thread2";
-  EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
-  EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_2"), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_2"), 0);
-  done = true;
-  cv.notify_one();
+    std::lock_guard<std::mutex> lck(mu);
+    auto& instance = ErrorManager::GetInstance();
+    instance.error_context_.work_stream_id = 10000;
+    std::map<std::string, std::string> args_map;
+    args_map["argv1"] = "thread2";
+    EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
+    EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_2"), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_2"), 0);
+    done = true;
+    cv.notify_one();
 }
 
 void thread7()
 {
-  std::unique_lock<std::mutex> lck(mu);
-  auto &instance = ErrorManager::GetInstance();
-  instance.error_context_.work_stream_id = 10000;
-  std::map<std::string, std::string> args_map;
-  args_map["argv1"] = "thread1";
-  EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
-  EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_1"), 0);
-  EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_1"), 0);
-  cv.wait(lck, []{return done;});
+    std::unique_lock<std::mutex> lck(mu);
+    auto& instance = ErrorManager::GetInstance();
+    instance.error_context_.work_stream_id = 10000;
+    std::map<std::string, std::string> args_map;
+    args_map["argv1"] = "thread1";
+    EXPECT_EQ(instance.ReportErrMessage("E13000", args_map), 0);
+    EXPECT_EQ(instance.ReportErrMessage("W14000", args_map), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("E18888", "InterErr is thread_1"), 0);
+    EXPECT_EQ(instance.ReportInterErrMessage("W18888", "InterWarning is thread_1"), 0);
+    cv.wait(lck, [] { return done; });
 
-  EXPECT_EQ(instance.error_message_process_.size(), 0);
-  EXPECT_EQ(instance.warning_messages_process_.size(), 0);
-  auto err = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err, nullptr);
-  auto error_str = std::string(err.get());
-  EXPECT_NE(error_str.find("thread1"), std::string::npos);
-  EXPECT_NE(error_str.find("thread2"), std::string::npos);
-  EXPECT_NE(error_str.find("thread_1"), std::string::npos);
-  EXPECT_NE(error_str.find("thread_2"), std::string::npos);
-  auto war = error_message::GetErrMgrWarningMessage();
-  EXPECT_NE(war, nullptr);
-  auto warnig_str = std::string(war.get());
-  EXPECT_NE(warnig_str.find("thread1"), std::string::npos);
-  EXPECT_NE(warnig_str.find("thread2"), std::string::npos);
-  EXPECT_NE(warnig_str.find("thread_1"), std::string::npos);
-  EXPECT_NE(warnig_str.find("thread_2"), std::string::npos);
+    EXPECT_EQ(instance.error_message_process_.size(), 0);
+    EXPECT_EQ(instance.warning_messages_process_.size(), 0);
+    auto err = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err, nullptr);
+    auto error_str = std::string(err.get());
+    EXPECT_NE(error_str.find("thread1"), std::string::npos);
+    EXPECT_NE(error_str.find("thread2"), std::string::npos);
+    EXPECT_NE(error_str.find("thread_1"), std::string::npos);
+    EXPECT_NE(error_str.find("thread_2"), std::string::npos);
+    auto war = error_message::GetErrMgrWarningMessage();
+    EXPECT_NE(war, nullptr);
+    auto warnig_str = std::string(war.get());
+    EXPECT_NE(warnig_str.find("thread1"), std::string::npos);
+    EXPECT_NE(warnig_str.find("thread2"), std::string::npos);
+    EXPECT_NE(warnig_str.find("thread_1"), std::string::npos);
+    EXPECT_NE(warnig_str.find("thread_2"), std::string::npos);
 
-  // 读清
-  err = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err, nullptr);
-  error_str = std::string(err.get());
-  EXPECT_EQ(error_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
-  war = error_message::GetErrMgrWarningMessage();
-  EXPECT_NE(war, nullptr);
-  warnig_str = std::string(war.get());
-  EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
-  lck.unlock();
+    // 读清
+    err = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err, nullptr);
+    error_str = std::string(err.get());
+    EXPECT_EQ(error_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
+    war = error_message::GetErrMgrWarningMessage();
+    EXPECT_NE(war, nullptr);
+    warnig_str = std::string(war.get());
+    EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
+    lck.unlock();
 }
 
-TEST_F(UtestErrorManager, ProcessModeTest01) {
-  auto &instance = ErrorManager::GetInstance();
-  instance.error_mode_ = error_message::ErrorMsgMode::PROCESS_MODE;
-  EXPECT_NE(instance.Init(error_message::ErrorMsgMode::ERR_MSG_MODE_MAX), 0);
-  instance.Init(error_message::ErrorMsgMode::PROCESS_MODE);
-  auto conf = ErrorManager::ErrorInfoConfig();
-  conf.error_id = "E13000";
-  conf.error_message = "error happend, thread=%s.";
-  conf.arg_list.push_back("argv1");
-  instance.error_map_["E13000"] = conf;
-  conf.error_id = "W14000";
-  conf.error_message = "warning happend, thread=%s.";
-  instance.error_map_["W14000"] = conf;
-  instance.is_init_ = true;
+TEST_F(UtestErrorManager, ProcessModeTest01)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.error_mode_ = error_message::ErrorMsgMode::PROCESS_MODE;
+    EXPECT_NE(instance.Init(error_message::ErrorMsgMode::ERR_MSG_MODE_MAX), 0);
+    instance.Init(error_message::ErrorMsgMode::PROCESS_MODE);
+    auto conf = ErrorManager::ErrorInfoConfig();
+    conf.error_id = "E13000";
+    conf.error_message = "error happend, thread=%s.";
+    conf.arg_list.push_back("argv1");
+    instance.error_map_["E13000"] = conf;
+    conf.error_id = "W14000";
+    conf.error_message = "warning happend, thread=%s.";
+    instance.error_map_["W14000"] = conf;
+    instance.is_init_ = true;
 
-  std::thread td1(thread1);
-  std::thread td2(thread2);
+    std::thread td1(thread1);
+    std::thread td2(thread2);
 
-  td1.join();
-  td2.join();
-  EXPECT_EQ(instance.error_message_process_.size(), 4);
-  EXPECT_EQ(instance.warning_messages_process_.size(), 4);
-  auto err = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err, nullptr);
-  auto error_str = std::string(err.get());
-  EXPECT_NE(error_str.find("thread1"), std::string::npos);
-  EXPECT_NE(error_str.find("thread2"), std::string::npos);
-  EXPECT_NE(error_str.find("thread_1"), std::string::npos);
-  EXPECT_NE(error_str.find("thread_2"), std::string::npos);
-  auto war = error_message::GetErrMgrWarningMessage();
-  EXPECT_NE(war, nullptr);
-  auto warnig_str = std::string(war.get());
-  EXPECT_NE(warnig_str.find("thread1"), std::string::npos);
-  EXPECT_NE(warnig_str.find("thread2"), std::string::npos);
-  EXPECT_NE(warnig_str.find("thread_1"), std::string::npos);
-  EXPECT_NE(warnig_str.find("thread_2"), std::string::npos);
+    td1.join();
+    td2.join();
+    EXPECT_EQ(instance.error_message_process_.size(), 4);
+    EXPECT_EQ(instance.warning_messages_process_.size(), 4);
+    auto err = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err, nullptr);
+    auto error_str = std::string(err.get());
+    EXPECT_NE(error_str.find("thread1"), std::string::npos);
+    EXPECT_NE(error_str.find("thread2"), std::string::npos);
+    EXPECT_NE(error_str.find("thread_1"), std::string::npos);
+    EXPECT_NE(error_str.find("thread_2"), std::string::npos);
+    auto war = error_message::GetErrMgrWarningMessage();
+    EXPECT_NE(war, nullptr);
+    auto warnig_str = std::string(war.get());
+    EXPECT_NE(warnig_str.find("thread1"), std::string::npos);
+    EXPECT_NE(warnig_str.find("thread2"), std::string::npos);
+    EXPECT_NE(warnig_str.find("thread_1"), std::string::npos);
+    EXPECT_NE(warnig_str.find("thread_2"), std::string::npos);
 
-  // 读清测试
-  error_str = instance.GetErrorMessage();
-  EXPECT_EQ(error_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
-  warnig_str = instance.GetWarningMessage();
-  EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
-  EXPECT_EQ(instance.error_message_process_.size(), 0);
-  EXPECT_EQ(instance.warning_messages_process_.size(), 0);
-
+    // 读清测试
+    error_str = instance.GetErrorMessage();
+    EXPECT_EQ(error_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
+    warnig_str = instance.GetWarningMessage();
+    EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
+    EXPECT_EQ(instance.error_message_process_.size(), 0);
+    EXPECT_EQ(instance.warning_messages_process_.size(), 0);
 }
 
-TEST_F(UtestErrorManager, ProcessModeTest02) {
-  auto &instance = ErrorManager::GetInstance();
-  instance.error_mode_ = error_message::ErrorMsgMode::PROCESS_MODE;
-  auto conf = ErrorManager::ErrorInfoConfig();
-  conf.error_id = "E13000";
-  conf.error_message = "error happend, thread=%s.";
-  conf.arg_list.push_back("argv1");
-  instance.error_map_["E13000"] = conf;
-  conf.error_id = "W14000";
-  conf.error_message = "warning happend, thread=%s.";
-  instance.error_map_["W14000"] = conf;
-  instance.is_init_ = true;
+TEST_F(UtestErrorManager, ProcessModeTest02)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.error_mode_ = error_message::ErrorMsgMode::PROCESS_MODE;
+    auto conf = ErrorManager::ErrorInfoConfig();
+    conf.error_id = "E13000";
+    conf.error_message = "error happend, thread=%s.";
+    conf.arg_list.push_back("argv1");
+    instance.error_map_["E13000"] = conf;
+    conf.error_id = "W14000";
+    conf.error_message = "warning happend, thread=%s.";
+    instance.error_map_["W14000"] = conf;
+    instance.is_init_ = true;
 
-  std::thread td3(thread3);
-  std::thread td4(thread4);
+    std::thread td3(thread3);
+    std::thread td4(thread4);
 
-  td3.join();
-  td4.join();
+    td3.join();
+    td4.join();
 
-  // 读清测试
-  std::string error_str = instance.GetErrorMessage();
-  EXPECT_EQ(error_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
-  std::string warnig_str = instance.GetWarningMessage();
-  EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
-  EXPECT_EQ(instance.error_message_process_.size(), 0);
-  EXPECT_EQ(instance.warning_messages_process_.size(), 0);
+    // 读清测试
+    std::string error_str = instance.GetErrorMessage();
+    EXPECT_EQ(error_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
+    std::string warnig_str = instance.GetWarningMessage();
+    EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
+    EXPECT_EQ(instance.error_message_process_.size(), 0);
+    EXPECT_EQ(instance.warning_messages_process_.size(), 0);
+    done = false;
 }
 
-TEST_F(UtestErrorManager, ProcessModeTest03) {
-  auto &instance = ErrorManager::GetInstance();
-  instance.error_mode_ = error_message::ErrorMsgMode::INTERNAL_MODE;
-  auto conf = ErrorManager::ErrorInfoConfig();
-  conf.error_id = "E13000";
-  conf.error_message = "error happend, thread=%s.";
-  conf.arg_list.push_back("argv1");
-  instance.error_map_["E13000"] = conf;
-  conf.error_id = "W14000";
-  conf.error_message = "warning happend, thread=%s.";
-  instance.error_map_["W14000"] = conf;
-  instance.is_init_ = true;
+TEST_F(UtestErrorManager, ProcessModeTest03)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.error_mode_ = error_message::ErrorMsgMode::INTERNAL_MODE;
+    auto conf = ErrorManager::ErrorInfoConfig();
+    conf.error_id = "E13000";
+    conf.error_message = "error happend, thread=%s.";
+    conf.arg_list.push_back("argv1");
+    instance.error_map_["E13000"] = conf;
+    conf.error_id = "W14000";
+    conf.error_message = "warning happend, thread=%s.";
+    instance.error_map_["W14000"] = conf;
+    instance.is_init_ = true;
 
-  std::thread td1(thread1);
-  std::thread td2(thread2);
+    std::thread td1(thread1);
+    std::thread td2(thread2);
 
-  td1.join();
-  td2.join();
+    td1.join();
+    td2.join();
 
-  auto err = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err, nullptr);
-  std::string error_str(err.get());
-  EXPECT_EQ(error_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
-  auto war = error_message::GetErrMgrWarningMessage();
-  EXPECT_NE(war, nullptr);
-  std::string warnig_str(war.get());
-  EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
-  EXPECT_EQ(instance.error_message_process_.size(), 0);
-  EXPECT_EQ(instance.warning_messages_process_.size(), 0);
+    auto err = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err, nullptr);
+    std::string error_str(err.get());
+    EXPECT_EQ(error_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
+    auto war = error_message::GetErrMgrWarningMessage();
+    EXPECT_NE(war, nullptr);
+    std::string warnig_str(war.get());
+    EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
+    EXPECT_EQ(instance.error_message_process_.size(), 0);
+    EXPECT_EQ(instance.warning_messages_process_.size(), 0);
 }
 
-TEST_F(UtestErrorManager, InternalModeTest04) {
-  auto &instance = ErrorManager::GetInstance();
-  instance.error_mode_ = error_message::ErrorMsgMode::INTERNAL_MODE;
-  auto conf = ErrorManager::ErrorInfoConfig();
-  conf.error_id = "E13000";
-  conf.error_message = "error happend, thread=%s.";
-  conf.arg_list.push_back("argv1");
-  instance.error_map_["E13000"] = conf;
-  conf.error_id = "W14000";
-  conf.error_message = "warning happend, thread=%s.";
-  instance.error_map_["W14000"] = conf;
-  instance.is_init_ = true;
+TEST_F(UtestErrorManager, InternalModeTest04)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.error_mode_ = error_message::ErrorMsgMode::INTERNAL_MODE;
+    auto conf = ErrorManager::ErrorInfoConfig();
+    conf.error_id = "E13000";
+    conf.error_message = "error happend, thread=%s.";
+    conf.arg_list.push_back("argv1");
+    instance.error_map_["E13000"] = conf;
+    conf.error_id = "W14000";
+    conf.error_message = "warning happend, thread=%s.";
+    instance.error_map_["W14000"] = conf;
+    instance.is_init_ = true;
 
-  std::thread td1(thread4);
-  std::thread td2(thread5);
+    std::thread td1(thread4);
+    std::thread td2(thread5);
 
-  td1.join();
-  td2.join();
+    td1.join();
+    td2.join();
 
-  std::string error_str = instance.GetErrorMessage();
-  EXPECT_EQ(error_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
-  std::string warnig_str = instance.GetWarningMessage();
-  EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
-  EXPECT_EQ(instance.error_message_process_.size(), 0);
-  EXPECT_EQ(instance.warning_messages_process_.size(), 0);
+    std::string error_str = instance.GetErrorMessage();
+    EXPECT_EQ(error_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
+    std::string warnig_str = instance.GetWarningMessage();
+    EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
+    EXPECT_EQ(instance.error_message_process_.size(), 0);
+    EXPECT_EQ(instance.warning_messages_process_.size(), 0);
+    done = false;
 }
 
-TEST_F(UtestErrorManager, InternalModeTest05) {
-  auto &instance = ErrorManager::GetInstance();
-  instance.error_mode_ = error_message::ErrorMsgMode::INTERNAL_MODE;
-  auto conf = ErrorManager::ErrorInfoConfig();
-  conf.error_id = "E13000";
-  conf.error_message = "error happend, thread=%s.";
-  conf.arg_list.push_back("argv1");
-  instance.error_map_["E13000"] = conf;
-  conf.error_id = "W14000";
-  conf.error_message = "warning happend, thread=%s.";
-  instance.error_map_["W14000"] = conf;
-  instance.is_init_ = true;
+TEST_F(UtestErrorManager, InternalModeTest05)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.error_mode_ = error_message::ErrorMsgMode::INTERNAL_MODE;
+    auto conf = ErrorManager::ErrorInfoConfig();
+    conf.error_id = "E13000";
+    conf.error_message = "error happend, thread=%s.";
+    conf.arg_list.push_back("argv1");
+    instance.error_map_["E13000"] = conf;
+    conf.error_id = "W14000";
+    conf.error_message = "warning happend, thread=%s.";
+    instance.error_map_["W14000"] = conf;
+    instance.is_init_ = true;
 
-  std::thread td1(thread6);
-  std::thread td2(thread7);
+    std::thread td1(thread6);
+    std::thread td2(thread7);
 
-  td1.join();
-  td2.join();
+    td1.join();
+    td2.join();
 
-  std::string error_str = instance.GetErrorMessage();
-  EXPECT_EQ(error_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
-  std::string warnig_str = instance.GetWarningMessage();
-  EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
-  EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
-  EXPECT_EQ(instance.error_message_process_.size(), 0);
-  EXPECT_EQ(instance.warning_messages_process_.size(), 0);
+    std::string error_str = instance.GetErrorMessage();
+    EXPECT_EQ(error_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(error_str.find("thread_2"), std::string::npos);
+    std::string warnig_str = instance.GetWarningMessage();
+    EXPECT_EQ(warnig_str.find("thread1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread2"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_1"), std::string::npos);
+    EXPECT_EQ(warnig_str.find("thread_2"), std::string::npos);
+    EXPECT_EQ(instance.error_message_process_.size(), 0);
+    EXPECT_EQ(instance.warning_messages_process_.size(), 0);
+    done = false;
 }
 
-TEST_F(UtestErrorManager, IsUserDefinedErrorCode_Failed_invalid_error_code) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_FALSE(instance.IsUserDefinedErrorCode("E10001"));
-  EXPECT_FALSE(instance.IsUserDefinedErrorCode("E1000"));
-  EXPECT_FALSE(instance.IsUserDefinedErrorCode("E18888"));
-  EXPECT_FALSE(instance.IsUserDefinedErrorCode("E19999"));
+TEST_F(UtestErrorManager, IsUserDefinedErrorCode_Failed_invalid_error_code)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_FALSE(instance.IsUserDefinedErrorCode("E10001"));
+    EXPECT_FALSE(instance.IsUserDefinedErrorCode("E1000"));
+    EXPECT_FALSE(instance.IsUserDefinedErrorCode("E18888"));
+    EXPECT_FALSE(instance.IsUserDefinedErrorCode("E19999"));
 }
 
-TEST_F(UtestErrorManager, IsUserDefinedErrorCode_Success) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_TRUE(instance.IsUserDefinedErrorCode("EU0001"));
+TEST_F(UtestErrorManager, IsUserDefinedErrorCode_Success)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_TRUE(instance.IsUserDefinedErrorCode("EU0001"));
 }
 
-TEST_F(UtestErrorManager, ReportUserDefinedErrMsg_Failed_MessageLengthExceedsLimits_1024) {
-  auto ret = error_message::ReportUserDefinedErrMsg("EU0001", "errmsg is %s.", std::string(1025, 'a').c_str());
-  EXPECT_EQ(ret, -1);
-  EXPECT_TRUE(std::string(error_message::GetErrMgrErrorMessage().get()).empty());
+TEST_F(UtestErrorManager, ReportUserDefinedErrMsg_Failed_MessageLengthExceedsLimits_1024)
+{
+    auto ret = error_message::ReportUserDefinedErrMsg("EU0001", "errmsg is %s.", std::string(1025, 'a').c_str());
+    EXPECT_EQ(ret, -1);
+    EXPECT_TRUE(std::string(error_message::GetErrMgrErrorMessage().get()).empty());
 }
 
-TEST_F(UtestErrorManager, ReportUserDefinedErrMsg_Success_empty_error_code) {
-  error_message::ErrorManagerContext ctx;
-  ctx.work_stream_id = 0;
-  error_message::SetErrMgrContext(ctx);
-  const std::string errmsg = "Report error code is empty!";
-  auto ret = error_message::ReportUserDefinedErrMsg("", "%s", errmsg.c_str());
-  EXPECT_EQ(ret, 0);
-  EXPECT_TRUE(std::string(error_message::GetErrMgrErrorMessage().get()).find(errmsg) != std::string::npos);
+TEST_F(UtestErrorManager, ReportUserDefinedErrMsg_Success_empty_error_code)
+{
+    error_message::ErrorManagerContext ctx;
+    ctx.work_stream_id = 0;
+    error_message::SetErrMgrContext(ctx);
+    const std::string errmsg = "Report error code is empty!";
+    auto ret = error_message::ReportUserDefinedErrMsg("", "%s", errmsg.c_str());
+    EXPECT_EQ(ret, 0);
+    EXPECT_TRUE(std::string(error_message::GetErrMgrErrorMessage().get()).find(errmsg) != std::string::npos);
 }
 
-TEST_F(UtestErrorManager, ReportUserDefinedErrMsg_Success_not_support_error_code) {
-  const std::string errmsg_1 = "Report 8888 error code!";
-  auto ret = error_message::ReportUserDefinedErrMsg("EU8888", "%s", errmsg_1.c_str());
-  EXPECT_EQ(ret, 0);
-  const std::string errmsg_2 = "Report 9999 error code!";
-  ret = error_message::ReportUserDefinedErrMsg("EU9999", "%s", errmsg_2.c_str());
-  EXPECT_EQ(ret, 0);
-  const std::string errmsg_3 = "Report predefined error code!";
-  ret = error_message::ReportUserDefinedErrMsg("E10001", "%s", errmsg_3.c_str());
-  EXPECT_EQ(ret, 0);
-  const std::string errmsg_4 = "Report user defined invalid error code!";
-  ret = error_message::ReportUserDefinedErrMsg("EU001", "%s", errmsg_4.c_str());
-  EXPECT_EQ(ret, 0);
-  auto err_msg = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err_msg, nullptr);
-  auto error_message = std::string(err_msg.get());
-  EXPECT_TRUE(error_message.find("EU0000") != std::string::npos);
-  EXPECT_TRUE(error_message.find(errmsg_1) != std::string::npos);
-  EXPECT_TRUE(error_message.find(errmsg_2) != std::string::npos);
-  EXPECT_TRUE(error_message.find(errmsg_3) != std::string::npos);
-  EXPECT_TRUE(error_message.find(errmsg_4) != std::string::npos);
+TEST_F(UtestErrorManager, ReportUserDefinedErrMsg_Success_not_support_error_code)
+{
+    const std::string errmsg_1 = "Report 8888 error code!";
+    auto ret = error_message::ReportUserDefinedErrMsg("EU8888", "%s", errmsg_1.c_str());
+    EXPECT_EQ(ret, 0);
+    const std::string errmsg_2 = "Report 9999 error code!";
+    ret = error_message::ReportUserDefinedErrMsg("EU9999", "%s", errmsg_2.c_str());
+    EXPECT_EQ(ret, 0);
+    const std::string errmsg_3 = "Report predefined error code!";
+    ret = error_message::ReportUserDefinedErrMsg("E10001", "%s", errmsg_3.c_str());
+    EXPECT_EQ(ret, 0);
+    const std::string errmsg_4 = "Report user defined invalid error code!";
+    ret = error_message::ReportUserDefinedErrMsg("EU001", "%s", errmsg_4.c_str());
+    EXPECT_EQ(ret, 0);
+    auto err_msg = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err_msg, nullptr);
+    auto error_message = std::string(err_msg.get());
+    EXPECT_TRUE(error_message.find("EU0000") != std::string::npos);
+    EXPECT_TRUE(error_message.find(errmsg_1) != std::string::npos);
+    EXPECT_TRUE(error_message.find(errmsg_2) != std::string::npos);
+    EXPECT_TRUE(error_message.find(errmsg_3) != std::string::npos);
+    EXPECT_TRUE(error_message.find(errmsg_4) != std::string::npos);
 }
 
-TEST_F(UtestErrorManager, ReportUserDefinedErrMsg_Success) {
-  const std::string errmsg = "Report user defined U error code!";
-  auto ret = error_message::ReportUserDefinedErrMsg("EU0001", "%s", errmsg.c_str());
-  EXPECT_EQ(ret, 0);
-  auto err_msg = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err_msg, nullptr);
-  auto error_message = std::string(err_msg.get());
-  EXPECT_TRUE(error_message.find("EU0001") != std::string::npos);
-  EXPECT_TRUE(error_message.find(errmsg) != std::string::npos);
+TEST_F(UtestErrorManager, ReportUserDefinedErrMsg_Success)
+{
+    const std::string errmsg = "Report user defined U error code!";
+    auto ret = error_message::ReportUserDefinedErrMsg("EU0001", "%s", errmsg.c_str());
+    EXPECT_EQ(ret, 0);
+    auto err_msg = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err_msg, nullptr);
+    auto error_message = std::string(err_msg.get());
+    EXPECT_TRUE(error_message.find("EU0001") != std::string::npos);
+    EXPECT_TRUE(error_message.find(errmsg) != std::string::npos);
 }
 
-TEST_F(UtestErrorManager, GetErrMgrRawErrorMessages_Success) {
-  auto ret = error_message::ReportPredefinedErrMsg("E10001", {"value", "parameter", "reason"}, {"1", "2", "le 0"});
-  EXPECT_EQ(ret, 0);
-  auto error_message_item = error_message::GetErrMgrRawErrorMessages();
-  EXPECT_EQ(error_message_item.empty(), false);
-  EXPECT_NE(error_message_item[0].error_id, nullptr);
-  EXPECT_NE(error_message_item[0].error_title, nullptr);
-  EXPECT_NE(error_message_item[0].error_message, nullptr);
-  EXPECT_NE(error_message_item[0].possible_cause, nullptr);
-  EXPECT_NE(error_message_item[0].solution, nullptr);
+TEST_F(UtestErrorManager, GetErrMgrRawErrorMessages_Success)
+{
+    auto ret = error_message::ReportPredefinedErrMsg("E10001", {"value", "parameter", "reason"}, {"1", "2", "le 0"});
+    EXPECT_EQ(ret, 0);
+    auto error_message_item = error_message::GetErrMgrRawErrorMessages();
+    EXPECT_EQ(error_message_item.empty(), false);
+    EXPECT_NE(error_message_item[0].error_id, nullptr);
+    EXPECT_NE(error_message_item[0].error_title, nullptr);
+    EXPECT_NE(error_message_item[0].error_message, nullptr);
+    EXPECT_NE(error_message_item[0].possible_cause, nullptr);
+    EXPECT_NE(error_message_item[0].solution, nullptr);
 
-  EXPECT_EQ(std::string(error_message_item[0].error_id.get()), "E10001");
-  EXPECT_TRUE(std::string(error_message_item[0].error_title.get()).find("Invalid_Argument") != std::string::npos);
-  EXPECT_TRUE(std::string(error_message_item[0].solution.get()).find("Try again with a valid argument") != std::string::npos);
+    EXPECT_EQ(std::string(error_message_item[0].error_id.get()), "E10001");
+    EXPECT_TRUE(std::string(error_message_item[0].error_title.get()).find("Invalid_Argument") != std::string::npos);
+    EXPECT_TRUE(
+        std::string(error_message_item[0].solution.get()).find("Try again with a valid argument") != std::string::npos);
 
-  EXPECT_EQ(error_message_item[0].args_key.size(), 3);
-  EXPECT_EQ(error_message_item[0].args_value.size(), 3);
+    EXPECT_EQ(error_message_item[0].args_key.size(), 3);
+    EXPECT_EQ(error_message_item[0].args_value.size(), 3);
 
-  EXPECT_EQ(std::string(error_message_item[0].args_key[0].get()), "parameter");
-  EXPECT_EQ(std::string(error_message_item[0].args_key[1].get()), "reason");
-  EXPECT_EQ(std::string(error_message_item[0].args_key[2].get()), "value");
+    EXPECT_EQ(std::string(error_message_item[0].args_key[0].get()), "parameter");
+    EXPECT_EQ(std::string(error_message_item[0].args_key[1].get()), "reason");
+    EXPECT_EQ(std::string(error_message_item[0].args_key[2].get()), "value");
 
-  EXPECT_EQ(std::string(error_message_item[0].args_value[0].get()), "2");
-  EXPECT_EQ(std::string(error_message_item[0].args_value[1].get()), "le 0");
-  EXPECT_EQ(std::string(error_message_item[0].args_value[2].get()), "1");
+    EXPECT_EQ(std::string(error_message_item[0].args_value[0].get()), "2");
+    EXPECT_EQ(std::string(error_message_item[0].args_value[1].get()), "le 0");
+    EXPECT_EQ(std::string(error_message_item[0].args_value[2].get()), "1");
 
-  EXPECT_TRUE(std::string(error_message_item[0].error_title.get()).find("Invalid_Argument") != std::string::npos);
-  EXPECT_TRUE(std::string(error_message_item[0].error_title.get()).find("Invalid_Argument") != std::string::npos);
+    EXPECT_TRUE(std::string(error_message_item[0].error_title.get()).find("Invalid_Argument") != std::string::npos);
+    EXPECT_TRUE(std::string(error_message_item[0].error_title.get()).find("Invalid_Argument") != std::string::npos);
 }
 
-
-TEST_F(UtestErrorManager, ReportPredefinedErrMsg_Failed_vector_size_unequal) {
-  auto ret = error_message::ReportPredefinedErrMsg("E10001", {"value", "parameter", "reason"}, {"", ""});
-  EXPECT_EQ(ret, -1);
-  auto err_msg = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err_msg, nullptr);
-  EXPECT_TRUE(std::string(err_msg.get()).empty());
+TEST_F(UtestErrorManager, ReportPredefinedErrMsg_Failed_vector_size_unequal)
+{
+    auto ret = error_message::ReportPredefinedErrMsg("E10001", {"value", "parameter", "reason"}, {"", ""});
+    EXPECT_EQ(ret, -1);
+    auto err_msg = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err_msg, nullptr);
+    EXPECT_TRUE(std::string(err_msg.get()).empty());
 }
 
-TEST_F(UtestErrorManager, ReportPredefinedErrMsg_Success) {
-  auto ret = error_message::ReportPredefinedErrMsg("E10001", {"value", "parameter", "reason"}, {"1", "2", "le 0"});
-  EXPECT_EQ(ret, 0);
-  auto err_msg = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err_msg, nullptr);
-  EXPECT_TRUE(std::string(err_msg.get()).find("E10001") != std::string::npos);
+TEST_F(UtestErrorManager, ReportPredefinedErrMsg_Success)
+{
+    auto ret = error_message::ReportPredefinedErrMsg("E10001", {"value", "parameter", "reason"}, {"1", "2", "le 0"});
+    EXPECT_EQ(ret, 0);
+    auto err_msg = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err_msg, nullptr);
+    EXPECT_TRUE(std::string(err_msg.get()).find("E10001") != std::string::npos);
 }
 
-TEST_F(UtestErrorManager, ReportInnerErrMsg_Failed_MessageLengthExceedsLimits_1024) {
-  REPORT_INNER_ERR_MSG("E18888", "errmsg:%s", std::string(1025U, 'a').c_str());
-  EXPECT_TRUE(std::string(error_message::GetErrMgrErrorMessage().get()).empty());
+TEST_F(UtestErrorManager, ReportInnerErrMsg_Failed_MessageLengthExceedsLimits_1024)
+{
+    REPORT_INNER_ERR_MSG("E18888", "errmsg:%s", std::string(1025U, 'a').c_str());
+    EXPECT_TRUE(std::string(error_message::GetErrMgrErrorMessage().get()).empty());
 }
 
-TEST_F(UtestErrorManager, ReportInnerErrMsg_Success) {
-  std::string errmsg = "Report Inner Err msg!";
-  REPORT_INNER_ERR_MSG("E18888", "%s", errmsg.c_str());
-  ge::ReportInnerErrMsg(__FILE__, __FUNCTION__, __LINE__, "E18888", "%s", errmsg.c_str());
-  auto err_msg = error_message::GetErrMgrErrorMessage();
-  EXPECT_NE(err_msg, nullptr);
-  EXPECT_TRUE(std::string(err_msg.get()).find("E18888") != std::string::npos);
-  EXPECT_TRUE(std::string(err_msg.get()).find(errmsg) != std::string::npos);
+TEST_F(UtestErrorManager, ReportInnerErrMsg_Success)
+{
+    std::string errmsg = "Report Inner Err msg!";
+    REPORT_INNER_ERR_MSG("E18888", "%s", errmsg.c_str());
+    ge::ReportInnerErrMsg(__FILE__, __FUNCTION__, __LINE__, "E18888", "%s", errmsg.c_str());
+    auto err_msg = error_message::GetErrMgrErrorMessage();
+    EXPECT_NE(err_msg, nullptr);
+    EXPECT_TRUE(std::string(err_msg.get()).find("E18888") != std::string::npos);
+    EXPECT_TRUE(std::string(err_msg.get()).find(errmsg) != std::string::npos);
 }
 
-TEST_F(UtestErrorManager, RegisterFormatErrorMessage_Success_WithPriority) {
-  std::string msg1 = R"(
+TEST_F(UtestErrorManager, RegisterFormatErrorMessage_Success_WithPriority)
+{
+    std::string msg1 = R"(
 {
   "error_info_list": [
     {
@@ -958,19 +1046,21 @@ TEST_F(UtestErrorManager, RegisterFormatErrorMessage_Success_WithPriority) {
   ]
 }
 )";
-  EXPECT_EQ(error_message::RegisterFormatErrorMessage(msg1.c_str(), msg1.size()), 0);
-  std::string errmsg = "Report Inner Err msg!";
-  EXPECT_EQ(error_message::ReportPredefinedErrMsg("E10025", {"realpath", "errmsg"}, {"11", "22"}), 0);
+    EXPECT_EQ(error_message::RegisterFormatErrorMessage(msg1.c_str(), msg1.size()), 0);
+    std::string errmsg = "Report Inner Err msg!";
+    EXPECT_EQ(error_message::ReportPredefinedErrMsg("E10025", {"realpath", "errmsg"}, {"11", "22"}), 0);
 
-  REPORT_PREDEFINED_ERR_MSG("E10025", std::vector<const char *>({"realpath", "errmsg"}), std::vector<const char *>({"11", "22"}));
-  REPORT_PREDEFINED_ERR_MSG("E10025");
-  auto err_msg = error_message::GetErrMgrErrorMessage();
-  EXPECT_TRUE(std::string(err_msg.get()).find("Test register priority")!= std::string::npos);
+    REPORT_PREDEFINED_ERR_MSG(
+        "E10025", std::vector<const char*>({"realpath", "errmsg"}), std::vector<const char*>({"11", "22"}));
+    REPORT_PREDEFINED_ERR_MSG("E10025");
+    auto err_msg = error_message::GetErrMgrErrorMessage();
+    EXPECT_TRUE(std::string(err_msg.get()).find("Test register priority") != std::string::npos);
 }
 
-TEST_F(UtestErrorManager, RegisterFormatErrorMessage_Failed) {
-  // 没有按照json格式注册
-  std::string msg1 = R"(
+TEST_F(UtestErrorManager, RegisterFormatErrorMessage_Failed)
+{
+    // 没有按照json格式注册
+    std::string msg1 = R"(
 {
     123,
     "errClass": "GE Errors",
@@ -984,9 +1074,9 @@ TEST_F(UtestErrorManager, RegisterFormatErrorMessage_Failed) {
     },
 }
 )";
-  EXPECT_EQ(error_message::RegisterFormatErrorMessage(msg1.c_str(), msg1.size()), -1);
-  // 没有error_info_list
-  std::string msg2 = R"(
+    EXPECT_EQ(error_message::RegisterFormatErrorMessage(msg1.c_str(), msg1.size()), -1);
+    // 没有error_info_list
+    std::string msg2 = R"(
 {
       "errClass": "GE Errors",
       "errTitle": "Invalid --singleop Argument",
@@ -999,56 +1089,297 @@ TEST_F(UtestErrorManager, RegisterFormatErrorMessage_Failed) {
       }
 }
 )";
-  EXPECT_EQ(error_message::RegisterFormatErrorMessage(msg2.c_str(), msg2.size()), -1);
+    EXPECT_EQ(error_message::RegisterFormatErrorMessage(msg2.c_str(), msg2.size()), -1);
 }
 
-TEST_F(UtestErrorManager, GetSetErrorManagerContext) {
-  auto ori_ctx = error_message::GetErrMgrContext();
-  ori_ctx.work_stream_id = 11;
-  error_message::SetErrMgrContext(ori_ctx);
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_EQ(instance.GetErrorManagerContext().work_stream_id, ori_ctx.work_stream_id);
-  SetErrMgrContext(ori_ctx);
+TEST_F(UtestErrorManager, RegisterFormatErrorMessageForC_Success)
+{
+    const std::string msg = R"(
+{
+  "error_info_list": [
+    {
+      "errClass": "GE Errors",
+      "errTitle": "Invalid Driver State",
+      "ErrCode": "E10026",
+      "ErrMessage": "Module [%s] failed. Reason: %s",
+      "Arglist": "module,reason",
+      "suggestion": {
+        "Possible Cause": "N/A",
+        "Solution": "Registered from C callback."
+      }
+    }
+  ]
+}
+)";
+    EXPECT_EQ(RegisterFormatErrorMessageForC(msg.c_str(), msg.size()), 0);
+    EXPECT_EQ(error_message::ReportPredefinedErrMsg("E10026", {"module", "reason"}, {"driver", "test"}), 0);
+
+    auto err_msg = error_message::GetErrMgrErrorMessage();
+    ASSERT_NE(err_msg, nullptr);
+    const std::string error_message(err_msg.get());
+    EXPECT_NE(error_message.find("E10026"), std::string::npos);
+    EXPECT_NE(error_message.find("Registered from C callback"), std::string::npos);
 }
 
-TEST_F(UtestErrorManager, ReportFormatErrorMessage_Success) {
-  // 上报预定义错误码
-  EXPECT_EQ(error_message::ReportPredefinedErrMsg("E10023", {"value"}, {"11"}), 0);
-  std::string res(error_message::GetErrMgrErrorMessage().get());
-  EXPECT_EQ(res.find("Invalid_Argument(E10023): ") != std::string::npos, true);
-  // 上报预定义告警码
-  EXPECT_EQ(error_message::ReportPredefinedErrMsg("W11002", {"filename", "opnames"}, {"test.json", "add_0_1"}), 0);
-  res = error_message::GetErrMgrWarningMessage().get();
-  EXPECT_EQ(res.find("Config_Error_Weight_Configuration(W11002): ") != std::string::npos, true);
-  // 上报内部错误码
-  std::string errmsg = "Report Inner Error messsage!";
-  REPORT_INNER_ERR_MSG("E19999", "%s", errmsg.c_str());
-  res = error_message::GetErrMgrErrorMessage().get();
-  EXPECT_EQ(res.find("(E19999):") != std::string::npos, true);
-  // 上报用户定义错误码
-  errmsg = "Report user defined U error code!";
-  auto ret = error_message::ReportUserDefinedErrMsg("EU0001", "%s", errmsg.c_str());
-  EXPECT_EQ(ret, 0);
-  res = error_message::GetErrMgrErrorMessage().get();
-  EXPECT_EQ(res.find("(EU0001):") != std::string::npos, true);
+TEST_F(UtestErrorManager, RegisterFormatErrorMessageForC_Failed)
+{
+    const std::string msg = R"(
+{
+    123,
+    "errClass": "GE Errors",
+    "ErrCode": "E10027"
+}
+)";
+    EXPECT_EQ(RegisterFormatErrorMessageForC(msg.c_str(), msg.size()), -1);
+}
+
+TEST_F(UtestErrorManager, RegisterFormatErrorMessageForC_Failed_NullErrorMessage)
+{
+    EXPECT_EQ(RegisterFormatErrorMessageForC(nullptr, 1U), -1);
+}
+
+TEST_F(UtestErrorManager, CCallbackWrapperInterfaceNamesRemainStable)
+{
+    ExpectCInterfaceSymbolName(&RegisterFormatErrorMessageForC, "RegisterFormatErrorMessageForC");
+    ExpectCInterfaceSymbolName(&ReportPredefinedErrMsgForC, "ReportPredefinedErrMsgForC");
+    ExpectCInterfaceSymbolName(&ReportInnerErrMsgForC, "ReportInnerErrMsgForC");
+}
+
+TEST_F(UtestErrorManager, ReportPredefinedErrMsgForC_Success)
+{
+    const char* keys[] = {"value", "parameter", "reason"};
+    const char* values[] = {"1", "2", "le 0"};
+    EXPECT_EQ(ReportPredefinedErrMsgForC("E10001", keys, values, 3U), 0);
+
+    auto err_msg = error_message::GetErrMgrErrorMessage();
+    ASSERT_NE(err_msg, nullptr);
+    const std::string error_message(err_msg.get());
+    EXPECT_NE(error_message.find("E10001"), std::string::npos);
+    EXPECT_NE(error_message.find("Invalid_Argument"), std::string::npos);
+}
+
+TEST_F(UtestErrorManager, ReportPredefinedErrMsgForC_Failed_NullptrInput)
+{
+    EXPECT_EQ(ReportPredefinedErrMsgForC("E10001", nullptr, nullptr, 1U), -1);
+}
+
+TEST_F(UtestErrorManager, ReportPredefinedErrMsgForC_Failed_NullErrorCode)
+{
+    const char* keys[] = {"value", "parameter", "reason"};
+    const char* values[] = {"1", "2", "le 0"};
+    EXPECT_EQ(ReportPredefinedErrMsgForC(nullptr, keys, values, 3U), -1);
+}
+
+TEST_F(UtestErrorManager, ReportPredefinedErrMsgForC_Failed_PartialNullArray)
+{
+    const char* keys[] = {"value"};
+    const char* values[] = {"1"};
+    EXPECT_EQ(ReportPredefinedErrMsgForC("E10001", nullptr, values, 1U), -1);
+    EXPECT_EQ(ReportPredefinedErrMsgForC("E10001", keys, nullptr, 1U), -1);
+}
+
+TEST_F(UtestErrorManager, ReportPredefinedErrMsgForC_Failed_NullArrayElement)
+{
+    const char* keys[] = {"value", nullptr, "reason"};
+    const char* values[] = {"1", "2", "le 0"};
+    EXPECT_EQ(ReportPredefinedErrMsgForC("E10001", keys, values, 3U), -1);
+
+    const char* valid_keys[] = {"value", "parameter", "reason"};
+    const char* invalid_values[] = {"1", nullptr, "le 0"};
+    EXPECT_EQ(ReportPredefinedErrMsgForC("E10001", valid_keys, invalid_values, 3U), -1);
+}
+
+TEST_F(UtestErrorManager, ReportPredefinedErrMsgForC_ZeroArg_NullArrays)
+{
+    EXPECT_EQ(ReportPredefinedErrMsgForC("E10001", nullptr, nullptr, 0U), -1);
+}
+
+TEST_F(UtestErrorManager, ReportInnerErrMsgForC_Success)
+{
+    const std::string errmsg = "Report inner err msg from C callback";
+    EXPECT_EQ(ReportInnerErrMsgForC(__FILE__, __FUNCTION__, __LINE__, "E18888", kStringArgFormat, errmsg.c_str()), 0);
+
+    auto err_msg = error_message::GetErrMgrErrorMessage();
+    ASSERT_NE(err_msg, nullptr);
+    const std::string error_message(err_msg.get());
+    EXPECT_NE(error_message.find("E18888"), std::string::npos);
+    EXPECT_NE(error_message.find(errmsg), std::string::npos);
+}
+
+TEST_F(UtestErrorManager, ReportInnerErrMsgForC_Failed_MessageLengthExceedsLimits_1024)
+{
+    EXPECT_EQ(
+        ReportInnerErrMsgForC(
+            __FILE__, __FUNCTION__, __LINE__, "E18888", kErrMsgFormat, std::string(1025U, 'a').c_str()),
+        -1);
+    EXPECT_TRUE(std::string(error_message::GetErrMgrErrorMessage().get()).empty());
+}
+
+TEST_F(UtestErrorManager, ReportInnerErrMsgForC_Failed_NullParam)
+{
+    EXPECT_EQ(ReportInnerErrMsgForC(nullptr, __FUNCTION__, __LINE__, "E18888", kStringArgFormat, "msg"), -1);
+    EXPECT_EQ(ReportInnerErrMsgForC(__FILE__, nullptr, __LINE__, "E18888", kStringArgFormat, "msg"), -1);
+    EXPECT_EQ(ReportInnerErrMsgForC(__FILE__, __FUNCTION__, __LINE__, nullptr, kStringArgFormat, "msg"), -1);
+    EXPECT_EQ(ReportInnerErrMsgForC(__FILE__, __FUNCTION__, __LINE__, "E18888", nullptr), -1);
+}
+
+TEST_F(UtestErrorManager, GetSetErrorManagerContext)
+{
+    auto ori_ctx = error_message::GetErrMgrContext();
+    ori_ctx.work_stream_id = 11;
+    error_message::SetErrMgrContext(ori_ctx);
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_EQ(instance.GetErrorManagerContext().work_stream_id, ori_ctx.work_stream_id);
+    SetErrMgrContext(ori_ctx);
+}
+
+TEST_F(UtestErrorManager, ReportFormatErrorMessage_Success)
+{
+    // 上报预定义错误码
+    EXPECT_EQ(error_message::ReportPredefinedErrMsg("E10023", {"value"}, {"11"}), 0);
+    std::string res(error_message::GetErrMgrErrorMessage().get());
+    EXPECT_EQ(res.find("Invalid_Argument(E10023): ") != std::string::npos, true);
+    // 上报预定义告警码
+    EXPECT_EQ(error_message::ReportPredefinedErrMsg("W11002", {"filename", "opnames"}, {"test.json", "add_0_1"}), 0);
+    res = error_message::GetErrMgrWarningMessage().get();
+    EXPECT_EQ(res.find("Config_Error_Weight_Configuration(W11002): ") != std::string::npos, true);
+    // 上报内部错误码
+    std::string errmsg = "Report Inner Error messsage!";
+    REPORT_INNER_ERR_MSG("E19999", "%s", errmsg.c_str());
+    res = error_message::GetErrMgrErrorMessage().get();
+    EXPECT_EQ(res.find("(E19999):") != std::string::npos, true);
+    // 上报用户定义错误码
+    errmsg = "Report user defined U error code!";
+    auto ret = error_message::ReportUserDefinedErrMsg("EU0001", "%s", errmsg.c_str());
+    EXPECT_EQ(ret, 0);
+    res = error_message::GetErrMgrErrorMessage().get();
+    EXPECT_EQ(res.find("(EU0001):") != std::string::npos, true);
 }
 
 class UtestErrorManagerUninitialized : public testing::Test {
- protected:
-  void SetUp() {}
-  void TearDown() {}
+protected:
+    void SetUp() {}
+    void TearDown() {}
 };
 
-TEST_F(UtestErrorManagerUninitialized, IsUserDefinedErrorCode_Failed_uninitialized) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_FALSE(instance.is_init_);
-  EXPECT_FALSE(instance.IsUserDefinedErrorCode("EU0001"));
+TEST_F(UtestErrorManagerUninitialized, IsUserDefinedErrorCode_Failed_uninitialized)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_FALSE(instance.is_init_);
+    EXPECT_FALSE(instance.IsUserDefinedErrorCode("EU0001"));
 }
 
-TEST_F(UtestErrorManagerUninitialized, ReportUserDefinedErrMsg_Failed_uninitialized) {
-  auto &instance = ErrorManager::GetInstance();
-  EXPECT_FALSE(instance.is_init_);
-  auto ret = error_message::ReportUserDefinedErrMsg("EU0001", "Report user defined error code!");
-  EXPECT_EQ(ret, -1);
+TEST_F(UtestErrorManagerUninitialized, ReportUserDefinedErrMsg_Failed_uninitialized)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_FALSE(instance.is_init_);
+    auto ret = error_message::ReportUserDefinedErrMsg("EU0001", "Report user defined error code!");
+    EXPECT_EQ(ret, -1);
 }
+// 并发注册错误码 + 并发上报: 覆盖 error_map_ 的读写竞争。
+// 修复前 ReportErrMessage 在锁外执行 error_map_.find 并把指向 map 内部的引用带出锁,
+// 而 RegisterFormatErrorMessage -> ParseJsonFormatString 全程不持锁改写 error_map_,
+// 两者构成数据竞争, 在 TSAN/ASAN 下可稳定暴露。
+TEST_F(UtestErrorManager, ConcurrentRegisterAndReportErrMessage)
+{
+    auto& instance = ErrorManager::GetInstance();
+    instance.error_mode_ = error_message::ErrorMsgMode::INTERNAL_MODE;
+
+    auto conf = ErrorManager::ErrorInfoConfig();
+    conf.error_id = "E13001";
+    conf.error_message = "concurrent report happend, arg=%s.";
+    conf.arg_list.push_back("argv1");
+    instance.error_map_["E13001"] = conf;
+
+    constexpr int32_t kLoopCnt = 300;
+    std::atomic<bool> start{false};
+
+    std::thread registerer([&start]() {
+        while (!start.load()) {
+        }
+        for (int32_t i = 0; i < kLoopCnt; ++i) {
+            // 每轮注册一个新错误码, 持续触发 error_map_ 的插入与红黑树调整
+            const std::string msg = std::string(R"({"error_info_list":[{"ErrCode":"E9)") + std::to_string(1000 + i) +
+                                    R"(","ErrMessage":"concurrent %s","Arglist":"argv1"}]})";
+            (void)error_message::RegisterFormatErrorMessage(msg.c_str(), msg.size());
+        }
+    });
+    std::thread reporter([&instance, &start]() {
+        while (!start.load()) {
+        }
+        for (int32_t i = 0; i < kLoopCnt; ++i) {
+            (void)instance.ReportErrMessage("E13001", {{"argv1", "value"}});
+        }
+    });
+    start.store(true);
+    registerer.join();
+    reporter.join();
+
+    // 并发写入过程中不应丢失任何已注册的错误码模板
+    int32_t found = 0;
+    for (int32_t i = 0; i < kLoopCnt; ++i) {
+        if (instance.error_map_.find(std::string("E9") + std::to_string(1000 + i)) != instance.error_map_.end()) {
+            ++found;
+        }
+    }
+    EXPECT_EQ(found, kLoopCnt);
+    EXPECT_NE(instance.error_map_.find("E13001"), instance.error_map_.end());
+
+    for (int32_t i = 0; i < kLoopCnt; ++i) {
+        (void)instance.error_map_.erase(std::string("E9") + std::to_string(1000 + i));
+    }
+    (void)instance.error_map_.erase("E13001");
 }
+
+// Init(mode) 失败时不得改写 error_mode_: 修复前 error_mode_ 在校验解析结果之前就被写入,
+// 一次失败的 Init 会把错误消息粒度模式永久置成调用方期望但实际未生效的值。
+TEST_F(UtestErrorManager, InitWithModeNotPolluteModeOnFailure)
+{
+    auto& instance = ErrorManager::GetInstance();
+    const auto origin_mode = instance.error_mode_.load();
+    instance.error_mode_ = error_message::ErrorMsgMode::INTERNAL_MODE;
+
+    // 非法模式直接返回失败, 模式保持不变
+    EXPECT_EQ(instance.Init(error_message::ErrorMsgMode::ERR_MSG_MODE_MAX), -1);
+    EXPECT_EQ(instance.error_mode_.load(), error_message::ErrorMsgMode::INTERNAL_MODE);
+
+    // 合法模式但解析 error_code.json 失败时, 模式同样不应被改写
+    const int32_t ret = instance.Init(error_message::ErrorMsgMode::PROCESS_MODE);
+    if (ret != 0) {
+        EXPECT_EQ(instance.error_mode_.load(), error_message::ErrorMsgMode::INTERNAL_MODE);
+    } else {
+        EXPECT_EQ(instance.error_mode_.load(), error_message::ErrorMsgMode::PROCESS_MODE);
+    }
+
+    instance.error_mode_ = origin_mode;
+}
+
+// 未初始化时多线程并发上报: 覆盖 is_init_ 的 check-then-init 竞争,
+// 修复前多个线程可同时读到 is_init_ == false 并各自完整跑一遍 ParseJsonFile。
+TEST_F(UtestErrorManagerUninitialized, ConcurrentLazyInitFromMultipleThreads)
+{
+    auto& instance = ErrorManager::GetInstance();
+    EXPECT_FALSE(instance.is_init_);
+
+    constexpr int32_t kThreadNum = 8;
+    std::atomic<bool> start{false};
+    std::vector<std::thread> threads;
+    for (int32_t i = 0; i < kThreadNum; ++i) {
+        threads.emplace_back([&instance, &start]() {
+            while (!start.load()) {
+            }
+            (void)instance.ReportErrMessage("E19999", {});
+            (void)instance.ReportInterErrMessage("EZ9999", "inner");
+        });
+    }
+    start.store(true);
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    // 复位, 避免影响后续用例对未初始化状态的断言
+    instance.is_init_ = false;
+    instance.error_message_per_work_id_.clear();
+    instance.warning_messages_per_work_id_.clear();
+}
+} // namespace error_message

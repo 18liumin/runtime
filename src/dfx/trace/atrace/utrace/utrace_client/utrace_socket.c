@@ -9,32 +9,39 @@
  */
 
 #include "utrace_socket.h"
+#include "adiag_lock.h"
 #include "adiag_utils.h"
 #include "adiag_print.h"
+#include "trace_recorder.h"
 #include "trace_system_api.h"
 
 STATIC int32_t g_clientSockFd = -1;
+STATIC AdiagLock g_clientSockLock = TRACE_MUTEX_INITIALIZER;
 
 void UtraceSetSocketFd(int32_t fd)
 {
+    (void)AdiagLockGet(&g_clientSockLock);
     g_clientSockFd = fd;
+    (void)AdiagLockRelease(&g_clientSockLock);
 }
 
 int32_t UtraceGetSocketFd(void)
 {
-    return g_clientSockFd;
+    (void)AdiagLockGet(&g_clientSockLock);
+    int32_t fd = g_clientSockFd;
+    (void)AdiagLockRelease(&g_clientSockLock);
+    return fd;
 }
 
 bool UtraceIsSocketFdValid(void)
 {
-    if (g_clientSockFd < 0) {
-        return false;
-    } else {
-        return true;
-    }
+    (void)AdiagLockGet(&g_clientSockLock);
+    bool isValid = (g_clientSockFd >= 0);
+    (void)AdiagLockRelease(&g_clientSockLock);
+    return isValid;
 }
 
-STATIC TraStatus TraceGetSocketPathByVfid(uint32_t vfid, char *socketPath, uint32_t pathLen)
+STATIC TraStatus TraceGetSocketPathByVfid(uint32_t vfid, char* socketPath, uint32_t pathLen)
 {
     int32_t ret = snprintf_s(socketPath, pathLen, pathLen - 1, "%s%s_%u", SOCKET_FILE_DIR, SOCKET_FILE, vfid);
     if (ret == -1) {
@@ -44,7 +51,7 @@ STATIC TraStatus TraceGetSocketPathByVfid(uint32_t vfid, char *socketPath, uint3
     return TRACE_SUCCESS;
 }
 
-STATIC TraStatus TraceGetSocketPathByPfid(char *socketPath, uint32_t pathLen)
+STATIC TraStatus TraceGetSocketPathByPfid(char* socketPath, uint32_t pathLen)
 {
     int32_t ret = snprintf_s(socketPath, pathLen, pathLen - 1, "%s%s", SOCKET_FILE_DIR, SOCKET_FILE);
     if (ret == -1) {
@@ -61,7 +68,7 @@ STATIC TraStatus TraceGetSocketPathByPfid(char *socketPath, uint32_t pathLen)
  * @param [in]      : pathLen           path length
  * @return          : !=0 failure; ==0 success
  */
-STATIC TraStatus UtraceGetTraceSocketPath(uint32_t devId, char *socketPath, uint32_t pathLen)
+STATIC TraStatus UtraceGetTraceSocketPath(uint32_t devId, char* socketPath, uint32_t pathLen)
 {
     if ((devId >= MIN_VFID_NUM) && (devId <= MAX_VFID_NUM)) {
         // devId(32~63) is vfid, strcat socket path with "socket_trace_vfid"
@@ -79,13 +86,14 @@ int32_t UtraceCreateSocket(uint32_t devId)
     struct sockaddr_un addr;
     int32_t pid = (int32_t)getpid();
     int32_t sockFd = TraceSocket(AF_UNIX, (uint32_t)SOCK_DGRAM | (uint32_t)SOCK_NONBLOCK, 0);
-    ADIAG_CHK_EXPR_ACTION(sockFd == TRACE_FAILURE, return TRACE_FAILURE, "create socket failed, strerr=%s, pid=%d",
+    ADIAG_CHK_EXPR_ACTION(
+        sockFd == TRACE_FAILURE, return TRACE_FAILURE, "create socket failed, strerr=%s, pid=%d",
         strerror(AdiagGetErrorCode()), pid);
 
     const int32_t nSendBuf = 2097152; // 2MB
     int32_t ret;
     do {
-        ret = setsockopt(sockFd, SOL_SOCKET, SO_SNDBUF, (const char *)&nSendBuf, sizeof(int));
+        ret = setsockopt(sockFd, SOL_SOCKET, SO_SNDBUF, (const char*)&nSendBuf, sizeof(int));
         if (ret < 0) {
             ADIAG_ERR("set socket option failed, strerr=%s, pid=%d.", strerror(AdiagGetErrorCode()), pid);
             break;
@@ -94,7 +102,7 @@ int32_t UtraceCreateSocket(uint32_t devId)
         (void)memset_s(&addr, sizeof(addr), 0, sizeof(addr));
 
         addr.sun_family = AF_UNIX;
-        char socketPath[SOCKET_PATH_MAX_LENGTH + 1U] = { 0 };
+        char socketPath[SOCKET_PATH_MAX_LENGTH + 1U] = {0};
         ret = UtraceGetTraceSocketPath(devId, socketPath, SOCKET_PATH_MAX_LENGTH);
         if (ret != TRACE_SUCCESS) {
             ADIAG_ERR("get socket path failed, ret=%d, pid=%d, devId=%u.", ret, pid, devId);
@@ -107,7 +115,7 @@ int32_t UtraceCreateSocket(uint32_t devId)
             break;
         }
 
-        ret = TraceConnect(sockFd, (struct sockaddr *)&addr, sizeof(addr));
+        ret = TraceConnect(sockFd, (struct sockaddr*)&addr, sizeof(addr));
         if (ret != TRACE_SUCCESS) {
             ADIAG_ERR("connect to trace server failed, path %s, ret=%d, pid=%d.", addr.sun_path, ret, pid);
             break;
@@ -125,8 +133,42 @@ int32_t UtraceCreateSocket(uint32_t devId)
 
 void UtraceCloseSocket(void)
 {
-    if (UtraceIsSocketFdValid()) {
-        TraceCloseSocket(g_clientSockFd);
-        UtraceSetSocketFd(-1);
+    int32_t fd = -1;
+    (void)AdiagLockGet(&g_clientSockLock);
+    if (g_clientSockFd >= 0) {
+        fd = g_clientSockFd;
+        g_clientSockFd = -1;
     }
+    (void)AdiagLockRelease(&g_clientSockLock);
+    if (fd >= 0) {
+        (void)TraceCloseSocket(fd);
+    }
+}
+
+TraStatus UtraceWriteSocket(uint32_t devId, const char* buffer, uint32_t len)
+{
+    if ((buffer == NULL) || (len == 0U)) {
+        return TRACE_FAILURE;
+    }
+
+    int32_t fd = -1;
+    (void)AdiagLockGet(&g_clientSockLock);
+    if (g_clientSockFd < 0) {
+        fd = UtraceCreateSocket(devId);
+        if (fd == TRACE_FAILURE) {
+            (void)AdiagLockRelease(&g_clientSockLock);
+            return TRACE_FAILURE;
+        }
+        g_clientSockFd = fd;
+    }
+    fd = g_clientSockFd;
+    TraStatus ret = TraceRecorderWrite(fd, buffer, len);
+    if (ret != TRACE_SUCCESS) {
+        g_clientSockFd = -1;
+    }
+    (void)AdiagLockRelease(&g_clientSockLock);
+    if ((ret != TRACE_SUCCESS) && (fd >= 0)) {
+        (void)TraceCloseSocket(fd);
+    }
+    return ret;
 }

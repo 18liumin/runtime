@@ -1,14 +1,15 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
- * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
 #ifndef PROF_CANN_PLUGIN_H
 #define PROF_CANN_PLUGIN_H
+#include <atomic>
 #include <vector>
 #include <map>
 #include <functional>
@@ -29,40 +30,47 @@ constexpr int ADDITIONAL_INFO_BODY_LENGTH = 232;
 constexpr int STANDARD_ADDITIONAL_INFO_LENGTH = 256;
 constexpr int MAX_VARIABLE_DATA_LENGTH = 65536;
 
-using ProfInitFunc = int32_t (*) (uint32_t type, void *data, uint32_t dataLen);
-using ProfStartFunc = int32_t (*) (uint32_t dataType, const void *data, uint32_t length);
-using ProfStopFunc = int32_t (*) (uint32_t dataType, const void *data, uint32_t length);
-using ProfSetConfigFunc = int32_t (*) (uint32_t configType, const char *config, size_t configLength);
-using ProfRegisterCallbackFunc = int32_t (*) (uint32_t moduleId, ProfCommandHandle handle);
-using ProfReportDataFunc = int32_t (*) (uint32_t moduleId, uint32_t type, void* data, uint32_t len);
-using ProfSetDeviceIdFunc = int32_t (*) (const uint32_t geModelIdx, const uint32_t deviceId);
-using ProfNotifySetDeviceFunc = int32_t (*) (uint32_t chipId, uint32_t deviceId, bool isOpen);
-using ProfFinalizeFunc = int32_t (*) ();
-using ProfGetImplInfoFunc = void (*) (ProfImplInfo& info);
-using ProfApiBufPopFunc = void (*) (const ProfApiBufPopCallback func);
-using ProfCompactBufPopFunc = void (*) (const ProfCompactBufPopCallback func);
-using ProfAdditionalBufPopFunc = void (*) (const ProfAdditionalBufPopCallback func);
-using ProfReportBufEmptyFunc = void (*) (const ProfReportBufEmptyCallback func);
-using ProfAdditionalBufPushFunc = void (*) (const ProfAdditionalBufPushCallback func);
-using ProfMarkExFunc = void (*) (const ProfMarkExCallback func);
-using ProfBatchAddBufPopFunc = void* (*) (const ProfBatchAddBufPopCallback func);
-using ProfBatchAddBufIndexShiftFunc = void (*) (const ProfBatchAddBufIndexShiftCallBack func);
-using ProfGetFeatureIsOnFunc = int32_t (*) (uint64_t feature);
-using ProfImplInitMstxInjectionFunc = void(*)(const ProfRegisterMstxFuncCallback func);
-using ProfSubscribeRawDataFunc = int32_t (*) (MsprofRawDataCallback callback);
-using ProfUnSubscribeRawDataFunc = int32_t (*) ();
+using ProfInitFunc = int32_t (*)(uint32_t type, void* data, uint32_t dataLen);
+using ProfStartFunc = int32_t (*)(uint32_t dataType, const void* data, uint32_t length);
+using ProfStopFunc = int32_t (*)(uint32_t dataType, const void* data, uint32_t length);
+using ProfSetConfigFunc = int32_t (*)(uint32_t configType, const char* config, size_t configLength);
+using ProfRegisterCallbackFunc = int32_t (*)(uint32_t moduleId, ProfCommandHandle handle);
+using ProfReportDataFunc = int32_t (*)(uint32_t moduleId, uint32_t type, void* data, uint32_t len);
+using ProfSetDeviceIdFunc = int32_t (*)(const uint32_t geModelIdx, const uint32_t deviceId);
+using ProfNotifySetDeviceFunc = int32_t (*)(uint32_t chipId, uint32_t deviceId, bool isOpen);
+using ProfFinalizeFunc = int32_t (*)();
+using ProfGetImplInfoFunc = void (*)(ProfImplInfo& info);
+using ProfApiBufPopFunc = void (*)(const ProfApiBufPopCallback func);
+using ProfCompactBufPopFunc = void (*)(const ProfCompactBufPopCallback func);
+using ProfAdditionalBufPopFunc = void (*)(const ProfAdditionalBufPopCallback func);
+using ProfReportBufEmptyFunc = void (*)(const ProfReportBufEmptyCallback func);
+using ProfAdditionalBufPushFunc = void (*)(const ProfAdditionalBufPushCallback func);
+using ProfMarkExFunc = void (*)(const ProfMarkExCallback func);
+using ProfBatchAddBufPopFunc = void* (*)(const ProfBatchAddBufPopCallback func);
+using ProfBatchAddBufIndexShiftFunc = void (*)(const ProfBatchAddBufIndexShiftCallBack func);
+using ProfGetFeatureIsOnFunc = int32_t (*)(uint64_t feature);
+using ProfImplInitMstxInjectionFunc = void (*)(const ProfRegisterMstxFuncCallback func);
+using ProfSubscribeRawDataFunc = int32_t (*)(MsprofRawDataCallback callback);
+using ProfUnSubscribeRawDataFunc = int32_t (*)();
+using ProfSetInjectionFuncFunc = int32_t (*)(uint32_t type, void* func);
+using ProfInjectionInitializeFunc = int32_t (*)();
+using ProfGetInjectionFuncFunc = void* (*)(uint32_t type);
+using ProfRegisterDataCallbackFunc = int32_t (*)(uint32_t type, void* callback);
 
-using ProfVarAddBlockBufPopFunc = void* (*) (const ProfVarAddBlockBufPopCallback func);
-using ProfVarAddBufIndexShiftFunc = void* (*) (const ProfVarAddBufIndexShiftCallBack func);
+using ProfVarAddBlockBufPopFunc = void* (*)(const ProfVarAddBlockBufPopCallback func);
+using ProfVarAddBufIndexShiftFunc = void* (*)(const ProfVarAddBufIndexShiftCallBack func);
+
+using ProfSetCommandFunc = int32_t (*)(VOID_PTR command, uint32_t len);
+using ProfCheckOpSwitchFunc = bool (*)(uint32_t type, const char* op, size_t len);
 
 class ProfCannPlugin : public ProfPlugin, public analysis::dvvp::common::singleton::Singleton<ProfCannPlugin> {
 public:
     void ProfApiInit();
 
-    int32_t ProfInit(uint32_t type, void *data, uint32_t dataLen) override;
-    int32_t ProfStart(uint32_t dataType, const void *data, uint32_t length) override;
-    int32_t ProfStop(uint32_t dataType, const void *data, uint32_t length) override;
-    int32_t ProfSetConfig(uint32_t configType, const char *config, size_t configLength) override;
+    int32_t ProfInit(uint32_t type, void* data, uint32_t dataLen) override;
+    int32_t ProfStart(uint32_t dataType, const void* data, uint32_t length) override;
+    int32_t ProfStop(uint32_t dataType, const void* data, uint32_t length) override;
+    int32_t ProfSetConfig(uint32_t configType, const char* config, size_t configLength) override;
     int32_t ProfRegisterCallback(uint32_t moduleId, ProfCommandHandle handle) override;
     int32_t ProfReportData(uint32_t moduleId, uint32_t type, void* data, uint32_t len) override;
     int32_t ProfReportApi(uint32_t agingFlag, const MsprofApi* api) override;
@@ -72,10 +80,16 @@ public:
     int32_t ProfReportRegTypeInfo(uint16_t level, uint32_t typeId, const char* typeName, size_t len) override;
     int32_t ProfReportRegDataFormat(uint16_t level, uint32_t typeId, const char* dataFormat, size_t len) override;
     uint64_t ProfReportGetHashId(const char* info, size_t len) override;
+    char* ProfReportGetHashInfo(const uint64_t hashId) override;
+    char* profGetPath() override;
     int32_t ProfSetDeviceIdByGeModelIdx(const uint32_t geModelIdx, const uint32_t deviceId) override;
     int32_t ProfUnSetDeviceIdByGeModelIdx(const uint32_t geModelIdx, const uint32_t deviceId) override;
     int32_t ProfNotifySetDevice(uint32_t chipId, uint32_t deviceId, bool isOpen) override;
     int32_t ProfSetStepInfo(const uint64_t indexId, const uint16_t tagId, void* const stream) override;
+    int32_t ReportApiInfo(
+        const uint64_t beginTime, const uint64_t endTime, const uint64_t itemId, const uint32_t apiType);
+    void BuildApiInfo(
+        const std::pair<uint64_t, uint64_t>& profTime, const uint32_t apiType, const uint64_t itemId, MsprofApi& api);
     int32_t ProfFinalize() override;
     bool ProfHostFreqIsEnable() override;
     void ProfGetImplInfo(ProfImplInfo& info);
@@ -83,37 +97,55 @@ public:
     void ProfInitReportBuf(uint32_t type = 0);
     void ProfUnInitReportBuf();
     bool ProfIfReportBufEmpty();
-    bool ProfReportBufPop(uint32_t &aging, MsprofApi& data);
-    bool ProfReportBufPop(uint32_t &aging, MsprofCompactInfo& data);
-    bool ProfReportBufPop(uint32_t &aging, MsprofAdditionalInfo& data);
+    bool ProfReportBufPop(uint32_t& aging, MsprofApi& data);
+    bool ProfReportBufPop(uint32_t& aging, MsprofCompactInfo& data);
+    bool ProfReportBufPop(uint32_t& aging, MsprofAdditionalInfo& data);
     void ProfTxInit();
     bool ProfCheckCommandLine();
 
-    void *ProfVarBlockBufBatchPop(size_t &popSize);
-    void ProfVarAddBufIndexShift(void *popPtr, const size_t popSize);
+    void* ProfVarBlockBufBatchPop(size_t& popSize);
+    void ProfVarAddBufIndexShift(void* popPtr, const size_t popSize);
 
     // devprof
     int32_t ProfReportBatchAdditionalInfo(uint32_t agingFlag, const VOID_PTR data, uint32_t len) override;
     size_t ProfGetBatchReportMaxSize(uint32_t type) override;
-    void *ProfBatchAddBufPop(size_t &popSize, bool popForce);
-    void ProfBatchAddBufIndexShift(void *popPtr, const size_t popSize);
+    void* ProfBatchAddBufPop(size_t& popSize, bool popForce);
+    void ProfBatchAddBufIndexShift(void* popPtr, const size_t popSize);
     void ProfInitDevReportBuf();
     int32_t ProfAdprofCheckFeatureIsOn(uint64_t feature) const;
     int32_t ProfSubscribeRawData(MsprofRawDataCallback callback) const;
     int32_t ProfUnSubscribeRawData() const;
+    int32_t ProfSetInjectionFunc(uint32_t type, void* func);
+    int32_t ProfInjectionInitialize();
+    void* ProfGetInjectionFunc(uint32_t type);
+    int32_t ProfRegisterDataCallback(uint32_t type, void* callback);
+
+    int32_t ProfSetProfCommand(VOID_PTR command, uint32_t len);
+    bool ProfCheckOpSwitch(uint32_t type, const char* op, size_t len);
+    int32_t RegisterProfileCallback(int32_t callbackType, VOID_PTR callback, uint32_t len);
     ~ProfCannPlugin() override;
 
 private:
     void ProfRegisterFunc(uint32_t type, void* func);
     void LoadProfInfo();
-    void *msProfLibHandle_;
-    std::map<uint32_t, uint32_t> deviceIdMaps_;  // (moduleId, deviceId)
+    std::atomic<void*> msProfLibHandle_{nullptr};
+    std::map<uint32_t, uint32_t> deviceIdMaps_;   // (moduleId, deviceId)
     std::mutex deviceMapsMutex_;
-    std::map<uint64_t, bool> deviceStates_; // id is deviceid << 32 | chipid;
+    std::map<uint64_t, bool> deviceStates_;       // id is deviceid << 32 | chipid;
+    std::map<uint64_t, bool> cachedDeviceStates_; // id is deviceid << 32 | chipid;
     std::mutex deviceStateMutex_;
+    std::mutex cachedDeviceStateMutex_;
     std::mutex envMutex_;
 
     void LoadProfApi();
+    void LoadProfCoreApi();
+    void LoadProfReportApi();
+    void LoadProfBufferApi();
+    void LoadProfRawDataApi();
+    void LoadProfExtendedApi();
+
+    int32_t RegisterProfileCallbackForAtls(int32_t callbackType, VOID_PTR callback);
+    void ProfNotifyCachedDevice();
 
     PTHREAD_ONCE_T profApiLoadFlag_;
     ProfInitFunc profInit_{nullptr};
@@ -125,6 +157,8 @@ private:
     ProfReportRegTypeInfoFunc profReportRegTypeInfo_{nullptr};
     ProfReportRegDataFormatFunc profReportRegDataFormat_{nullptr};
     ProfReportGetHashIdFunc profReportGetHashId_{nullptr};
+    ProfReportGetHashInfoFunc profReportGetHashInfo_{nullptr};
+    ProfGetPathFunc profGetPath_{nullptr};
     ProfSetDeviceIdFunc profSetDeviceId_{nullptr};
     ProfSetDeviceIdFunc profUnSetDeviceId_{nullptr};
     ProfNotifySetDeviceFunc profNotifySetDevice_{nullptr};
@@ -148,22 +182,39 @@ private:
     ProfImplInitMstxInjectionFunc profImplInitMstxInjection_{nullptr};
     ProfSubscribeRawDataFunc profSubscribeRawData_{nullptr};
     ProfUnSubscribeRawDataFunc profUnSubscribeRawData_{nullptr};
+    ProfSetInjectionFuncFunc profSetInjectionFunc_{nullptr};
+    ProfInjectionInitializeFunc profInjectionInitialize_{nullptr};
+    ProfGetInjectionFuncFunc profGetInjectionFunc_{nullptr};
+    ProfRegisterDataCallbackFunc profRegisterDataCallback_{nullptr};
 
     VariableBlockBuffer variableAdditionalBuffer_{};
     ProfVarAddBlockBufPopFunc profVarAddBlockBufPop_{nullptr};
     ProfVarAddBufIndexShiftFunc profVarAddBlockBufIndexShift_{nullptr};
+
+    ProfSetCommandFunc profSetProfCommand_{nullptr};
+    ProfCheckOpSwitchFunc profCheckOpSwitch_{nullptr};
+
+    // for atls tools callback
+    MsprofSetDeviceHandle atlsSetDevice_{nullptr};
+    AtlsReportApiFunc atlsReportApi_{nullptr};
+    AtlsReportEventFunc atlsReportEvent_{nullptr};
+    AtlsReportCompactInfoFunc atlsReportCompactInfo_{nullptr};
+    AtlsReportAdditionalInfoFunc atlsReportAdditionalInfo_{nullptr};
+    AtlsReportRegTypeInfoFunc atlsReportRegTypeInfo_{nullptr};
+    AtlsReportGetHashIdFunc atlsReportGetHashId_{nullptr};
+    AtlsHostFreqIsEnableFunc atlsHostFreqIsEnable_{nullptr};
 };
 
-bool TryPopApiBuf(uint32_t &aging, MsprofApi& data);
-bool TryPopCompactBuf(uint32_t &aging, MsprofCompactInfo& data);
-bool TryPopAdditionalBuf(uint32_t &aging, MsprofAdditionalInfo& data);
+bool TryPopApiBuf(uint32_t& aging, MsprofApi& data);
+bool TryPopCompactBuf(uint32_t& aging, MsprofCompactInfo& data);
+bool TryPopAdditionalBuf(uint32_t& aging, MsprofAdditionalInfo& data);
 bool IsReportBufEmpty();
 int32_t TryPushAdditionalBuf(uint32_t aging, const VOID_PTR data, uint32_t len);
-int32_t TryMarkEx(uint64_t indexId, uint64_t modelId, uint16_t tagId, void *stm);
-void *TryPopAdprofBuf(size_t &popSize, bool popForce);
-void TryIndexShiftAdprofBuf(void *popPtr, const size_t popSize);
+int32_t TryMarkEx(uint64_t indexId, uint64_t modelId, uint16_t tagId, void* stm);
+void* TryPopAdprofBuf(size_t& popSize, bool popForce);
+void TryIndexShiftAdprofBuf(void* popPtr, const size_t popSize);
 
-void *TryPopVariableAdditionalBuf(size_t &popSize);
-void TryIndexShiftVariableAddBuf(void *popPtr, const size_t popSize);
-}
+void* TryPopVariableAdditionalBuf(size_t& popSize);
+void TryIndexShiftVariableAddBuf(void* popPtr, const size_t popSize);
+} // namespace ProfAPI
 #endif

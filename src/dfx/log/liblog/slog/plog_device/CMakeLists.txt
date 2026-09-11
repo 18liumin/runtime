@@ -8,8 +8,6 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
-############################# ![ascend610/ascend610Lite/ascend610Lite] ###################################
-############################# libslog.so #################################################################
 set(libslogSrcFiles
     ${CMAKE_CURRENT_SOURCE_DIR}/../alog_to_slog.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../slog_api.cpp
@@ -33,8 +31,8 @@ set(libslogSrcFiles
 
 set(libslogHeaderDir
     ${LIBC_SEC_HEADER}
-    ${TOOLAHCIN_LOG_DIR}/../../../include/driver
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../mmpa/inc/mmpa
+    ${TOOLAHCIN_LOG_DIR}/../../../pkg_inc/driver
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../pkg_inc/mmpa
     ${RUNTIME_DIR}/inc/driver
     ${IAM_HEADER_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../
@@ -94,8 +92,8 @@ target_link_options(slog
 
 target_link_libraries(slog
     PRIVATE
-        $<BUILD_INTERFACE:mmpa_headers>
         $<BUILD_INTERFACE:intf_pub>
+        $<BUILD_INTERFACE:mmpa_headers>
         mmpa
         c_sec
     PUBLIC
@@ -125,8 +123,6 @@ install(TARGETS slog
     LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL
 )
 
-############################# ![ascend610/ascend610Lite/ascend610Lite] ###################################
-############################# libalog.so #################################################################
 add_library(alog
     SHARED
         ${libslogSrcFiles})
@@ -172,12 +168,13 @@ target_link_options(alog
     PRIVATE
         -Wl,-z,relro,-z,now,-z,noexecstack
         -Wl,--gc-sections
+        $<$<CONFIG:Release>:-s>
 )
 
 target_link_libraries(alog
     PRIVATE
-        $<BUILD_INTERFACE:mmpa_headers>
         $<BUILD_INTERFACE:intf_pub>
+        $<BUILD_INTERFACE:mmpa_headers>
         mmpa
         c_sec
     PUBLIC
@@ -194,12 +191,15 @@ install(TARGETS alog
     LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL
 )
 
-# install(TARGETS alog
-#     LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}/${CMAKE_SYSTEM_PROCESSOR} OPTIONAL
-# )
+install(TARGETS alog
+    LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}/${CMAKE_SYSTEM_PROCESSOR} OPTIONAL
+)
 
-############################# ![ascend610/ascend610Lite/ascend610Lite] ###################################
-############################# libunified_npu_log.so ######################################################
+install(TARGETS alog
+    DESTINATION ${DEVICE_LIBRARY_PATH} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+)
+
+
 add_library(unified_dlog
     SHARED
         ${libslogSrcFiles}
@@ -215,6 +215,7 @@ target_compile_definitions(unified_dlog
         OS_TYPE_DEF=0
         OS_TYPE=0
         WRITE_TO_SYSLOG
+    PUBLIC
         $<$<NOT:$<BOOL:${PRODUCT}>>:APP_LOG>
 )
 
@@ -245,8 +246,8 @@ target_link_options(unified_dlog
 
 target_link_libraries(unified_dlog
     PRIVATE
-        $<BUILD_INTERFACE:mmpa_headers>
         $<BUILD_INTERFACE:intf_pub>
+        $<BUILD_INTERFACE:mmpa_headers>
         mmpa
         c_sec
     PUBLIC
@@ -257,6 +258,10 @@ install(TARGETS unified_dlog
     LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL
 )
 
-# install(TARGETS unified_dlog
-#     LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}/${CMAKE_SYSTEM_PROCESSOR} OPTIONAL
-# )
+install(TARGETS unified_dlog
+    LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}/${CMAKE_SYSTEM_PROCESSOR} OPTIONAL
+)
+
+install(TARGETS unified_dlog
+    DESTINATION ${DEVICE_LIBRARY_PATH} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+)

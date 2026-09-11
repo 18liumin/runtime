@@ -13,6 +13,10 @@ add_library(kernel_load_platform SHARED
     load_platform_info.cpp
 )
 
+target_include_directories(kernel_load_platform PRIVATE
+    ${RUNTIME_DIR}/pkg_inc/aicpu_sched/common
+)
+
 target_link_libraries(kernel_load_platform PRIVATE
     $<BUILD_INTERFACE:intf_pub>
     $<BUILD_INTERFACE:slog_headers>
@@ -44,6 +48,6 @@ target_link_options(kernel_load_platform PRIVATE
     -Wl,-Bsymbolic
 )
 
-install(TARGETS kernel_load_platform OPTIONAL
-    LIBRARY DESTINATION lib
+install(TARGETS kernel_load_platform
+    DESTINATION ${DEVICE_LIBRARY_PATH} COMPONENT npu-runtime
 )

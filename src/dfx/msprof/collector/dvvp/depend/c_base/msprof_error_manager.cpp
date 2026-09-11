@@ -12,21 +12,16 @@
 namespace Analysis {
 namespace Dvvp {
 namespace MsprofErrMgr {
-error_message::Context MsprofErrorManager::errorContext_ = {0UL, "", "", ""};
+error_message::ErrorManagerContext MsprofErrorManager::errorContext_{};
 
-error_message::Context &MsprofErrorManager::GetErrorManagerContext() const
-{
-    return errorContext_;
-}
+error_message::ErrorManagerContext& MsprofErrorManager::GetErrorManagerContext() const { return errorContext_; }
 
-void MsprofErrorManager::SetErrorContext(const error_message::Context /* errorContext */) const
-{
-}
+void MsprofErrorManager::SetErrorContext(const error_message::ErrorManagerContext /* errorContext */) const {}
 
-void MsprofErrorManager::ReportErrorMessage(const std::string errorCode, const std::vector<std::string> &keys,
-    const std::vector<std::string> &values) const
+void MsprofErrorManager::ReportErrorMessage(
+    const std::string errorCode, const std::vector<std::string>& keys, const std::vector<std::string>& values) const
 {
-    char **argList = new(std::nothrow) char* [keys.size()]();
+    char** argList = new (std::nothrow) char*[keys.size()]();
     if (argList == nullptr) {
         return;
     }
@@ -34,7 +29,7 @@ void MsprofErrorManager::ReportErrorMessage(const std::string errorCode, const s
         argList[i] = const_cast<char*>(keys[i].c_str());
     }
 
-    char **argVals = new(std::nothrow) char* [values.size()]();
+    char** argVals = new (std::nothrow) char*[values.size()]();
     if (argVals == nullptr) {
         delete[] argList;
         return;
@@ -47,6 +42,6 @@ void MsprofErrorManager::ReportErrorMessage(const std::string errorCode, const s
     delete[] argList;
     delete[] argVals;
 }
-}  // ErrorManager
-}  // Dvvp
-}  // namespace Analysis
+} // namespace MsprofErrMgr
+} // namespace Dvvp
+} // namespace Analysis

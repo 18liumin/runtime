@@ -10,25 +10,27 @@
 
 #ifndef UTILS_H
 #define UTILS_H
+
+#include <cstdio>
 #define INFO_LOG(fmt, args...) fprintf(stdout, "[INFO]  " fmt "\n", ##args)
 #define WARN_LOG(fmt, args...) fprintf(stdout, "[WARN]  " fmt "\n", ##args)
 #define ERROR_LOG(fmt, args...) fprintf(stdout, "[ERROR]  " fmt "\n", ##args)
 
-#define CHECK_ERROR(call) \
-    do { \
-        aclError __ret = (call); \
-        if (__ret != ACL_SUCCESS) { \
+#define CHECK_ERROR(call)                                                                                 \
+    do {                                                                                                  \
+        aclError __ret = (call);                                                                          \
+        if (__ret != ACL_SUCCESS) {                                                                       \
             ERROR_LOG("Operation failed: %s returned error code %d", #call, static_cast<int32_t>(__ret)); \
-            return -1; \
-        } \
+            return -1;                                                                                    \
+        }                                                                                                 \
     } while (0)
-    
-#define CHECK_ERROR_WITHOUT_RETURN(call) \
-    do { \
-        aclError __ret = (call); \
-        if (__ret != ACL_SUCCESS) { \
+
+#define CHECK_ERROR_WITHOUT_RETURN(call)                                                                  \
+    do {                                                                                                  \
+        aclError __ret = (call);                                                                          \
+        if (__ret != ACL_SUCCESS) {                                                                       \
             ERROR_LOG("Operation failed: %s returned error code %d", #call, static_cast<int32_t>(__ret)); \
-        } \
+        }                                                                                                 \
     } while (0)
 
 #endif

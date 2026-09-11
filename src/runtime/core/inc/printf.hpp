@@ -1,0 +1,156 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+#ifndef CCE_RUNTIME_PRINTF_HPP
+#define CCE_RUNTIME_PRINTF_HPP
+
+#include "base.hpp"
+#include "driver.hpp"
+
+namespace cce {
+namespace runtime {
+
+class Device;
+
+// 单核数据排布 blockData: | blockInfo | readInfo | tlv1 | tlv2 | tlv3 ... | writeInfo |
+// 整体排布：| blockData1 | blockData2 | ... | bloackData75 |
+
+struct BlockInfo {
+    uint32_t length = 0;      // 单核维测总长度
+    uint32_t coreId = 0;      // 当前core id
+    uint32_t blockNum = 0;    // 本次总共的核数
+    uint32_t remainLen = 0;   // 可打印的总长度
+    uint16_t magic = 0xAE86U; // 信息校验数 // 0xAE86
+    uint16_t flag = 0;        // flag value, 0:simd-aic, 1:simd-aiv, 2:simt
+    uint32_t rsv = 0;         // DUMP EXC FLAG
+    uint64_t dumpAddr = 0;    // 起始printf的地址
+    uint64_t dbgAddr = 0;     // debug bus addr
+    uint32_t resv[4] = {0U};
+};
+
+enum class DumpType : uint32_t {
+    DUMP_DEFAULT = 0,
+    DUMP_SCALAR,
+    DUMP_TENSOR,
+    DUMP_SHAPE,
+    DUMP_ASSERT,
+    DUMP_META,
+    DUMP_TIMESTAMP,
+    DUMP_SIMT,
+    DUMP_BUFI,
+    DUMP_BUFO,
+    DUMP_SKIP,
+    DUMP_AICPU,
+    DUMP_SIMT_ASSERT = 0xF0E00F0EU,
+    DUMP_SIMT_PRINTF = 0xF0F00F0FU,
+    DUMP_WAIT = 0xF0A55A0FU
+};
+
+#pragma pack(push, 1)
+struct DumpInfoHead {
+    DumpType type = DumpType::DUMP_DEFAULT; // dump type, DUMP_SCALAR:1, DUMP_TENSOR:2
+    uint32_t infoLen = 0U;                  // length for dump info
+    uint8_t infoMsg[0U];                    // extend value
+};
+#pragma pack(pop)
+
+struct BlockWriteInfo {
+    DumpType dumpType = DumpType::DUMP_BUFI;
+    uint32_t length = 16; // writeIdx 和 packIdx 的大小相加
+    uint64_t writeIdx = 0;
+    uint64_t packIdx = 0;
+};
+
+struct BlockReadInfo {
+    DumpType dumpType = DumpType::DUMP_BUFO;
+    uint32_t length = 16; // readIdx 和 resv 的大小相加
+    uint64_t readIdx = 0;
+    uint64_t resv = 0;
+};
+
+struct DumpTimeStampInfoMsg {
+    uint32_t descId; // dot Id for description
+    uint16_t blockIdx;
+    uint16_t rsv;
+    uint64_t syscyc;  // dotting timestamp with system cycle
+    uint64_t curPc;   // currrent pc for source line
+    uint64_t entry;   // Entry system cycle
+    uint32_t resv[2]; // reserved
+};
+
+constexpr uint32_t RT_DUMP_SHAPE_MAX_SIZE = 8U;
+struct DumpTensorInfo {
+    uint32_t addr = 0U;
+    uint32_t dataType = 0U;                        // 数据类型
+    uint32_t desc;                                 // 用户标识
+    uint32_t bufferId;
+    uint16_t position;                             // position GM, UB, L1, L0C
+    uint16_t blockIdx = 0U;                        // block idx
+    uint32_t dim = 0U;                             // dim值
+    uint32_t shape[RT_DUMP_SHAPE_MAX_SIZE] = {0U}; // shape 各维度值 < 8
+    uint32_t resv = 0U;                            // 保留字
+    uint32_t dumpSize;                             // dump实际的大小，不包含对齐长度
+};
+
+struct DumpShapeInfo {
+    uint32_t dim = 0U; // shapeInfo.dim, 即：fmt的offset
+    uint32_t shape[RT_DUMP_SHAPE_MAX_SIZE] = {0U};
+    uint32_t resv;
+};
+
+constexpr uint32_t RT_KERNEL_DFX_INFO_CORE_TYPE_AIC = 0U;
+constexpr uint32_t RT_KERNEL_DFX_INFO_CORE_TYPE_AIV = 1U;
+constexpr uint32_t RT_KERNEL_DFX_INFO_CORE_TYPE_SIMT = 2U;
+constexpr uint32_t RT_KERNEL_DFX_INFO_CORE_TYPE_AICPU = 3U;
+
+enum class AicpuDfxAttrId : uint32_t {
+    MEM_INFO = 1U,
+};
+
+#pragma pack(push, 1)
+struct AicpuPrintfMemInfo {
+    uint64_t printfMemAddr = 0U;
+    uint32_t printfMemSize = 0U;
+    uint32_t resv0 = 0U;
+};
+
+union AicpuDfxAttrValue {
+    uint8_t resv[64U] = {0U};
+    AicpuPrintfMemInfo printfMemInfo;
+};
+
+struct AicpuDfxAttrInfo {
+    uint32_t attrId = 0U;
+    AicpuDfxAttrValue value;
+};
+
+struct AicpuDfxInfo {
+    uint64_t attrs = 0U;    // AicpuDfxAttrInfo在device侧的内存地址
+    uint64_t numAttrs = 0U; // AicpuDfxAttrInfo的数量
+};
+
+struct AicpuSetDfxArgs {
+    uint8_t cpType = 0U;  // aicpu的类型，0：aicpusd, 1: custom_aicpusd
+    uint64_t dfxPtr = 0U; // AicpuDfxInfo在device侧的地址
+};
+#pragma pack(pop)
+
+rtError_t InitPrintf(void* addr, const size_t blockSize, const Device* const dev);
+rtError_t InitSimtPrintf(void* addr, const size_t blockSize, Driver* curDrv);
+rtError_t ParsePrintf(void* addr, const size_t blockSize, Driver* curDrv);
+rtError_t ParseSimtPrintf(void* addr, const size_t blockSize, Driver* curDrv, const Device* const dev);
+rtError_t ParsePrintfV2(void* addr, const size_t blockSize, Driver* curDrv, uint32_t userDeviceId);
+rtError_t ParseSimtPrintfV2(void* addr, const size_t blockSize, Driver* curDrv, uint32_t userDeviceId);
+rtError_t InitAicpuPrintf(void* addr, const size_t blockSize, Driver* curDrv);
+rtError_t ParseAicpuPrintf(void* addr, const size_t blockSize, Driver* curDrv, const Device* const dev);
+rtError_t ParseAicpuPrintfV2(void* addr, const size_t blockSize, Driver* curDrv, uint32_t userDeviceId);
+} // namespace runtime
+} // namespace cce
+
+#endif // CCE_RUNTIME_PRINTF_HPP

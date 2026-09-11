@@ -14,18 +14,14 @@
 
 #define ASC_DUMPER_ARGC 2
 
-#if defined (_ADIAG_LLT_) || defined (ENABLE_SCD)
-int32_t StacktraceDumperMain(int32_t argc, const char *argv[]);
-int32_t StacktraceDumperMain(int32_t argc, const char *argv[])
-#else
-int32_t main(int32_t argc, const char *argv[])
-#endif
+int32_t StacktraceDumperMain(int32_t argc, const char* argv[]);
+int32_t StacktraceDumperMain(int32_t argc, const char* argv[])
 {
     if (argc != ASC_DUMPER_ARGC) {
         ADIAG_WAR("input args is invalid, argc=%d", argc);
         return 1;
     }
 
-    const char *binPath = argv[1];
+    const char* binPath = argv[1];
     return TraceStackParse(binPath, (uint32_t)strlen(binPath));
 }

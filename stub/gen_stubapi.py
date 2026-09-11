@@ -14,7 +14,9 @@ import os
 import re
 import sys
 
-PATTERN_FUNCTION = re.compile(r'ACL_FUNC_VISIBILITY\s+\n+.+\w+\([^();]*\);|.+\w+\([^();]*\);')
+PATTERN_FUNCTION = re.compile(
+    r'[A-Z][A-Z0-9_]*(?:_API|_VISIBILITY)\s+[^;{}]*?\w+\([^();]*\);|.+\w+\([^();]*\);'
+)
 PATTERN_RETURN = re.compile(r'([^ ]+[ *])\w+\([^;]+;')
 
 RETURN_STATEMENTS = {
@@ -67,6 +69,8 @@ def collect_header_files(path):
                 file_path = os.path.join(root, file)
                 file_path = file_path.replace('\\', '/')
                 prof_headers.append(file_path)
+            elif file == "acl_rt_api.h":
+                continue  # skip C++ API header, only process acl_rt.h (pure C API)
             else:
                 file_path = os.path.join(root, file)
                 file_path = file_path.replace('\\', '/')
@@ -89,7 +93,8 @@ def implement_function(func):
     function_def = func[:len(func) - 1]
     function_def += '\n'
     function_def += '{\n'
-    m = PATTERN_RETURN.search(func)
+    normalized_func = re.sub(r'\s+', ' ', func)
+    m = PATTERN_RETURN.search(normalized_func)
     if m:
         ret_type = m.group(1).strip()
         if RETURN_STATEMENTS.__contains__(ret_type):
@@ -132,7 +137,7 @@ def generate_function(header_files, inc_dir):
         includes.append(include_str)
 
     content = includes
-    print("include concent build success")
+    print("include content build success")
     total = 0
     content.append('\n')
     # generate implement
@@ -146,7 +151,7 @@ def generate_function(header_files, inc_dir):
         for func in functions:
             content.append("{}\n".format(implement_function(func)))
             content.append("\n")
-    print("implement concent build success")
+    print("implement content build success")
     print('total functions number is {}'.format(total))
     return content
 

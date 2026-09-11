@@ -15,11 +15,13 @@ file(GLOB_RECURSE SRC_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 include_directories(${TOP_DIR}/include)
+include_directories(${TOP_DIR}/include/external)
 include_directories(${TOP_DIR}/pkg_inc/runtime)
 include_directories(${TOP_DIR}/pkg_inc/runtime/runtime)
 include_directories(${CMAKE_BINARY_DIR}/include_acl)
 include_directories(${CMAKE_BINARY_DIR}/include_acl/tdt)
 include_directories(${TOP_DIR}/src/dfx/error_manager)
+include_directories(${TOP_DIR}/src/inc)
 include_directories(${BASE_DIR}/tests/depends/)
 
 include_directories(${BASE_DIR}/pkg_inc)
@@ -27,6 +29,7 @@ include_directories(${BASE_DIR}/pkg_inc/base)
 include_directories(${BASE_DIR}/pkg_inc/profiling)
 include_directories(${BASE_DIR}/pkg_inc/dump)
 include_directories(${BASE_DIR}/pkg_inc/watchdog)
+include_directories(${BASE_DIR}/include/dfx)
 
 add_library(tdt_stub SHARED ${SRC_FILES})
 
@@ -34,10 +37,11 @@ add_dependencies(tdt_stub copy_acl_headers_and_libs)
 
 target_link_libraries(tdt_stub PRIVATE
     $<BUILD_INTERFACE:intf_pub>
+    $<BUILD_INTERFACE:c_sec_headers>
     c_sec
     # static_turbojpeg
-    GTest::gtest
-    GTest::gtest_main
-    GTest::gmock
-    GTest::gmock_main
+    GTestShared::gtest
+    GTestShared::gtest_main
+    GTestShared::gmock
+    GTestShared::gmock_main
 )

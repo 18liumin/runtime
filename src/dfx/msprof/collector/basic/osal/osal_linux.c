@@ -1,12 +1,12 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
- * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
 
 #include "osal_linux.h"
 #include <stdbool.h>
@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include "osal_mem.h"
 
+#ifndef LITE_OS
 struct CpuInfoTable {
     CHAR physicalID[OSAL_CPUINFO_DEFAULT_SIZE];
     CHAR cpuMhz[OSAL_CPUINFO_DEFAULT_SIZE];
@@ -24,6 +25,7 @@ struct CpuInfoTable {
     CHAR cpuThreads[OSAL_CPUINFO_DEFAULT_SIZE];
     CHAR maxSpeed[OSAL_CPUINFO_DEFAULT_SIZE];
 };
+#endif
 
 /*
  * 描述:睡眠指定时间
@@ -32,9 +34,11 @@ struct CpuInfoTable {
  */
 int32_t LinuxSleep(uint32_t milliSecond)
 {
+#ifndef LITE_OS
     if (milliSecond == OSAL_ZERO) {
         return OSAL_EN_INVALID_PARAM;
     }
+#endif
     uint32_t microSecond;
 
     // 防止截断
@@ -58,7 +62,11 @@ int32_t LinuxSleep(uint32_t milliSecond)
  */
 int32_t LinuxGetPid(void)
 {
+#ifdef LITE_OS
+    return 0;
+#else
     return (int32_t)(getpid());
+#endif
 }
 
 /*
@@ -66,11 +74,9 @@ int32_t LinuxGetPid(void)
  * 参数:无
  * 返回值:执行成功返回对应调用线程的id, 执行错误返回OSAL_EN_ERROR
  */
-int32_t LinuxGetTid(void)
-{
-    return OSAL_EN_ERROR;
-}
+int32_t LinuxGetTid(void) { return OSAL_EN_ERROR; }
 
+#ifndef LITE_OS
 /*
  * 描述:创建socket
  * 参数: sockFamily--协议域
@@ -93,7 +99,7 @@ OsalSockHandle LinuxSocket(int32_t sockFamily, int32_t type, int32_t protocol)
  *       addrLen--对应地址的长度
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxBind(OsalSockHandle sockFd, OsalSockAddr *addr, OsalSocklen addrLen)
+int32_t LinuxBind(OsalSockHandle sockFd, OsalSockAddr* addr, OsalSocklen addrLen)
 {
     (void)sockFd;
     (void)addr;
@@ -121,7 +127,7 @@ int32_t LinuxListen(OsalSockHandle sockFd, int32_t backLog)
  *       addrLen--协议地址的长度
  * 返回值:执行成功返回自动生成的一个全新的socket id, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-OsalSockHandle LinuxAccept(OsalSockHandle sockFd, OsalSockAddr *addr, OsalSocklen *addrLen)
+OsalSockHandle LinuxAccept(OsalSockHandle sockFd, OsalSockAddr* addr, OsalSocklen* addrLen)
 {
     (void)sockFd;
     (void)addr;
@@ -136,7 +142,7 @@ OsalSockHandle LinuxAccept(OsalSockHandle sockFd, OsalSockAddr *addr, OsalSockle
  *      addrLen--地址的长度
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxConnect(OsalSockHandle sockFd, OsalSockAddr *addr, OsalSocklen addrLen)
+int32_t LinuxConnect(OsalSockHandle sockFd, OsalSockAddr* addr, OsalSocklen addrLen)
 {
     (void)sockFd;
     (void)addr;
@@ -152,8 +158,7 @@ int32_t LinuxConnect(OsalSockHandle sockFd, OsalSockAddr *addr, OsalSocklen addr
  *       sendFlag--发送的方式标志位，一般置0
  * 返回值:执行成功返回实际发送的buf长度, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-OsalSsize LinuxSocketSend(
-    OsalSockHandle sockFd, VOID *sendBuf, int32_t sendLen, int32_t sendFlag)
+OsalSsize LinuxSocketSend(OsalSockHandle sockFd, VOID* sendBuf, int32_t sendLen, int32_t sendFlag)
 {
     (void)sockFd;
     (void)sendBuf;
@@ -170,8 +175,7 @@ OsalSsize LinuxSocketSend(
  *       recvFlag--接收的方式标志位，一般置0
  * 返回值:执行成功返回实际接收的buf长度, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-OsalSsize LinuxSocketRecv(
-    OsalSockHandle sockFd, VOID *recvBuf, int32_t recvLen, int32_t recvFlag)
+OsalSsize LinuxSocketRecv(OsalSockHandle sockFd, VOID* recvBuf, int32_t recvLen, int32_t recvFlag)
 {
     (void)sockFd;
     (void)recvBuf;
@@ -180,6 +184,7 @@ OsalSsize LinuxSocketRecv(
     return OSAL_EN_ERROR;
 }
 
+#endif
 /*
  * 描述:获取错误码
  * 返回值:error code
@@ -198,8 +203,8 @@ int32_t LinuxGetErrorCode(void)
  *      id--创建的子进程ID号
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxCreateProcess(const CHAR *fileName, const OsalArgvEnv *env,
-    const CHAR *stdoutRedirectFile, OsalProcess *id)
+int32_t LinuxCreateProcess(
+    const CHAR* fileName, const OsalArgvEnv* env, const CHAR* stdoutRedirectFile, OsalProcess* id)
 {
     (void)fileName;
     (void)env;
@@ -214,7 +219,7 @@ int32_t LinuxCreateProcess(const CHAR *fileName, const OsalArgvEnv *env,
  *       threadAttr -- 包含需要设置的线程属性类别和值
  * 返回值:执行成功返回EN_OK, 执行错误返回EN_ERROR, 入参检查错误返回EN_INVALID_PARAM
  */
-static int32_t LocalSetSchedAttr(pthread_attr_t *attr, const OsalThreadAttr *threadAttr)
+static int32_t LocalSetSchedAttr(pthread_attr_t* attr, const OsalThreadAttr* threadAttr)
 {
 #ifndef __ANDROID__
     // 设置默认继承属性 PTHREAD_EXPLICIT_SCHED 使得调度属性生效
@@ -242,7 +247,7 @@ static int32_t LocalSetSchedAttr(pthread_attr_t *attr, const OsalThreadAttr *thr
             return OSAL_EN_INVALID_PARAM;
         }
         struct sched_param param;
-        (VOID)memset_s(&param, sizeof(param), 0, sizeof(param)); /* unsafe_function_ignore: memset */
+        (VOID) memset_s(&param, sizeof(param), 0, sizeof(param)); /* unsafe_function_ignore: memset */
         param.sched_priority = threadAttr->priority;
         if (pthread_attr_setschedparam(attr, &param) != OSAL_EN_OK) {
             return OSAL_EN_ERROR;
@@ -257,7 +262,7 @@ static int32_t LocalSetSchedAttr(pthread_attr_t *attr, const OsalThreadAttr *thr
  *       threadAttr -- 包含需要设置的线程属性类别和值
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-static int32_t LinuxLocalSetThreadAttr(pthread_attr_t *attr, const OsalThreadAttr *threadAttr)
+static int32_t LinuxLocalSetThreadAttr(pthread_attr_t* attr, const OsalThreadAttr* threadAttr)
 {
     // 设置调度相关属性
     int32_t ret = LocalSetSchedAttr(attr, threadAttr);
@@ -290,29 +295,36 @@ static int32_t LinuxLocalSetThreadAttr(pthread_attr_t *attr, const OsalThreadAtt
  *       threadAttr -- 包含需要设置的线程属性类别和值
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxCreateTaskWithThreadAttr(OsalThread *threadHandle,
-    const OsalUserBlock *funcBlock, const OsalThreadAttr *threadAttr)
+int32_t LinuxCreateTaskWithThreadAttr(
+    OsalThread* threadHandle, const OsalUserBlock* funcBlock, const OsalThreadAttr* threadAttr)
 {
-    if ((threadHandle == NULL) || (funcBlock == NULL) ||
-        (funcBlock->procFunc == NULL) || (threadAttr == NULL)) {
+    if ((threadHandle == NULL) || (funcBlock == NULL) || (funcBlock->procFunc == NULL) || (threadAttr == NULL)) {
         return OSAL_EN_INVALID_PARAM;
     }
 
     pthread_attr_t attr;
-    (VOID)memset_s(&attr, sizeof(attr), 0, sizeof(attr)); /* unsafe_function_ignore: memset */
+    (VOID) memset_s(&attr, sizeof(attr), 0, sizeof(attr)); /* unsafe_function_ignore: memset */
 
     // 初始化线程属性
     int32_t ret = pthread_attr_init(&attr);
     if (ret != OSAL_EN_OK) {
         return OSAL_EN_ERROR;
     }
+#ifndef LITE_OS
     ret = LinuxLocalSetThreadAttr(&attr, threadAttr);
     if (ret != OSAL_EN_OK) {
-        (VOID)pthread_attr_destroy(&attr);
+        (VOID) pthread_attr_destroy(&attr);
         return ret;
     }
+#else
+    ret = pthread_attr_setstacksize(&attr, OSAL_THREAD_MIN_STACK_SIZE);
+    if (ret != OSAL_EN_OK) {
+        (VOID) pthread_attr_destroy(&attr);
+        return OSAL_EN_ERROR;
+    }
+#endif
     ret = pthread_create(threadHandle, &attr, funcBlock->procFunc, funcBlock->pulArg);
-    (VOID)pthread_attr_destroy(&attr);
+    (VOID) pthread_attr_destroy(&attr);
     if (ret != OSAL_EN_OK) {
         ret = OSAL_EN_ERROR;
     }
@@ -329,7 +341,7 @@ int32_t LinuxCreateTaskWithThreadAttr(OsalThread *threadHandle,
  * 返回值:子进程未结束返回EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  *        进程已经结束返回EN_ERR
  */
-int32_t LinuxWaitPid(OsalProcess pid, int32_t *status, int32_t options)
+int32_t LinuxWaitPid(OsalProcess pid, int32_t* status, int32_t options)
 {
     (void)pid;
     (void)status;
@@ -344,7 +356,7 @@ int32_t LinuxWaitPid(OsalProcess pid, int32_t *status, int32_t options)
  * 参数: threadHandle-- pthread_t类型的实例
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxJoinTask(OsalThread *threadHandle)
+int32_t LinuxJoinTask(OsalThread* threadHandle)
 {
     if (threadHandle == NULL) {
         return OSAL_EN_INVALID_PARAM;
@@ -365,24 +377,25 @@ OsalTimespec LinuxGetTickCount(void)
 {
     OsalTimespec rts = {0, 0};
     struct timespec ts = {0, 0};
-    (VOID)clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    (VOID) clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
     rts.tv_sec = ts.tv_sec;
     rts.tv_nsec = ts.tv_nsec;
     return rts;
 }
 
+#ifndef LITE_OS
 /*
  * 描述:获取当前工作目录路径
  * 参数:buffer--由用户分配用来存放工作目录路径的缓存
  *      maxLen--缓存长度
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxGetCwd(CHAR *buffer, int32_t maxLen)
+int32_t LinuxGetCwd(CHAR* buffer, int32_t maxLen)
 {
     if ((buffer == NULL) || (maxLen < OSAL_ZERO)) {
         return OSAL_EN_INVALID_PARAM;
     }
-    const CHAR *ptr = getcwd(buffer, (uint32_t)(maxLen));
+    const CHAR* ptr = getcwd(buffer, (uint32_t)(maxLen));
     if (ptr != NULL) {
         return OSAL_EN_OK;
     } else {
@@ -396,13 +409,13 @@ int32_t LinuxGetCwd(CHAR *buffer, int32_t maxLen)
  *      length--获取到的文件大小
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxGetFileSize(const CHAR *fileName, uint64_t *length)
+int32_t LinuxGetFileSize(const CHAR* fileName, uint64_t* length)
 {
     if ((fileName == NULL) || (length == NULL)) {
         return OSAL_EN_INVALID_PARAM;
     }
     struct stat fileStat;
-    (VOID)memset_s(&fileStat, sizeof(fileStat), 0, sizeof(fileStat)); /* unsafe_function_ignore: memset */
+    (VOID) memset_s(&fileStat, sizeof(fileStat), 0, sizeof(fileStat)); /* unsafe_function_ignore: memset */
     int32_t ret = lstat(fileName, &fileStat);
     if (ret < OSAL_ZERO) {
         return OSAL_EN_ERROR;
@@ -417,7 +430,7 @@ int32_t LinuxGetFileSize(const CHAR *fileName, uint64_t *length)
  *      diskSize--OsalDiskSize结构内容
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxGetDiskFreeSpace(const CHAR *path, OsalDiskSize *diskSize)
+int32_t LinuxGetDiskFreeSpace(const CHAR* path, OsalDiskSize* diskSize)
 {
     if ((path == NULL) || (diskSize == NULL)) {
         return OSAL_EN_INVALID_PARAM;
@@ -425,7 +438,7 @@ int32_t LinuxGetDiskFreeSpace(const CHAR *path, OsalDiskSize *diskSize)
 
     // 把文件系统信息读入 struct statvfs buf 中
     struct statvfs buf;
-    (VOID)memset_s(&buf, sizeof(buf), 0, sizeof(buf)); /* unsafe_function_ignore: memset */
+    (VOID) memset_s(&buf, sizeof(buf), 0, sizeof(buf)); /* unsafe_function_ignore: memset */
 
     int32_t ret = statvfs(path, &buf);
     if (ret == OSAL_ZERO) {
@@ -442,13 +455,13 @@ int32_t LinuxGetDiskFreeSpace(const CHAR *path, OsalDiskSize *diskSize)
  * 参数: fileName -- 文件路径名
  * 返回值:执行成功返回OSAL_EN_OK(是目录), 执行错误返回OSAL_EN_ERROR(不是目录), 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxIsDir(const CHAR *fileName)
+int32_t LinuxIsDir(const CHAR* fileName)
 {
     if (fileName == NULL) {
         return OSAL_EN_INVALID_PARAM;
     }
     struct stat fileStat;
-    (VOID)memset_s(&fileStat, sizeof(fileStat), 0, sizeof(fileStat)); /* unsafe_function_ignore: memset */
+    (VOID) memset_s(&fileStat, sizeof(fileStat), 0, sizeof(fileStat)); /* unsafe_function_ignore: memset */
     int32_t ret = lstat(fileName, &fileStat);
     if (ret < OSAL_ZERO) {
         return OSAL_EN_ERROR;
@@ -466,7 +479,7 @@ int32_t LinuxIsDir(const CHAR *fileName)
  * 参数: mode -- 权限
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxAccess2(const CHAR *pathName, int32_t mode)
+int32_t LinuxAccess2(const CHAR* pathName, int32_t mode)
 {
     if (pathName == NULL) {
         return OSAL_EN_INVALID_PARAM;
@@ -484,17 +497,14 @@ int32_t LinuxAccess2(const CHAR *pathName, int32_t mode)
  * 参数: pathName -- 文件路径名
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxAccess(const CHAR *pathName)
-{
-    return LinuxAccess2(pathName, F_OK);
-}
+int32_t LinuxAccess(const CHAR* pathName) { return LinuxAccess2(pathName, F_OK); }
 
 /*
  * 描述:截取目录, 比如/usr/bin/test, 截取后为 /usr/bin
  * 参数:path--路径，函数内部会修改path的值
  * 返回值:执行成功返回指向截取到的目录部分指针，执行失败返回nullptr
  */
-CHAR *LinuxDirName(CHAR *path)
+CHAR* LinuxDirName(CHAR* path)
 {
     if (path == NULL) {
         return NULL;
@@ -507,7 +517,7 @@ CHAR *LinuxDirName(CHAR *path)
  * 参数:path--路径，函数内部会修改path的值(行尾有\\会去掉)
  * 返回值:执行成功返回指向截取到的目录部分指针，执行失败返回nullptr
  */
-CHAR *LinuxBaseName(CHAR *path)
+CHAR* LinuxBaseName(CHAR* path)
 {
     if (path == NULL) {
         return NULL;
@@ -521,7 +531,7 @@ CHAR *LinuxBaseName(CHAR *path)
  *       mode -- 新目录的权限
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxMkdir(const CHAR *pathName, OsalMode mode)
+int32_t LinuxMkdir(const CHAR* pathName, OsalMode mode)
 {
     if (pathName == NULL) {
         return OSAL_EN_INVALID_PARAM;
@@ -540,7 +550,7 @@ int32_t LinuxMkdir(const CHAR *pathName, OsalMode mode)
  *      mode--需要修改的权限
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxChmod(const CHAR *filename, int32_t mode)
+int32_t LinuxChmod(const CHAR* filename, int32_t mode)
 {
     if (filename == NULL) {
         return OSAL_EN_INVALID_PARAM;
@@ -554,7 +564,7 @@ int32_t LinuxChmod(const CHAR *filename, int32_t mode)
  * 参数:path--需要切换到的工作目录
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxChdir(const CHAR *path)
+int32_t LinuxChdir(const CHAR* path)
 {
     (void)path;
     return OSAL_EN_ERROR;
@@ -568,7 +578,7 @@ int32_t LinuxChdir(const CHAR *path)
  *      entryList--扫描到的目录结构指针, 用户不需要分配缓存, 内部分配, 需要调用LinuxScandirFree释放
  * 返回值:执行成功返回扫描到的子目录数量, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxScandir(const CHAR *path, OsalDirent ***entryList, OsalFilter filterFunc, OsalSort sort)
+int32_t LinuxScandir(const CHAR* path, OsalDirent*** entryList, OsalFilter filterFunc, OsalSort sort)
 {
     if ((path == NULL) || (entryList == NULL)) {
         return OSAL_EN_INVALID_PARAM;
@@ -586,7 +596,7 @@ int32_t LinuxScandir(const CHAR *path, OsalDirent ***entryList, OsalFilter filte
  *      count--扫描到的子目录数量
  * 返回值:无
  */
-VOID LinuxScandirFree(OsalDirent **entryList, int32_t count)
+VOID LinuxScandirFree(OsalDirent** entryList, int32_t count)
 {
     if (entryList == NULL) {
         return;
@@ -601,7 +611,7 @@ VOID LinuxScandirFree(OsalDirent **entryList, int32_t count)
     OsalFree(entryList);
 }
 
-static int32_t DataPackaged(CHAR *buf, size_t bufSize, const struct dirent *entry, const CHAR *pathName)
+static int32_t DataPackaged(CHAR* buf, size_t bufSize, const struct dirent* entry, const CHAR* pathName)
 {
     int32_t ret = memset_s(buf, bufSize, 0, bufSize);
     if (ret != EOK) {
@@ -623,30 +633,30 @@ static int32_t DataPackaged(CHAR *buf, size_t bufSize, const struct dirent *entr
  * 参数: pathName -- 目录名全路径
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxRmdir(const CHAR *pathName)
+int32_t LinuxRmdir(const CHAR* pathName)
 {
     int32_t ret;
-    DIR *childDir = NULL;
+    DIR* childDir = NULL;
 
     if (pathName == NULL) {
         return OSAL_EN_INVALID_PARAM;
     }
-    DIR *dir = opendir(pathName);
+    DIR* dir = opendir(pathName);
     if (dir == NULL) {
         return OSAL_EN_INVALID_PARAM;
     }
 
-    const struct dirent *entry = NULL;
+    const struct dirent* entry = NULL;
     size_t bufSize = strlen(pathName) + (size_t)(OSAL_PATH_SIZE + 2); // make sure the length is large enough
     while ((entry = readdir(dir)) != NULL) {
         if ((strcmp(".", entry->d_name) == OSAL_ZERO) || (strcmp("..", entry->d_name) == OSAL_ZERO)) {
             continue;
         }
         if (bufSize == 0 || bufSize > OSAL_MAX_PATH) {
-            (VOID)closedir(dir);
+            (VOID) closedir(dir);
             return OSAL_EN_INVALID_PARAM;
         }
-        CHAR *buf = (CHAR *)OsalMalloc(bufSize);
+        CHAR* buf = (CHAR*)OsalMalloc(bufSize);
         if (buf == NULL) {
             break;
         }
@@ -657,8 +667,8 @@ int32_t LinuxRmdir(const CHAR *pathName)
 
         childDir = opendir(buf);
         if (childDir != NULL) {
-            (VOID)closedir(childDir);
-            (VOID)LinuxRmdir(buf);
+            (VOID) closedir(childDir);
+            (VOID) LinuxRmdir(buf);
             OsalFree(buf);
             buf = NULL;
             continue;
@@ -672,7 +682,7 @@ int32_t LinuxRmdir(const CHAR *pathName)
         OsalFree(buf);
         buf = NULL;
     }
-    (VOID)closedir(dir);
+    (VOID) closedir(dir);
 
     ret = rmdir(pathName);
     if (ret == OSAL_EN_ERROR) {
@@ -686,7 +696,7 @@ int32_t LinuxRmdir(const CHAR *pathName)
  * 参数:filename--文件路径
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxUnlink(const CHAR *filename)
+int32_t LinuxUnlink(const CHAR* filename)
 {
     if (filename == NULL) {
         return OSAL_EN_INVALID_PARAM;
@@ -702,13 +712,13 @@ int32_t LinuxUnlink(const CHAR *filename)
  *       realPathLen--realPath缓存的长度, 长度必须要>= OSAL_MAX_PATH
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxRealPath(const CHAR *path, CHAR *realPath, int32_t realPathLen)
+int32_t LinuxRealPath(const CHAR* path, CHAR* realPath, int32_t realPathLen)
 {
     int32_t ret = OSAL_EN_OK;
     if ((realPath == NULL) || (path == NULL) || (realPathLen < OSAL_MAX_PATH)) {
         return OSAL_EN_INVALID_PARAM;
     }
-    const CHAR *ptr = realpath(path, realPath);
+    const CHAR* ptr = realpath(path, realPath);
     if (ptr == NULL) {
         ret = OSAL_EN_ERROR;
     }
@@ -716,13 +726,13 @@ int32_t LinuxRealPath(const CHAR *path, CHAR *realPath, int32_t realPathLen)
 }
 
 /*
-* 描述：将LinuxGetErrorCode函数得到的错误信息转化成字符串信息
-* 参数： errnum--错误码，即LinuxGetErrorCode的返回值
-*       buf--收错误信息描述的缓冲区指针
-*       size--缓冲区的大小
-* 返回值:成功返回错误信息的字符串，失败返回nullptr
-*/
-CHAR *LinuxGetErrorFormatMessage(OsalErrorMsg errnum, CHAR *buf, OsalSize size)
+ * 描述：将LinuxGetErrorCode函数得到的错误信息转化成字符串信息
+ * 参数： errnum--错误码，即LinuxGetErrorCode的返回值
+ *       buf--收错误信息描述的缓冲区指针
+ *       size--缓冲区的大小
+ * 返回值:成功返回错误信息的字符串，失败返回nullptr
+ */
+CHAR* LinuxGetErrorFormatMessage(OsalErrorMsg errnum, CHAR* buf, OsalSize size)
 {
     (void)errnum;
     (void)buf;
@@ -736,7 +746,7 @@ CHAR *LinuxGetErrorFormatMessage(OsalErrorMsg errnum, CHAR *buf, OsalSize size)
  *       buffer--获取到的状态 由用户分配缓存
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxStatGet(const CHAR *path, OsalStat *buffer)
+int32_t LinuxStatGet(const CHAR* path, OsalStat* buffer)
 {
     (void)path;
     (void)buffer;
@@ -763,19 +773,19 @@ int32_t LinuxDup(int32_t oldFd, int32_t newFd)
  *       mode -- 打开或者创建的权限
  * 返回值:执行成功返回对应打开的文件描述符, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxOpen(const CHAR *pathName, int32_t flags, OsalMode mode)
+int32_t LinuxOpen(const CHAR* pathName, int32_t flags, OsalMode mode)
 {
     if ((pathName == NULL) || (flags < OSAL_ZERO)) {
         return OSAL_EN_INVALID_PARAM;
     }
     uint32_t tmp = (uint32_t)(flags);
 
-    if (((tmp & ((uint32_t)O_TRUNC | (uint32_t)O_WRONLY | (uint32_t)O_RDWR |
-        (uint32_t)O_CREAT)) == OSAL_ZERO) && (flags != O_RDONLY)) {
+    if (((tmp & ((uint32_t)O_TRUNC | (uint32_t)O_WRONLY | (uint32_t)O_RDWR | (uint32_t)O_CREAT)) == OSAL_ZERO) &&
+        (flags != O_RDONLY)) {
         return OSAL_EN_INVALID_PARAM;
     }
-    if (((mode & ((uint32_t)S_IRUSR | (uint32_t)S_IREAD)) == (uint32_t)OSAL_ZERO)
-        && ((mode & ((uint32_t)S_IWUSR | (uint32_t)S_IWRITE)) == (uint32_t)OSAL_ZERO)) {
+    if (((mode & ((uint32_t)S_IRUSR | (uint32_t)S_IREAD)) == (uint32_t)OSAL_ZERO) &&
+        ((mode & ((uint32_t)S_IWUSR | (uint32_t)S_IWRITE)) == (uint32_t)OSAL_ZERO)) {
         return OSAL_EN_INVALID_PARAM;
     }
 
@@ -811,7 +821,7 @@ int32_t LinuxClose(int32_t fd)
  *       bufLen--需要写入的数据长度
  * 返回值:执行成功返回写入的长度, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-OsalSsize LinuxWrite(int32_t fd, VOID *buf, uint32_t bufLen)
+OsalSsize LinuxWrite(int32_t fd, VOID* buf, uint32_t bufLen)
 {
     if ((fd < OSAL_ZERO) || (buf == NULL)) {
         return OSAL_EN_INVALID_PARAM;
@@ -840,24 +850,20 @@ int32_t LinuxSetCurrentThreadName(const CHAR* name)
     }
     return OSAL_EN_OK;
 }
+#endif
 
+#ifndef LITE_OS
 /*
  * 描述:获取变量optind的值
  * 返回值：获取到optind的值
  */
-int32_t LinuxGetOptInd(void)
-{
-    return optind;
-}
+int32_t LinuxGetOptInd(void) { return optind; }
 
 /*
-* 描述:获取变量optarg的值
-* 返回值：获取到optarg的指针
-*/
-CHAR *LinuxGetOptArg(void)
-{
-    return optarg;
-}
+ * 描述:获取变量optarg的值
+ * 返回值：获取到optarg的指针
+ */
+CHAR* LinuxGetOptArg(void) { return optarg; }
 
 /*
  * 描述:获取系统名字
@@ -884,7 +890,7 @@ int32_t LinuxGetOsName(CHAR* name, int32_t nameSize)
  *      mode--打开方式
  * 返回值:执行成功返回动态链接库的句柄, 执行错误返回nullptr, 入参检查错误返回nullptr
  */
-VOID *LinuxDlopen(const CHAR *fileName, int32_t mode)
+VOID* LinuxDlopen(const CHAR* fileName, int32_t mode)
 {
     if ((fileName == NULL) || (mode < 0)) {
         return NULL;
@@ -899,7 +905,7 @@ VOID *LinuxDlopen(const CHAR *fileName, int32_t mode)
  *       funcName--要求获取的函数的名称
  * 返回值:执行成功返回指向函数的地址, 执行错误返回nullptr, 入参检查错误返回nullptr
  */
-VOID *LinuxDlsym(VOID *handle, const CHAR *funcName)
+VOID* LinuxDlsym(VOID* handle, const CHAR* funcName)
 {
     if ((handle == NULL) || (funcName == NULL)) {
         return NULL;
@@ -914,7 +920,7 @@ VOID *LinuxDlsym(VOID *handle, const CHAR *funcName)
  *       funcName--要求获取的函数的名称
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxDlclose(VOID *handle)
+int32_t LinuxDlclose(VOID* handle)
 {
     if (handle == NULL) {
         return OSAL_EN_INVALID_PARAM;
@@ -931,10 +937,8 @@ int32_t LinuxDlclose(VOID *handle)
  * 描述:当LinuxDlopen动态链接库操作函数执行失败时，LinuxDlerror可以返回出错信息
  * 返回值:执行成功返回nullptr
  */
-CHAR *LinuxDlerror(void)
-{
-    return dlerror();
-}
+CHAR* LinuxDlerror(void) { return dlerror(); }
+#endif
 
 /*
  * 描述:分析命令行参数-长参数
@@ -945,10 +949,19 @@ CHAR *LinuxDlerror(void)
  *      longIndex--表示长选项在longopts中的位置
  * 返回值:执行错误, 找不到选项元素, 返回EN_ERROR
  */
-int32_t LinuxGetOptLong(int32_t argc, CHAR *const *argv, const CHAR *opts,
-    const OsalStructOption *longOpts, int32_t *longIndex)
+int32_t LinuxGetOptLong(
+    int32_t argc, CHAR* const* argv, const CHAR* opts, const OsalStructOption* longOpts, int32_t* longIndex)
 {
+#ifdef LITE_OS
+    (void)argc;
+    (void)argv;
+    (void)opts;
+    (void)longOpts;
+    (void)longIndex;
+    return 0;
+#else
     return getopt_long(argc, argv, opts, longOpts, longIndex);
+#endif
 }
 
 /*
@@ -957,29 +970,39 @@ int32_t LinuxGetOptLong(int32_t argc, CHAR *const *argv, const CHAR *opts,
  *      versionInfo--由用户分配缓存, 缓存长度必须>=OSAL_MIN_OS_VERSION_SIZE
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxGetOsVersion(CHAR *versionInfo, int32_t versionLength)
+int32_t LinuxGetOsVersion(CHAR* versionInfo, int32_t versionLength)
 {
+#ifdef LITE_OS
+    const char* uname = "LiteOS";
+    errno_t ret = memcpy_s(versionInfo, versionLength - 1, uname, strlen(uname));
+    if (ret != EOK) {
+        return OSAL_EN_ERROR;
+    }
+    versionInfo[strlen(uname)] = '\0';
+    return OSAL_EN_OK;
+#else
     if ((versionInfo == NULL) || (versionLength < OSAL_MIN_OS_VERSION_SIZE)) {
         return OSAL_EN_INVALID_PARAM;
     }
     int32_t ret = 0;
     struct utsname sysInfo;
-    (VOID)memset_s(&sysInfo, sizeof(sysInfo), 0, sizeof(sysInfo)); /* unsafe_function_ignore: memset */
+    (VOID) memset_s(&sysInfo, sizeof(sysInfo), 0, sizeof(sysInfo)); /* unsafe_function_ignore: memset */
     uint32_t length = (uint32_t)(versionLength);
     size_t len = (size_t)(length);
     int32_t fb = uname(&sysInfo);
     if (fb < OSAL_ZERO) {
         return OSAL_EN_ERROR;
     } else {
-        ret = snprintf_s(versionInfo, len, (len - 1U), "%s-%s-%s",
-            sysInfo.sysname, sysInfo.release, sysInfo.version);
+        ret = snprintf_s(versionInfo, len, (len - 1U), "%s-%s-%s", sysInfo.sysname, sysInfo.release, sysInfo.version);
         if (ret == OSAL_EN_ERROR) {
             return OSAL_EN_ERROR;
         }
         return OSAL_EN_OK;
     }
+#endif
 }
 
+#ifndef LITE_OS
 /*
  * 描述:内部使用, 查找是否存在关键字的信息,buf为 xxx   :   xxx 形式
  * 参数:buf--需要查找的当前行数的字符串
@@ -989,32 +1012,36 @@ int32_t LinuxGetOsVersion(CHAR *versionInfo, int32_t versionLength)
  *      valueLen--缓存长度
  * 返回值:执行成功返回EN_OK, 执行失败返回EN_ERROR
  */
-static int32_t LocalLookup(CHAR *buf, uint32_t bufLen, const CHAR *pattern, CHAR *value, size_t valueLen)
+static int32_t LocalLookup(CHAR* buf, uint32_t bufLen, const CHAR* pattern, CHAR* value, size_t valueLen)
 {
     if (buf == NULL || bufLen == 0) {
         return OSAL_EN_ERROR;
     }
-    const CHAR *pValue = NULL;
-    CHAR *pBuf = NULL;
+    const CHAR* pValue = NULL;
+    CHAR* pBuf = NULL;
     size_t len = strlen(pattern);
 
     // 空白字符过滤
-    for (pBuf = buf; isspace((unsigned char)*pBuf) != 0; pBuf++) {}
+    for (pBuf = buf; isspace((unsigned char)*pBuf) != 0; pBuf++) {
+    }
 
     int32_t ret = strncmp(pBuf, pattern, len);
     if (ret != OSAL_ZERO) {
         return OSAL_EN_ERROR;
     }
 
-    for (pBuf = pBuf + len; isspace((unsigned char)*pBuf) != 0; pBuf++) {}
+    for (pBuf = pBuf + len; isspace((unsigned char)*pBuf) != 0; pBuf++) {
+    }
     if (*pBuf == '\0') {
         return OSAL_EN_ERROR;
     }
 
-    for (pBuf = pBuf + 1; isspace((unsigned char)*pBuf) != 0; pBuf++) {}
+    for (pBuf = pBuf + 1; isspace((unsigned char)*pBuf) != 0; pBuf++) {
+    }
 
     pValue = pBuf;
-    for (pBuf = buf + bufLen; isspace((unsigned char)*(pBuf - 1)) != 0; pBuf--) {}
+    for (pBuf = buf + bufLen; isspace((unsigned char)*(pBuf - 1)) != 0; pBuf--) {
+    }
 
     *pBuf = '\0';
     ret = memcpy_s(value, valueLen, pValue, strlen(pValue) + 1U);
@@ -1032,19 +1059,14 @@ static int32_t LocalLookup(CHAR *buf, uint32_t bufLen, const CHAR *pattern, CHAR
  *      partLen--指针长度
  * 返回值:无
  */
-static const CHAR* LocalGetArmVersion(const CHAR *cpuImplememter, const CHAR *cpuPart)
+static const CHAR* LocalGetArmVersion(const CHAR* cpuImplememter, const CHAR* cpuPart)
 {
     static struct CpuTypeTable paramatersTable[] = {
-        { "0x410xd03", "ARMv8_Cortex_A53"},
-        { "0x410xd05", "ARMv8_Cortex_A55"},
-        { "0x410xd07", "ARMv8_Cortex_A57"},
-        { "0x410xd08", "ARMv8_Cortex_A72"},
-        { "0x410xd09", "ARMv8_Cortex_A73"},
-        { "0x480xd01", "TaishanV110"}
-    };
+        {"0x410xd03", "ARMv8_Cortex_A53"}, {"0x410xd05", "ARMv8_Cortex_A55"}, {"0x410xd07", "ARMv8_Cortex_A57"},
+        {"0x410xd08", "ARMv8_Cortex_A72"}, {"0x410xd09", "ARMv8_Cortex_A73"}, {"0x480xd01", "TaishanV110"}};
     CHAR cpuArmVersion[OSAL_CPUINFO_DOUBLE_SIZE] = {0};
-    int32_t ret = snprintf_s(cpuArmVersion, sizeof(cpuArmVersion), sizeof(cpuArmVersion) - 1U,
-                           "%s%s", cpuImplememter, cpuPart);
+    int32_t ret =
+        snprintf_s(cpuArmVersion, sizeof(cpuArmVersion), sizeof(cpuArmVersion) - 1U, "%s%s", cpuImplememter, cpuPart);
     if (ret == OSAL_EN_ERROR) {
         return NULL;
     }
@@ -1065,7 +1087,7 @@ static const CHAR* LocalGetArmVersion(const CHAR *cpuImplememter, const CHAR *cp
  * 返回值:无
  */
 
-static VOID LocalGetArmManufacturer(const CHAR *cpuImplememter, OsalCpuDesc *cpuInfo)
+static VOID LocalGetArmManufacturer(const CHAR* cpuImplememter, OsalCpuDesc* cpuInfo)
 {
     size_t len = strlen(cpuInfo->manufacturer);
     if (len != 0U) {
@@ -1073,40 +1095,31 @@ static VOID LocalGetArmManufacturer(const CHAR *cpuImplememter, OsalCpuDesc *cpu
     }
     int32_t ret = OSAL_EN_ERROR;
     static struct CpuTypeTable manufacturerTable[] = {
-        { "0x41", "ARM"},
-        { "0x42", "Broadcom"},
-        { "0x43", "Cavium"},
-        { "0x44", "DigitalEquipment"},
-        { "0x48", "HiSilicon"},
-        { "0x49", "Infineon"},
-        { "0x4D", "Freescale"},
-        { "0x4E", "NVIDIA"},
-        { "0x50", "APM"},
-        { "0x51", "Qualcomm"},
-        { "0x56", "Marvell"},
-        { "0x69", "Intel"}
-    };
+        {"0x41", "ARM"},       {"0x42", "Broadcom"}, {"0x43", "Cavium"},    {"0x44", "DigitalEquipment"},
+        {"0x48", "HiSilicon"}, {"0x49", "Infineon"}, {"0x4D", "Freescale"}, {"0x4E", "NVIDIA"},
+        {"0x50", "APM"},       {"0x51", "Qualcomm"}, {"0x56", "Marvell"},   {"0x69", "Intel"}};
 
     int32_t i = 0;
     for (i = (int32_t)(sizeof(manufacturerTable) / sizeof(manufacturerTable[0])) - 1; i >= 0; --i) {
         ret = strcasecmp(cpuImplememter, manufacturerTable[i].key);
         if (ret == 0) {
-            (VOID)memcpy_s(cpuInfo->manufacturer, sizeof(cpuInfo->manufacturer),
-                manufacturerTable[i].value, (strlen(manufacturerTable[i].value) + 1U));
+            (VOID) memcpy_s(
+                cpuInfo->manufacturer, sizeof(cpuInfo->manufacturer), manufacturerTable[i].value,
+                (strlen(manufacturerTable[i].value) + 1U));
             return;
         }
     }
     return;
 }
 
-static int32_t CpuInfoStrToInt(const CHAR *str)
+static int32_t CpuInfoStrToInt(const CHAR* str)
 {
     if (str == NULL) {
         return 0;
     }
 
     errno = 0;
-    char *endPtr = NULL;
+    char* endPtr = NULL;
     const int32_t decimalBase = 10;
     int64_t out = strtol(str, &endPtr, decimalBase);
     if (str == endPtr || *endPtr != '\0') {
@@ -1118,25 +1131,25 @@ static int32_t CpuInfoStrToInt(const CHAR *str)
             return (int32_t)out;
         } else {
             return 0;
-        }        
+        }
     }
 }
 
-static VOID LocalLookupCpuInfo(struct CpuInfoTable infoTab, OsalCpuDesc *cpuInfo, FILE *fp)
+static VOID LocalLookupCpuInfo(struct CpuInfoTable infoTab, OsalCpuDesc* cpuInfo, FILE* fp)
 {
     uint32_t length = 0U;
     CHAR buf[OSAL_CPUPROC_BUF_SIZE] = {0};
     while (fgets(buf, (int32_t)(sizeof(buf)), fp) != NULL) {
         length = (uint32_t)(strlen(buf));
-        if (LocalLookup(buf, length, "manufacturer", cpuInfo->manufacturer,
-            sizeof(cpuInfo->manufacturer)) == OSAL_EN_OK) {
+        if (LocalLookup(buf, length, "manufacturer", cpuInfo->manufacturer, sizeof(cpuInfo->manufacturer)) ==
+            OSAL_EN_OK) {
             continue;
         }
         if (LocalLookup(buf, length, "vendor_id", cpuInfo->manufacturer, sizeof(cpuInfo->manufacturer)) == OSAL_EN_OK) {
             continue;
         }
-        if (LocalLookup(buf, length, "CPU implementer", infoTab.cpuImplememter,
-            sizeof(infoTab.cpuImplememter)) == OSAL_EN_OK) {
+        if (LocalLookup(buf, length, "CPU implementer", infoTab.cpuImplememter, sizeof(infoTab.cpuImplememter)) ==
+            OSAL_EN_OK) {
             continue; /* ARM and aarch64 */
         }
         if (LocalLookup(buf, length, "CPU part", infoTab.cpuPart, sizeof(infoTab.cpuPart)) == OSAL_EN_OK) {
@@ -1165,6 +1178,7 @@ static VOID LocalLookupCpuInfo(struct CpuInfoTable infoTab, OsalCpuDesc *cpuInfo
         }
     }
 }
+#endif
 
 /*
  * 描述:内部使用, 读取/proc/cpuinfo信息中的部分信息
@@ -1172,16 +1186,21 @@ static VOID LocalLookupCpuInfo(struct CpuInfoTable infoTab, OsalCpuDesc *cpuInfo
  *      physicalCount--物理CPU个数
  * 返回值:无
  */
-static VOID LocalGetCpuProc(OsalCpuDesc *cpuInfo, int32_t *physicalCount)
+static VOID LocalGetCpuProc(OsalCpuDesc* cpuInfo, int32_t* physicalCount)
 {
+#ifdef LITE_OS
+    (void)cpuInfo;
+    (void)physicalCount;
+    return;
+#else
     struct CpuInfoTable cpuInfoTable;
-    (VOID)memset_s(&cpuInfoTable, sizeof(cpuInfoTable), 0, sizeof(cpuInfoTable));
-    FILE *fp = fopen("/proc/cpuinfo", "r");
+    (VOID) memset_s(&cpuInfoTable, sizeof(cpuInfoTable), 0, sizeof(cpuInfoTable));
+    FILE* fp = fopen("/proc/cpuinfo", "r");
     if (fp == NULL) {
         return;
     }
     LocalLookupCpuInfo(cpuInfoTable, cpuInfo, fp);
-    (VOID)fclose(fp);
+    (VOID) fclose(fp);
     fp = NULL;
     cpuInfo->frequency = CpuInfoStrToInt(cpuInfoTable.cpuMhz);
     cpuInfo->ncores = CpuInfoStrToInt(cpuInfoTable.cpuCores);
@@ -1191,10 +1210,11 @@ static VOID LocalGetCpuProc(OsalCpuDesc *cpuInfo, int32_t *physicalCount)
     cpuInfo->maxFrequency = CpuInfoStrToInt(cpuInfoTable.maxSpeed);
     const CHAR* tmp = LocalGetArmVersion(cpuInfoTable.cpuImplememter, cpuInfoTable.cpuPart);
     if (tmp != NULL) {
-        (VOID)memcpy_s(cpuInfo->version, sizeof(cpuInfo->version), tmp, strlen(tmp) + 1U);
+        (VOID) memcpy_s(cpuInfo->version, sizeof(cpuInfo->version), tmp, strlen(tmp) + 1U);
     }
     LocalGetArmManufacturer(cpuInfoTable.cpuImplememter, cpuInfo);
     return;
+#endif
 }
 
 /*
@@ -1203,19 +1223,19 @@ static VOID LocalGetCpuProc(OsalCpuDesc *cpuInfo, int32_t *physicalCount)
  *      count--读取到的物理cpu个数
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxGetCpuInfo(OsalCpuDesc **cpuInfo, int32_t *count)
+int32_t LinuxGetCpuInfo(OsalCpuDesc** cpuInfo, int32_t* count)
 {
     if (count == NULL || cpuInfo == NULL) {
         return OSAL_EN_INVALID_PARAM;
     }
     int32_t ret = 0;
     OsalCpuDesc cpuDest = {};
-    (VOID)memset_s(&cpuDest, sizeof(cpuDest), 0, sizeof(cpuDest));
+    (VOID) memset_s(&cpuDest, sizeof(cpuDest), 0, sizeof(cpuDest));
     // 默认一个CPU
     int32_t physicalCount = 1;
-    OsalCpuDesc *pCpuDesc = NULL;
+    OsalCpuDesc* pCpuDesc = NULL;
     struct utsname sysInfo = {};
-    (VOID)memset_s(&sysInfo, sizeof(sysInfo), 0, sizeof(sysInfo));
+    (VOID) memset_s(&sysInfo, sizeof(sysInfo), 0, sizeof(sysInfo));
     LocalGetCpuProc(&cpuDest, &physicalCount);
 
     if ((physicalCount < OSAL_MIN_PHYSICALCPU_COUNT) || (physicalCount > OSAL_MAX_PHYSICALCPU_COUNT)) {
@@ -1228,7 +1248,16 @@ int32_t LinuxGetCpuInfo(OsalCpuDesc **cpuInfo, int32_t *count)
         return OSAL_EN_ERROR;
     }
 
-    (VOID)memset_s(pCpuDesc, needSize, 0, needSize); /* unsafe_function_ignore: memset */
+    (VOID) memset_s(pCpuDesc, needSize, 0, needSize); /* unsafe_function_ignore: memset */
+#ifdef LITE_OS
+    const char* uname = "LiteOS";
+    size_t sysMachineLen = strnlen(uname, sizeof(cpuDest.arch));
+    ret = memcpy_s(cpuDest.arch, sizeof(cpuDest.arch), uname, sysMachineLen + 1U);
+    if (ret != EOK) {
+        OsalFree(pCpuDesc);
+        return OSAL_EN_ERROR;
+    }
+#else
     if (uname(&sysInfo) == OSAL_EN_OK) {
         size_t sysMachineLen = strnlen(sysInfo.machine, sizeof(cpuDest.arch));
         if (sysMachineLen == sizeof(cpuDest.arch)) {
@@ -1241,6 +1270,7 @@ int32_t LinuxGetCpuInfo(OsalCpuDesc **cpuInfo, int32_t *count)
             return OSAL_EN_ERROR;
         }
     }
+#endif
     int32_t cpuCnt = physicalCount;
     for (int32_t i = 0; i < cpuCnt; i++) {
         pCpuDesc[i] = cpuDest;
@@ -1259,7 +1289,7 @@ int32_t LinuxGetCpuInfo(OsalCpuDesc **cpuInfo, int32_t *count)
  *      count--LinuxGetCpuInfo获取到的物理cpu个数
  * 返回值:执行成功返回OSAL_EN_OK, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxCpuInfoFree(OsalCpuDesc *cpuInfo, int32_t count)
+int32_t LinuxCpuInfoFree(OsalCpuDesc* cpuInfo, int32_t count)
 {
     if ((cpuInfo == NULL) || (count == OSAL_ZERO)) {
         return OSAL_EN_INVALID_PARAM;
@@ -1273,14 +1303,14 @@ int32_t LinuxCpuInfoFree(OsalCpuDesc *cpuInfo, int32_t count)
  * 参数: sysTimePtr -- 指向OsalSystemTime 结构的指针
  * 返回值:执行成功返回OSAL_EN_OK, 执行错误返回OSAL_EN_ERROR, 入参检查错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxGetLocalTime(OsalSystemTime *sysTimePtr)
+int32_t LinuxGetLocalTime(OsalSystemTime* sysTimePtr)
 {
     if (sysTimePtr == NULL) {
         return OSAL_EN_INVALID_PARAM;
     }
 
     struct timeval timeVal;
-    (VOID)memset_s(&timeVal, sizeof(timeVal), 0, sizeof(timeVal)); /* unsafe_function_ignore: memset */
+    (VOID) memset_s(&timeVal, sizeof(timeVal), 0, sizeof(timeVal)); /* unsafe_function_ignore: memset */
 
     int32_t ret = gettimeofday(&timeVal, NULL);
     if (ret != OSAL_EN_OK) {
@@ -1288,9 +1318,9 @@ int32_t LinuxGetLocalTime(OsalSystemTime *sysTimePtr)
     }
 
     struct tm nowTime;
-    (VOID)memset_s(&nowTime, sizeof(nowTime), 0, sizeof(nowTime)); /* unsafe_function_ignore: memset */
+    (VOID) memset_s(&nowTime, sizeof(nowTime), 0, sizeof(nowTime)); /* unsafe_function_ignore: memset */
 
-    const struct tm *tmp = localtime_r(&timeVal.tv_sec, &nowTime);
+    const struct tm* tmp = localtime_r(&timeVal.tv_sec, &nowTime);
     if (tmp == NULL) {
         return OSAL_EN_ERROR;
     }
@@ -1315,12 +1345,12 @@ int32_t LinuxGetLocalTime(OsalSystemTime *sysTimePtr)
         timeZone--当前系统设置的时区信息, 可以为nullptr, 表示不需要获取时区信息
  * 返回值:执行成功返回OSAL_EN_OK, 失败返回OSAL_EN_ERROR，入参错误返回OSAL_EN_INVALID_PARAM
  */
-int32_t LinuxGetTimeOfDay(OsalTimeval *timeVal, OsalTimezone *timeZone)
+int32_t LinuxGetTimeOfDay(OsalTimeval* timeVal, OsalTimezone* timeZone)
 {
     if (timeVal == NULL) {
         return OSAL_EN_INVALID_PARAM;
     }
-    int32_t ret = gettimeofday((struct timeval *)(timeVal), (struct timezone *)(timeZone));
+    int32_t ret = gettimeofday((struct timeval*)(timeVal), (struct timezone*)(timeZone));
     if (ret != OSAL_EN_OK) {
         ret = OSAL_EN_ERROR;
     }

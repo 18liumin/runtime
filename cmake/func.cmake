@@ -20,7 +20,7 @@ function(protobuf_generate comp c_var h_var)
     set(${h_var})
     set(_add_target FALSE)
 
-    if (BUILD_WITH_INSTALLED_DEPENDENCY_CANN_PKG)
+    if (ENABLE_OPEN_SRC)
         set(_protoc_grogam "host_protoc")
     else()
         set(_protoc_grogam ${PROTOC_PROGRAM})
@@ -110,21 +110,21 @@ macro(install_package)
 
     install(TARGETS ${TARGET_LIST}
         EXPORT ${PKG_NAME}-targets
-        LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL COMPONENT opensdk
-        ARCHIVE DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL COMPONENT opensdk
-        RUNTIME DESTINATION ${INSTALL_RUNTIME_DIR} OPTIONAL COMPONENT opensdk
+        LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL
+        ARCHIVE DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL
+        RUNTIME DESTINATION ${INSTALL_RUNTIME_DIR} OPTIONAL
     )
 
     if (file_count GREATER 0)
         foreach(i RANGE 1 ${file_count})
-            install(FILES ${FILES_${i}} DESTINATION ${FILES_DESTINATION_${i}} COMPONENT opensdk EXCLUDE_FROM_ALL)
+            install(FILES ${FILES_${i}} DESTINATION ${FILES_DESTINATION_${i}} EXCLUDE_FROM_ALL)
         endforeach()
     endif()
 
     if (directory_count GREATER 0)
         foreach(i RANGE 1 ${directory_count})
             install(DIRECTORY ${DIRECTORY_${i}} DESTINATION ${DIRECTORY_DESTINATION_${i}}
-                COMPONENT opensdk EXCLUDE_FROM_ALL
+                EXCLUDE_FROM_ALL
                 FILES_MATCHING 
                 PATTERN "*.h"
                 PATTERN "*.cppm")
@@ -133,16 +133,16 @@ macro(install_package)
 
     if (PACKAGE STREQUAL "opensdk")
         install(EXPORT ${PKG_NAME}-targets DESTINATION ${INSTALL_CONFIG_DIR}
-            FILE ${PKG_NAME}-targets.cmake COMPONENT opensdk EXCLUDE_FROM_ALL
+            FILE ${PKG_NAME}-targets.cmake EXCLUDE_FROM_ALL
         )
         configure_package_config_file(${RUNTIME_DIR}/cmake/config/pkg_config_template.cmake.in
             ${CMAKE_CURRENT_BINARY_DIR}/${PKG_NAME}-config.cmake
             INSTALL_DESTINATION ${INSTALL_CONFIG_DIR}
-            PATH_VARS INSTALL_BASE_DIR INSTALL_INCLUDE_DIR INSTALL_LIBRARY_DIR INSTALL_RUNTIME_DIR INSTALL_CONFIG_DIR
+            PATH_VARS INSTALL_INCLUDE_DIR INSTALL_LIBRARY_DIR INSTALL_RUNTIME_DIR INSTALL_CONFIG_DIR
             INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX}
         )
         install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${PKG_NAME}-config.cmake
-            DESTINATION ${INSTALL_CONFIG_DIR} COMPONENT opensdk EXCLUDE_FROM_ALL
+            DESTINATION ${INSTALL_CONFIG_DIR} EXCLUDE_FROM_ALL
         )
     endif()
 
@@ -162,215 +162,16 @@ macro(install_package)
     endif()
 endmacro(install_package)
 
-# =============================================================================
-# Function: pack_targets_and_files
-#
-# Packs targets and/or files into a flat tar.gz archive (no directory structure).
-# Optionally generates a SHA256 manifest file and includes it in the archive.
-#
-# Usage:
-#   pack_targets_and_files(
-#       [OUTPUT_TARGET <output_target>]
-#       OUTPUT <output.tar.gz>           # e.g., "cann-tsch-compat.tar.gz"
-#       [TARGETS target1 [target2 ...]]
-#       [FILES file1 [file2 ...]]
-#       [MANIFEST <manifest_filename>]   # e.g., "aicpu_compat_bin_hash.cfg"
-#   )
-#
-# Examples:
-#   # With manifest
-#   pack_targets_and_files(
-#       OUTPUT cann-tsch-compat.tar.gz
-#       TARGETS app server
-#       FILES "LICENSE" "config/default.json"
-#       MANIFEST "aicpu_compat_bin_hash.cfg"
-#   )
-#
-#   # Without manifest
-#   pack_targets_and_files(
-#       OUTPUT cann-tsch-compat.tar.gz
-#       TARGETS app
-#       FILES "README.md"
-#   )
-# =============================================================================
-function(pack_targets_and_files)
-    cmake_parse_arguments(ARG
-        ""
-        "OUTPUT;MANIFEST;OUTPUT_TARGET"
-        "TARGETS;FILES"
-        ${ARGN}
-    )
+# 设置rts参数
+macro(set_runtime_params base_dir)
 
-    # --- Validation ---
-    if(NOT ARG_OUTPUT)
-        message(FATAL_ERROR "[pack_targets_and_files] OUTPUT is required")
+    set(PROJECT_BASE_DIR "${base_dir}")  # 工程根目录，仅在func.cmake中使用
+
+    if(NOT ENABLE_COV AND NOT ENABLE_UT)
+        set(CMAKE_SKIP_RPATH TRUE)
     endif()
 
-    if(NOT IS_ABSOLUTE "${ARG_OUTPUT}")
-        set(ARG_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${ARG_OUTPUT}")
-    endif()
-
-    if(NOT ARG_OUTPUT_TARGET)
-        message(FATAL_ERROR "[pack_targets_and_files] OUTPUT_TARGET is required")
-    endif()
-
-    # Generate safe target name
-    get_filename_component(tar_basename "${ARG_OUTPUT}" NAME_WE)
-    string(MAKE_C_IDENTIFIER "pack_${tar_basename}" safe_name)
-    set(staging_dir "${CMAKE_CURRENT_BINARY_DIR}/_${safe_name}_stage")
-
-    # --- Collect all source items (as generator expressions) ---
-    set(src_items "")
-    foreach(tgt IN LISTS ARG_TARGETS)
-        if(NOT TARGET ${tgt})
-            message(FATAL_ERROR "[pack_targets_and_files] Target '${tgt}' does not exist")
-        endif()
-
-        get_target_property(type ${tgt} TYPE)
-        if(type MATCHES "^(EXECUTABLE|SHARED_LIBRARY|STATIC_LIBRARY)$")
-            list(APPEND src_items "$<TARGET_FILE:${tgt}>")
-        endif()
-    endforeach()
-    list(APPEND src_items ${ARG_FILES})
-
-    if(NOT src_items)
-        message(FATAL_ERROR "[pack_targets_and_files] No targets or files specified to pack")
-    endif()
-
-    set(manifest_arg "")
-    if(ARG_MANIFEST)
-        if("${ARG_MANIFEST}" STREQUAL "")
-            message(FATAL_ERROR "[pack] MANIFEST filename cannot be empty")
-        endif()
-        if(IS_ABSOLUTE "${ARG_MANIFEST}")
-            message(FATAL_ERROR "[pack] MANIFEST must be relative (e.g., 'sha256sums.cfg')")
-        endif()
-        set(manifest_arg -D_MANIFEST_FILE=${staging_dir}/${ARG_MANIFEST})
-    endif()
-
-    add_custom_command(
-        OUTPUT ${staging_dir}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${staging_dir}"
-        VERBATIM
-    )
-
-    add_custom_command(
-        OUTPUT "${ARG_OUTPUT}"
-        COMMAND ${CMAKE_COMMAND}
-            -D _STAGING_DIR=${staging_dir}
-            ${manifest_arg}
-            -D "_ITEMS=$<JOIN:${src_items},;>"
-            -P "${_FUNC_CMAKE_DIR}/_pack_stage.cmake"
-        COMMAND tar "czf" "${ARG_OUTPUT}" .
-                "--mode=750"
-        WORKING_DIRECTORY ${staging_dir}
-        DEPENDS ${ARG_TARGETS} ${staging_dir}
-        COMMENT "Packing with ${ARG_OUTPUT}"
-        VERBATIM
-    )
-
-    add_custom_target(${ARG_OUTPUT_TARGET} ALL DEPENDS "${ARG_OUTPUT}")
-endfunction()
-
-# sign_file.cmake
-# =============================================================================
-# Function: sign_file
-#
-# Signs a file and places signature in a standard directory.
-#
-# Usage:
-#   sign_file(
-#       [OUTPUT_TARGET <target_name>]
-#       INPUT <input_file>
-#       SCRIPT <sign_script>
-#       [SCRIPT_ARGS ...]
-#       [RESULT_VAR <output_var>]   # ← returns generated sig path
-#       [DEPENDS ...]
-#       [WORKING_DIRECTORY ...]
-#   )
-# =============================================================================
-function(sign_file)
-    cmake_parse_arguments(
-        ARG
-        ""
-        "OUTPUT_TARGET;INPUT;CONFIG;RESULT_VAR"
-        "SCRIPT_ARGS;DEPENDS"
-        ${ARGN}
-    )
-
-    # --- Validation ---
-    if(DEFINED CUSTOM_SIGN_SCRIPT AND NOT CUSTOM_SIGN_SCRIPT STREQUAL "")
-        set(SIGN_SCRIPT ${CUSTOM_SIGN_SCRIPT})
-    else()
-        set(SIGN_SCRIPT)
-    endif()
-
-    if(ENABLE_SIGN)
-        set(sign_flag "true")
-    else()
-        set(sign_flag "false")
-    endif()
-
-    foreach(var INPUT CONFIG RESULT_VAR)
-        if(NOT ARG_${var})
-            message(FATAL_ERROR "[sign_file] Missing required: ${var}")
-        endif()
-    endforeach()
-
-    if(NOT EXISTS "${ARG_CONFIG}")
-        message(FATAL_ERROR "[sign_file] Sign config not found: ${ARG_CONFIG}")
-    endif()
-
-    # Normalize input
-    if(NOT IS_ABSOLUTE "${ARG_INPUT}")
-        set(ARG_INPUT "${CMAKE_CURRENT_BINARY_DIR}/${ARG_INPUT}")
-    endif()
-
-    # Auto output path: ${CMAKE_CURRENT_BINARY_DIR}/signatures
-    set(signatures_dir "${CMAKE_CURRENT_BINARY_DIR}/signatures")
-    get_filename_component(input_name "${ARG_INPUT}" NAME)
-    set(output_sig "${signatures_dir}/${input_name}")
-
-    if(EXISTS "${SIGN_SCRIPT}")
-        get_filename_component(EXT ${SIGN_SCRIPT} EXT) # 获取文件扩展名
-
-        if (${EXT} STREQUAL ".sh")
-            set(sign_cmd bash ${SIGN_SCRIPT} ${output_sig} ${ARG_CONFIG} ${sign_flag})
-        elseif(${EXT} STREQUAL ".py")
-            message(STATUS "Detected +++VERSION_INFO:${VERSION_INFO}, _ROOT_DIR:${_ROOT_DIR}")
-            set(sign_cmd python3 ${_ROOT_DIR}/scripts/sign/add_header_sign.py ${signatures_dir} ${sign_flag} --bios_check_cfg=${ARG_CONFIG} --sign_script=${SIGN_SCRIPT} --version=${VERSION_INFO})
-        endif()
-    else()
-        set(sign_cmd )
-    endif()
-
-    # Ensure dir exists
-    file(MAKE_DIRECTORY "${signatures_dir}")
-
-    # Target name
-    get_filename_component(sign_basename "${ARG_INPUT}" NAME_WE)
-    string(MAKE_C_IDENTIFIER "${sign_basename}" safe_name)
-
-    if(ARG_OUTPUT_TARGET)
-        set(sign_target "${ARG_OUTPUT_TARGET}")
-    else()
-        set(sign_target "sign_${safe_name}")
-    endif()
-
-    add_custom_command(
-        OUTPUT "${output_sig}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${signatures_dir}
-        COMMAND ${CMAKE_COMMAND} -E copy ${ARG_INPUT} ${output_sig}
-        COMMAND ${sign_cmd}
-        DEPENDS "${ARG_INPUT}" "${SIGN_SCRIPT}" ${ARG_DEPENDS} ${ARG_CONFIG}
-        COMMENT "Signing: ${ARG_INPUT} → ${output_sig}"
-        VERBATIM
-    )
-
-    add_custom_target(${sign_target} ALL DEPENDS "${output_sig}")
-
-    # Return path via RESULT_VAR
-    if(ARG_RESULT_VAR)
-        set(${ARG_RESULT_VAR} "${output_sig}" PARENT_SCOPE)
-    endif()
-endfunction()
+    set(BASE_DIR ${RUNTIME_DIR})
+    set(RUNTIME_PYTHON "python3" CACHE PATH "Python Path")
+    set(DEVICE_LIBRARY_PATH "${CMAKE_HOST_SYSTEM_PROCESSOR}-linux/devlib/device")
+endmacro()

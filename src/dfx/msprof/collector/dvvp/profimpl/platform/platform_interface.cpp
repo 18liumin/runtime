@@ -19,23 +19,19 @@ using namespace analysis::dvvp::common::error;
 using namespace analysis::dvvp::common::validation;
 using namespace analysis::dvvp::common::config;
 
+namespace {
+constexpr uint32_t BIU_PERF_GROUP_CHANNEL_NUM = 3;
+constexpr uint32_t BIU_PERF_FIRST_CHANNEL_ID = 11;
+} // namespace
+
 std::map<PlatformTypeEnum, std::function<std::shared_ptr<PlatformInterface>()>> PlatformReflection::platformMap_;
-std::string PlatformInterface::GetDeviceOscDefaultFreq()
-{
-    return EMPTY_FREQUENCY;
-}
+std::string PlatformInterface::GetDeviceOscDefaultFreq() { return EMPTY_FREQUENCY; }
 
-std::string PlatformInterface::GetAicDefaultFreq()
-{
-    return EMPTY_FREQUENCY;
-}
+std::string PlatformInterface::GetAicDefaultFreq() { return EMPTY_FREQUENCY; }
 
-std::string PlatformInterface::GetAivDefaultFreq()
-{
-    return EMPTY_FREQUENCY;
-}
+std::string PlatformInterface::GetAivDefaultFreq() { return EMPTY_FREQUENCY; }
 
-int32_t PlatformInterface::GetAiPmuMetrics(const std::string &key, std::string &vaule)
+int32_t PlatformInterface::GetAiPmuMetrics(const std::string& key, std::string& value)
 {
     if (key.compare(0, CUSTOM_METRICS.length(), CUSTOM_METRICS) == 0) {
         std::string aicoreEvent = key.substr(CUSTOM_METRICS.length());
@@ -45,7 +41,7 @@ int32_t PlatformInterface::GetAiPmuMetrics(const std::string &key, std::string &
             MSPROF_LOGE("The aic_metrics[%s] of input config is invalid", key.c_str());
             return PROFILING_FAILED;
         }
-        vaule = aicoreEvent;
+        value = aicoreEvent;
         return PROFILING_SUCCESS;
     }
 
@@ -54,26 +50,25 @@ int32_t PlatformInterface::GetAiPmuMetrics(const std::string &key, std::string &
         return PROFILING_FAILED;
     }
 
-    vaule = GetMetricsValue(feature);
+    value = GetMetricsValue(feature);
     return PROFILING_SUCCESS;
 }
 
 std::string PlatformInterface::GetMetricsValue(const PlatformFeature feature)
 {
     std::map<PlatformFeature, MetricsFunc> metrics = {
-        {PLATFORM_TASK_AU_PMU,            &PlatformInterface::GetArithmeticUtilizationMetrics},
-        {PLATFORM_TASK_PU_PMU,            &PlatformInterface::GetPipeUtilizationMetrics},
-        {PLATFORM_TASK_PUEXCT_PMU,        &PlatformInterface::GetPipeUtilizationExctMetrics},
-        {PLATFORM_TASK_PEU_PMU,           &PlatformInterface::GetPipelineExecuteUtilizationMetrics},
-        {PLATFORM_TASK_PSC_PMU,           &PlatformInterface::GetPipeStallCycleMetrics},
-        {PLATFORM_TASK_RCR_PMU,           &PlatformInterface::GetResourceConflictRatioMetrics},
-        {PLATFORM_TASK_MEMORY_PMU,        &PlatformInterface::GetMemoryMetrics},
-        {PLATFORM_TASK_MEMORYL0_PMU,      &PlatformInterface::GetMemoryL0Metrics},
-        {PLATFORM_TASK_MEMORYUB_PMU,      &PlatformInterface::GetMemoryUBMetrics},
-        {PLATFORM_TASK_L2_CACHE_PMU,      &PlatformInterface::GetL2CacheMetrics},
-        {PLATFORM_TASK_SCALAR_RATIO_PMU,  &PlatformInterface::GetScalarMetrics},
-        {PLATFORM_TASK_MEMORY_ACCESS_PMU, &PlatformInterface::GetMemoryAccessMetrics}
-    };
+        {PLATFORM_TASK_AU_PMU, &PlatformInterface::GetArithmeticUtilizationMetrics},
+        {PLATFORM_TASK_PU_PMU, &PlatformInterface::GetPipeUtilizationMetrics},
+        {PLATFORM_TASK_PUEXCT_PMU, &PlatformInterface::GetPipeUtilizationExctMetrics},
+        {PLATFORM_TASK_PEU_PMU, &PlatformInterface::GetPipelineExecuteUtilizationMetrics},
+        {PLATFORM_TASK_PSC_PMU, &PlatformInterface::GetPipeStallCycleMetrics},
+        {PLATFORM_TASK_RCR_PMU, &PlatformInterface::GetResourceConflictRatioMetrics},
+        {PLATFORM_TASK_MEMORY_PMU, &PlatformInterface::GetMemoryMetrics},
+        {PLATFORM_TASK_MEMORYL0_PMU, &PlatformInterface::GetMemoryL0Metrics},
+        {PLATFORM_TASK_MEMORYUB_PMU, &PlatformInterface::GetMemoryUBMetrics},
+        {PLATFORM_TASK_L2_CACHE_PMU, &PlatformInterface::GetL2CacheMetrics},
+        {PLATFORM_TASK_SCALAR_RATIO_PMU, &PlatformInterface::GetScalarMetrics},
+        {PLATFORM_TASK_MEMORY_ACCESS_PMU, &PlatformInterface::GetMemoryAccessMetrics}};
 
     auto it = metrics.find(feature);
     if (it != metrics.end()) {
@@ -84,77 +79,68 @@ std::string PlatformInterface::GetMetricsValue(const PlatformFeature feature)
     return EMPTY_FREQUENCY;
 }
 
-std::string PlatformInterface::GetSmmuEventStr()
-{
-    return INTERFACE_SMMU_EVENT;
-};
+std::string PlatformInterface::GetSmmuEventStr() { return INTERFACE_SMMU_EVENT; };
 
-std::string PlatformInterface::GetL2CacheEvents()
-{
-    return INTERFACE_L2CACHEEVENT;
-};
+// Default: SMMU DFX is not configured on the platform (0 offset/mask means "unsupported").
+// Only platforms that support SOC PMU SMMU DFX (milan/CloudV2, david/David) override these.
+uint32_t PlatformInterface::GetSmmuDFXOffset() const { return 0; };
 
-std::string PlatformInterface::GetArithmeticUtilizationMetrics()
-{
-    return INTERFACE_AIRTHMETICUTILIZATION;
-};
+uint32_t PlatformInterface::GetSmmuDFXRegMask() const { return 0; };
 
-std::string PlatformInterface::GetPipeUtilizationMetrics()
-{
-    return INTERFACE_PIPEUTILIZATION;
-};
+std::string PlatformInterface::GetL2CacheEvents() { return INTERFACE_L2CACHEEVENT; };
 
-std::string PlatformInterface::GetPipeUtilizationExctMetrics()
-{
-    return INTERFACE_PIPEUTILIZATIONEXCT;
-}
+std::string PlatformInterface::GetArithmeticUtilizationMetrics() { return INTERFACE_AIRTHMETICUTILIZATION; };
 
-std::string PlatformInterface::GetPipelineExecuteUtilizationMetrics()
-{
-    return INTERFACE_PIPELINEEXECUTEUTILIZATION;
-};
+std::string PlatformInterface::GetPipeUtilizationMetrics() { return INTERFACE_PIPEUTILIZATION; };
 
-std::string PlatformInterface::GetPipeStallCycleMetrics()
-{
-    return INTERFACE_PIPELINEEXECUTEUTILIZATION;
-};
+std::string PlatformInterface::GetPipeUtilizationExctMetrics() { return INTERFACE_PIPEUTILIZATIONEXCT; }
 
-std::string PlatformInterface::GetResourceConflictRatioMetrics()
-{
-    return INTERFACE_RESOURCECONFLICTRATIO;
-};
+std::string PlatformInterface::GetPipelineExecuteUtilizationMetrics() { return INTERFACE_PIPELINEEXECUTEUTILIZATION; };
 
-std::string PlatformInterface::GetMemoryMetrics()
-{
-    return INTERFACE_MEMORY;
-}
+std::string PlatformInterface::GetPipeStallCycleMetrics() { return INTERFACE_PIPELINEEXECUTEUTILIZATION; };
 
-std::string PlatformInterface::GetMemoryL0Metrics()
-{
-    return INTERFACE_MEMORYL0;
-}
+std::string PlatformInterface::GetResourceConflictRatioMetrics() { return INTERFACE_RESOURCECONFLICTRATIO; };
 
-std::string PlatformInterface::GetMemoryUBMetrics()
-{
-    return INTERFACE_MEMORYUB;
-}
+std::string PlatformInterface::GetMemoryMetrics() { return INTERFACE_MEMORY; }
 
-std::string PlatformInterface::GetL2CacheMetrics()
-{
-    return INTERFACE_L2CACHE;
-}
+std::string PlatformInterface::GetMemoryL0Metrics() { return INTERFACE_MEMORYL0; }
 
-std::string PlatformInterface::GetScalarMetrics()
+std::string PlatformInterface::GetMemoryUBMetrics() { return INTERFACE_MEMORYUB; }
+
+std::string PlatformInterface::GetL2CacheMetrics() { return INTERFACE_L2CACHE; }
+
+std::string PlatformInterface::GetScalarMetrics() { return EMPTY_FREQUENCY; }
+
+std::string PlatformInterface::GetMemoryAccessMetrics() { return INTERFACE_MEMORYACCESS; }
+
+std::string PlatformInterface::GetNtsEvents(const std::string& metrics)
 {
+    const PlatformFeature feature = NtsMetricsToFeature(metrics);
+    if (!FeatureIsSupport(feature)) {
+        return EMPTY_FREQUENCY;
+    }
+
+    if (feature == PLATFORM_TASK_NTS) {
+        return GetNtsPipeUtilizationMetrics();
+    }
+
+    MSPROF_LOGE("Failed to find [%d] nts metrics function", feature);
     return EMPTY_FREQUENCY;
 }
 
-std::string PlatformInterface::GetMemoryAccessMetrics()
+std::string PlatformInterface::GetNtsPipeUtilizationMetrics() { return INTERFACE_NTS_PIPEUTILIZATION; }
+
+PlatformFeature PlatformInterface::NtsMetricsToFeature(const std::string& key) const
 {
-    return INTERFACE_MEMORYACCESS;
+    const auto it = NTS_METRIC_FEATURE_MAP.find(key);
+    if (it != NTS_METRIC_FEATURE_MAP.cend()) {
+        return it->second;
+    }
+
+    return PlatformFeature::PLATFORM_FEATURE_INVALID;
 }
 
-PlatformFeature PlatformInterface::PmuMetricsToFeature(const std::string &key) const
+PlatformFeature PlatformInterface::PmuMetricsToFeature(const std::string& key) const
 {
     const auto it = METRIC_FEATURE_MAP.find(key);
     if (it != METRIC_FEATURE_MAP.cend()) {
@@ -169,14 +155,22 @@ bool PlatformInterface::FeatureIsSupport(const PlatformFeature feature) const
     return (supportedFeature_.count(feature) > 0);
 }
 
-uint16_t PlatformInterface::GetMaxMonitorNumber() const
-{
-    return MAX_COLLECT_MONITOR_NUM;
-}
+uint16_t PlatformInterface::GetMaxMonitorNumber() const { return MAX_COLLECT_MONITOR_NUM; }
 
-uint16_t PlatformInterface::GetQosMonitorNumber() const
+uint16_t PlatformInterface::GetQosMonitorNumber() const { return MAX_COLLECT_MONITOR_NUM; }
+
+std::vector<BiuPerfChannelInfo> PlatformInterface::GetBiuPerfChannelInfos(
+    const std::vector<uint32_t>& groupVector, uint32_t groupNum) const
 {
-    return MAX_COLLECT_MONITOR_NUM;
+    std::vector<BiuPerfChannelInfo> channelInfos;
+    for (uint32_t groupId = 0; groupId < groupNum && groupId < groupVector.size(); groupId++) {
+        for (uint32_t groupType = 0; groupType < BIU_PERF_GROUP_CHANNEL_NUM; groupType++) {
+            channelInfos.push_back(
+                {groupId, groupType, groupVector[groupId],
+                 BIU_PERF_FIRST_CHANNEL_ID + groupId * BIU_PERF_GROUP_CHANNEL_NUM + groupType});
+        }
+    }
+    return channelInfos;
 }
 
 int32_t PlatformInterface::InitOnlineAnalyzer()
@@ -185,7 +179,7 @@ int32_t PlatformInterface::InitOnlineAnalyzer()
     return PROFILING_SUCCESS;
 }
 
-uint32_t PlatformInterface::GetMetricsPmuNum(const std::string &name) const
+uint32_t PlatformInterface::GetMetricsPmuNum(const std::string& name) const
 {
     if (analyzer_ == nullptr) {
         return 0;
@@ -193,7 +187,7 @@ uint32_t PlatformInterface::GetMetricsPmuNum(const std::string &name) const
     return analyzer_->GetMetricsPmuNum(name);
 }
 
-std::string PlatformInterface::GetMetricsTopName(const std::string &name) const
+std::string PlatformInterface::GetMetricsTopName(const std::string& name) const
 {
     if (analyzer_ == nullptr) {
         return "";
@@ -201,7 +195,7 @@ std::string PlatformInterface::GetMetricsTopName(const std::string &name) const
     return analyzer_->GetMetricsTopName(name);
 }
 
-PmuCalculationAttr* PlatformInterface::GetMetricsFunc(const std::string &name, uint32_t index) const
+PmuCalculationAttr* PlatformInterface::GetMetricsFunc(const std::string& name, uint32_t index) const
 {
     if (analyzer_ == nullptr) {
         return nullptr;
@@ -219,14 +213,21 @@ float PlatformInterface::GetTotalTime(uint64_t cycle, double freq, uint16_t bloc
 
 void PlatformInterface::SetSubscribeFeature()
 {
-    std::vector<PlatformFeature> unsupportFeature = {
-        PLATFORM_DIAGNOSTIC_COLLECTION
-    };
+    std::vector<PlatformFeature> unsupportFeature = {PLATFORM_DIAGNOSTIC_COLLECTION};
     for (const PlatformFeature feature : unsupportFeature) {
         supportedFeature_.erase(feature);
     }
     supportedFeature_.insert(PLATFORM_AOE_SUPPORT_FUNC);
 }
+
+ProfAicoreMetrics PlatformInterface::GetDefaultAicoreMetrics() const { return PROF_AICORE_PIPE_UTILIZATION; }
+
+uint64_t PlatformInterface::GetDefaultDataTypeConfig() const
+{
+    const uint64_t PROF_DEFAULT_SWITCH =
+        PROF_ACL_API | PROF_TASK_TIME_L1 | PROF_TASK_TIME | PROF_AICORE_METRICS | PROF_AICPU_MODEL;
+    return PROF_DEFAULT_SWITCH;
 }
-}
-}
+} // namespace Platform
+} // namespace Collect
+} // namespace Dvvp

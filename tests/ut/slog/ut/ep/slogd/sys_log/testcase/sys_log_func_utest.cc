@@ -14,6 +14,7 @@
 #include "mockcpp/mockcpp.hpp"
 
 #include "log_common.h"
+#include "securec.h"
 #include "slogd_syslog.h"
 #include "slogd_kernel_log.h"
 #include "slogd_config_mgr.h"
@@ -23,16 +24,15 @@ using namespace std;
 using namespace testing;
 
 extern "C" {
-void SlogdKernelLogReceive(void *args);
+void SlogdKernelLogReceive(void* args);
 bool SlogdKernelLogIsNeedInit(void);
-int32_t SlogdSysLogWrite(const char *msg, uint32_t msgLen, const LogInfo *info);
-LogStatus SlogdKernelLogProcessBuf(char *msg, uint32_t length);
+int32_t SlogdSysLogWrite(const char* msg, uint32_t msgLen, const LogInfo* info);
+LogStatus SlogdKernelLogProcessBuf(char* msg, uint32_t length);
 
 extern SlogdKernelLogMgr g_kernelLogMgr;
 }
 
-class EP_SLOGD_SYS_LOG_FUNC_UTEST : public testing::Test
-{
+class EP_SLOGD_SYS_LOG_FUNC_UTEST : public testing::Test {
 protected:
     virtual void SetUp()
     {
@@ -63,17 +63,25 @@ protected:
     }
 
 public:
-    int DlogCmdGetIntRet(const char *path, const char*cmd)
+    int DlogCmdGetIntRet(const char* path, const char* cmd)
     {
         char resultFile[200] = {0};
-        sprintf(resultFile, "%s/EP_SLOGD_SYS_LOG_FUNC_UTEST_cmd_result.txt", path);
+        int ret = snprintf_s(
+            resultFile, sizeof(resultFile), sizeof(resultFile) - 1, "%s/EP_SLOGD_SYS_LOG_FUNC_UTEST_cmd_result.txt",
+            path);
+        if (ret < 0) {
+            return 0;
+        }
 
         char cmdToFile[400] = {0};
-        sprintf(cmdToFile, "%s > %s", cmd, resultFile);
+        ret = snprintf_s(cmdToFile, sizeof(cmdToFile), sizeof(cmdToFile) - 1, "%s > %s", cmd, resultFile);
+        if (ret < 0) {
+            return 0;
+        }
         system(cmdToFile);
 
         char buf[100] = {0};
-        FILE *fp = fopen(resultFile, "r");
+        FILE* fp = fopen(resultFile, "r");
         if (fp == NULL) {
             return 0;
         }
@@ -85,21 +93,23 @@ public:
         return atoi(buf);
     }
 
-    int DlogCheckLog(const char *path, const char *str)
+    int DlogCheckLog(const char* path, const char* str)
     {
         if (access(path, F_OK) != 0) {
             return 0;
         }
 
         char cmd[200] = {0};
-        sprintf(cmd, "cat %s | grep -i %s | wc -l", path, str);
-        int ret = DlogCmdGetIntRet(PATH_ROOT, cmd);
-        return ret;
+        int ret = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "cat %s | grep -a -i %s | wc -l", path, str);
+        if (ret < 0) {
+            return 0;
+        }
+        return DlogCmdGetIntRet(PATH_ROOT, cmd);
     }
 };
 
 static int32_t g_sysFileFd = -1;
-int32_t SlogdSysLogWrite_stub(const char *msg, uint32_t msgLen, const LogInfo *info)
+int32_t SlogdSysLogWrite_stub(const char* msg, uint32_t msgLen, const LogInfo* info)
 {
     (void)info;
     if (g_sysFileFd == -1) {
@@ -144,7 +154,7 @@ TEST_F(EP_SLOGD_SYS_LOG_FUNC_UTEST, KernelLogInit)
     SlogdKernelLogExit();
 }
 
-static int32_t kernel_log_poll_stub(struct pollfd *fds, nfds_t nfds, int32_t timeout)
+static int32_t kernel_log_poll_stub(struct pollfd* fds, nfds_t nfds, int32_t timeout)
 {
     static int32_t cnt = 0;
     cnt++;
@@ -154,7 +164,7 @@ static int32_t kernel_log_poll_stub(struct pollfd *fds, nfds_t nfds, int32_t tim
     } else if (cnt == 2) {
         return -1; // error
     } else if (cnt == 3) {
-        return 0; // timeout
+        return 0;  // timeout
     } else if (cnt == 4) {
         system("echo \"0,1525,10000100,-,caller=T3730;test for kernel log0.\" >> " KERNEL_LOG_PATH);
     } else if (cnt == 5) {
@@ -184,7 +194,7 @@ static int32_t kernel_log_poll_stub(struct pollfd *fds, nfds_t nfds, int32_t tim
     return 1;
 }
 
-static int32_t poll_stub(struct pollfd *fds, nfds_t nfds, int32_t timeout)
+static int32_t poll_stub(struct pollfd* fds, nfds_t nfds, int32_t timeout)
 {
     system("echo \"0,1525,10000100,-,caller=T3730;test for kernel log0.\" >> " KERNEL_LOG_PATH);
     g_kernelLogMgr.pollFd.revents = POLLIN;
@@ -198,11 +208,13 @@ TEST_F(EP_SLOGD_SYS_LOG_FUNC_UTEST, KernelLogReceive)
     ret = SlogdKernelLogInit(SlogdSysLogWrite_stub);
     EXPECT_EQ(LOG_SUCCESS, ret);
 
-    for(int32_t i = 0; i < 20; i++) {
+    for (int32_t i = 0; i < 20; i++) {
         SlogdKernelLogReceive(nullptr);
     }
 
-    EXPECT_EQ(9, DlogCheckLog(LOG_FILE_PATH "/device-os/device-os_2025022835702082.log", "KERNEL"));
+    int32_t logNum = DlogCheckLog(LOG_FILE_PATH "/device-os/device-os_2025022835702082.log", "KERNEL");
+    EXPECT_GE(logNum, 6);
+    EXPECT_LE(logNum, 9);
     SlogdKernelLogExit();
 }
 

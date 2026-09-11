@@ -1,0 +1,339 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+#include <gtest/gtest.h>
+#include <thread>
+#include <chrono>
+#include "mockcpp/mockcpp.hpp"
+#include "dump_stream_info.h"
+
+using namespace Adx;
+
+static void WaitInterval_stub(uint32_t intervalSec)
+{
+    (void)intervalSec;
+}
+
+class DumpResourceSafeMapUtest : public testing::Test {
+protected:
+    virtual void SetUp()
+    {
+        DumpResourceSafeMap::Instance().clear();
+        MOCKER(DumpResourceSafeMap::WaitInterval).stubs().will(invoke(WaitInterval_stub));
+    }
+    virtual void TearDown()
+    {
+        DumpResourceSafeMap::Instance().clear();
+        GlobalMockObject::verify();
+    }
+};
+
+class DumpResourceSafeMapWaitIntervalUtest : public testing::Test {
+protected:
+    virtual void SetUp()
+    {
+        DumpResourceSafeMap::Instance().clear();
+    }
+    virtual void TearDown()
+    {
+        DumpResourceSafeMap::Instance().clear();
+        GlobalMockObject::verify();
+    }
+};
+
+TEST_F(DumpResourceSafeMapWaitIntervalUtest, Test_WaitInterval_ActualSleep)
+{
+    auto start = std::chrono::steady_clock::now();
+    DumpResourceSafeMap::WaitInterval(1);
+    auto end = std::chrono::steady_clock::now();
+    
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    EXPECT_GE(duration, 900);
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpStreamCreate_Success)
+{
+    DumpStreamInfo* dumpPtr = nullptr;
+    int32_t ret = DumpStreamCreate(&dumpPtr);
+    EXPECT_EQ(ret, ADUMP_SUCCESS);
+    EXPECT_NE(dumpPtr, nullptr);
+    EXPECT_NE(dumpPtr->stm, nullptr);
+    EXPECT_NE(dumpPtr->mainStmEvt, nullptr);
+    EXPECT_NE(dumpPtr->dumpStmEvt, nullptr);
+
+    if (dumpPtr != nullptr) {
+        DumpStreamFree(dumpPtr);
+    }
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpStreamCreate_Fail_NullPtr)
+{
+    int32_t ret = DumpStreamCreate(nullptr);
+    EXPECT_NE(ret, ADUMP_SUCCESS);
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpStreamFree_NullPtr)
+{
+    DumpStreamFree(nullptr);
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpStreamFree_Normal)
+{
+    DumpStreamInfo* dumpPtr = nullptr;
+    int32_t ret = DumpStreamCreate(&dumpPtr);
+    ASSERT_EQ(ret, ADUMP_SUCCESS);
+
+    DumpStreamFree(dumpPtr);
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpResourceSafeMap_Insert_Get)
+{
+    DumpStreamInfo* dumpPtr = nullptr;
+    int32_t ret = DumpStreamCreate(&dumpPtr);
+    ASSERT_EQ(ret, ADUMP_SUCCESS);
+    dumpPtr->mainStreamKey = "test_key_1";
+    std::shared_ptr<DumpStreamInfo> dumpInfo(dumpPtr, DumpStreamFree);
+
+    DumpResourceSafeMap::Instance().insert("test_key_1", dumpInfo);
+
+    auto result = DumpResourceSafeMap::Instance().get("test_key_1");
+    EXPECT_NE(result, nullptr);
+    EXPECT_EQ(result->mainStreamKey, "test_key_1");
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpResourceSafeMap_Get_NotFound)
+{
+    auto result = DumpResourceSafeMap::Instance().get("non_existent_key");
+    EXPECT_EQ(result, nullptr);
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpResourceSafeMap_Remove)
+{
+    DumpStreamInfo* dumpPtr = nullptr;
+    int32_t ret = DumpStreamCreate(&dumpPtr);
+    ASSERT_EQ(ret, ADUMP_SUCCESS);
+    std::shared_ptr<DumpStreamInfo> dumpInfo(dumpPtr, DumpStreamFree);
+
+    DumpResourceSafeMap::Instance().insert("test_key", dumpInfo);
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 1);
+
+    DumpResourceSafeMap::Instance().remove("test_key");
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 0);
+    EXPECT_EQ(DumpResourceSafeMap::Instance().get("test_key"), nullptr);
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpResourceSafeMap_Size)
+{
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 0);
+
+    DumpStreamInfo* dumpPtr = nullptr;
+    int32_t ret = DumpStreamCreate(&dumpPtr);
+    ASSERT_EQ(ret, ADUMP_SUCCESS);
+    std::shared_ptr<DumpStreamInfo> dumpInfo(dumpPtr, DumpStreamFree);
+
+    DumpResourceSafeMap::Instance().insert("key1", dumpInfo);
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 1);
+
+    DumpResourceSafeMap::Instance().clear();
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 0);
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpResourceSafeMap_Clear)
+{
+    DumpStreamInfo* dumpPtr1 = nullptr;
+    DumpStreamInfo* dumpPtr2 = nullptr;
+    int32_t ret1 = DumpStreamCreate(&dumpPtr1);
+    int32_t ret2 = DumpStreamCreate(&dumpPtr2);
+    ASSERT_EQ(ret1, ADUMP_SUCCESS);
+    ASSERT_EQ(ret2, ADUMP_SUCCESS);
+
+    std::shared_ptr<DumpStreamInfo> dumpInfo1(dumpPtr1, DumpStreamFree);
+    std::shared_ptr<DumpStreamInfo> dumpInfo2(dumpPtr2, DumpStreamFree);
+
+    DumpResourceSafeMap::Instance().insert("key1", dumpInfo1);
+    DumpResourceSafeMap::Instance().insert("key2", dumpInfo2);
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 2);
+
+    DumpResourceSafeMap::Instance().clear();
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 0);
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpResourceSafeMap_WaitAndClear_Completed)
+{
+    DumpStreamInfo* dumpPtr = nullptr;
+    int32_t ret = DumpStreamCreate(&dumpPtr);
+    ASSERT_EQ(ret, ADUMP_SUCCESS);
+    std::shared_ptr<DumpStreamInfo> dumpInfo(dumpPtr, DumpStreamFree);
+
+    DumpResourceSafeMap::Instance().insert("test_key", dumpInfo);
+
+    DumpResourceSafeMap::Instance().EnqueueCleanup("test_key");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    DumpResourceSafeMap::Instance().waitAndClear();
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 0);
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpResourceSafeMap_WaitAndClear_Multiple)
+{
+    DumpStreamInfo* dumpPtr1 = nullptr;
+    DumpStreamInfo* dumpPtr2 = nullptr;
+    int32_t ret1 = DumpStreamCreate(&dumpPtr1);
+    int32_t ret2 = DumpStreamCreate(&dumpPtr2);
+    ASSERT_EQ(ret1, ADUMP_SUCCESS);
+    ASSERT_EQ(ret2, ADUMP_SUCCESS);
+
+    std::shared_ptr<DumpStreamInfo> dumpInfo1(dumpPtr1, DumpStreamFree);
+    std::shared_ptr<DumpStreamInfo> dumpInfo2(dumpPtr2, DumpStreamFree);
+
+    DumpResourceSafeMap::Instance().insert("key1", dumpInfo1);
+    DumpResourceSafeMap::Instance().insert("key2", dumpInfo2);
+
+    DumpResourceSafeMap::Instance().EnqueueCleanup("key1");
+    DumpResourceSafeMap::Instance().EnqueueCleanup("key2");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    DumpResourceSafeMap::Instance().waitAndClear();
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 0);
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_DumpResourceSafeMap_ThreadSafety)
+{
+    const int numThreads = 10;
+    std::vector<std::thread> threads;
+
+    for (int i = 0; i < numThreads; ++i) {
+        threads.emplace_back([i]() {
+            DumpStreamInfo* dumpPtr = nullptr;
+            int32_t ret = DumpStreamCreate(&dumpPtr);
+            if (ret == ADUMP_SUCCESS) {
+                std::shared_ptr<DumpStreamInfo> dumpInfo(dumpPtr, DumpStreamFree);
+                std::string key = "thread_key_" + std::to_string(i);
+                DumpResourceSafeMap::Instance().insert(key, dumpInfo);
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), numThreads);
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_CleanupThread_StartStop)
+{
+    DumpResourceSafeMap::Instance().EnqueueCleanup("test_key_1");
+    EXPECT_TRUE(DumpResourceSafeMap::Instance().IsCleanupThreadActive());
+
+    DumpResourceSafeMap::Instance().waitAndClear();
+    EXPECT_FALSE(DumpResourceSafeMap::Instance().IsCleanupThreadActive());
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_CleanupThread_EnqueueAndProcess)
+{
+    DumpStreamInfo* dumpPtr = nullptr;
+    int32_t ret = DumpStreamCreate(&dumpPtr);
+    ASSERT_EQ(ret, ADUMP_SUCCESS);
+    dumpPtr->mainStreamKey = "test_key_cleanup";
+    std::shared_ptr<DumpStreamInfo> dumpInfo(dumpPtr, DumpStreamFree);
+
+    DumpResourceSafeMap::Instance().insert("test_key_cleanup", dumpInfo);
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 1);
+
+    DumpResourceSafeMap::Instance().EnqueueCleanup("test_key_cleanup");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 0);
+
+    DumpResourceSafeMap::Instance().waitAndClear();
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_CleanupThread_MultipleKeys)
+{
+    DumpStreamInfo* dumpPtr1 = nullptr;
+    DumpStreamInfo* dumpPtr2 = nullptr;
+    int32_t ret1 = DumpStreamCreate(&dumpPtr1);
+    int32_t ret2 = DumpStreamCreate(&dumpPtr2);
+    ASSERT_EQ(ret1, ADUMP_SUCCESS);
+    ASSERT_EQ(ret2, ADUMP_SUCCESS);
+
+    std::shared_ptr<DumpStreamInfo> dumpInfo1(dumpPtr1, DumpStreamFree);
+    std::shared_ptr<DumpStreamInfo> dumpInfo2(dumpPtr2, DumpStreamFree);
+
+    DumpResourceSafeMap::Instance().insert("key_cleanup_1", dumpInfo1);
+    DumpResourceSafeMap::Instance().insert("key_cleanup_2", dumpInfo2);
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 2);
+
+    DumpResourceSafeMap::Instance().EnqueueCleanup("key_cleanup_1");
+    DumpResourceSafeMap::Instance().EnqueueCleanup("key_cleanup_2");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_EQ(DumpResourceSafeMap::Instance().size(), 0);
+
+    DumpResourceSafeMap::Instance().waitAndClear();
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_WaitAndClear_StopsCleanupThread)
+{
+    DumpResourceSafeMap::Instance().EnqueueCleanup("test_key_stop");
+    EXPECT_TRUE(DumpResourceSafeMap::Instance().IsCleanupThreadActive());
+
+    DumpResourceSafeMap::Instance().waitAndClear();
+    EXPECT_FALSE(DumpResourceSafeMap::Instance().IsCleanupThreadActive());
+}
+
+TEST_F(DumpResourceSafeMapUtest, Test_CleanupThread_LazyStart)
+{
+    EXPECT_FALSE(DumpResourceSafeMap::Instance().IsCleanupThreadActive());
+
+    DumpResourceSafeMap::Instance().EnqueueCleanup("test_key_lazy");
+    EXPECT_TRUE(DumpResourceSafeMap::Instance().IsCleanupThreadActive());
+
+    DumpResourceSafeMap::Instance().waitAndClear();
+    EXPECT_FALSE(DumpResourceSafeMap::Instance().IsCleanupThreadActive());
+}
+
+// 验证 DumpStreamCreate 在创建 Stream 时保存了当前 context
+TEST_F(DumpResourceSafeMapUtest, Test_DumpStreamCreate_SavesContext)
+{
+    DumpStreamInfo* dumpPtr = nullptr;
+    ASSERT_EQ(DumpStreamCreate(&dumpPtr), ADUMP_SUCCESS);
+    ASSERT_NE(dumpPtr, nullptr);
+
+    // rtCtxGetCurrent stub 返回 0x1，创建后 ctx 字段应被写入该值
+    EXPECT_EQ(dumpPtr->ctx, reinterpret_cast<rtContext_t>(0x1));
+
+    DumpStreamFree(dumpPtr);
+}
+
+namespace {
+rtContext_t g_capturedSetContext = nullptr;
+rtError_t CaptureCtxSetCurrent(rtContext_t ctx)
+{
+    g_capturedSetContext = ctx;
+    return RT_ERROR_NONE;
+}
+} // namespace
+
+// 验证 DumpStreamFree 在销毁 Stream 前恢复了创建时保存的 context
+TEST_F(DumpResourceSafeMapUtest, Test_DumpStreamFree_SetsContextBeforeDestroy)
+{
+    g_capturedSetContext = nullptr;
+
+    DumpStreamInfo* dumpPtr = nullptr;
+    ASSERT_EQ(DumpStreamCreate(&dumpPtr), ADUMP_SUCCESS);
+    ASSERT_NE(dumpPtr, nullptr);
+
+    rtContext_t expectedCtx = dumpPtr->ctx;
+    EXPECT_NE(expectedCtx, nullptr);
+
+    MOCKER(rtCtxSetCurrent).stubs().will(invoke(CaptureCtxSetCurrent));
+
+    DumpStreamFree(dumpPtr);
+
+    // 销毁时使用的 context 必须与创建时保存的一致
+    EXPECT_EQ(g_capturedSetContext, expectedCtx);
+}

@@ -1,0 +1,179 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+#ifndef __CCE_RUNTIME_STARS_COND_ISA_PARA_HPP__
+#define __CCE_RUNTIME_STARS_COND_ISA_PARA_HPP__
+
+#include "base.hpp"
+
+namespace cce {
+namespace runtime {
+
+struct CondMbufTraceParam {
+    uint64_t traceBlockSizeAddr;
+    uint64_t traceBaseAddr;
+    uint64_t lpSysCntAddr;
+    uint64_t qidAddr;
+    uint64_t opQidOffset;
+    uint64_t opTypeOffset;
+    uint64_t ownerIdOffset;
+    uint64_t updateTimeOffset;
+    uint32_t streamId;
+    uint8_t opTypeVal;
+};
+
+struct RtDqsMbufFreeFcPara {
+    uint64_t ctrlSpaceAddr;      // ctrlSpace的地址
+    uint64_t mbufFreeAddr;       // 存放mbuf pool寄存器的地址
+    uint64_t mbufHandleAddr;     // 存放mbufHandle的
+    uint64_t lastMbufHandleAddr; // 存放上一帧mbufHandle
+    uint64_t freePreDotAddr;
+    uint64_t freePostDotAddr;
+    uint16_t mbufPoolIndexMax; // pool的下标 和 mbufHandle的下标一致
+    uint8_t schedType;
+    uint8_t sizeofHandleCache;
+    CondMbufTraceParam freeMbufTracePara;
+};
+
+struct RtStarsDqsFcPara {
+    uint64_t dfxAddr;
+    uint64_t gqmAddr;
+    uint64_t ctrlSpaceAddr; // ctrlSpace的地址
+    uint64_t inputMbufHandleAddr;
+    uint64_t ouputMbufHandleAddr;
+    uint16_t mbufPoolIndexMax;
+    uint64_t rtSqEnableAddr;
+    uint64_t streamExecTimesAddr;
+    uint64_t enqueOpAddr;
+    uint64_t prodqOwAddr;
+    uint64_t dequeuePostDotAddr;
+    uint64_t enquePostDotAddr;
+    uint64_t enquePreDotAddr;
+    uint32_t sqId;
+    RtDqsMbufFreeFcPara mbufFreePara;
+    CondMbufTraceParam owFreeMbufTracePara;
+    CondMbufTraceParam enqueMbufTracePara;
+    CondMbufTraceParam dequeMbufTracePara;
+};
+
+struct RtStarsDqsBatchDeqFcPara {
+    uint64_t dfxAddr;
+    uint64_t gqmAddr;
+    uint64_t inputMbufHandleAddr;
+    uint64_t mbufFreeAddr; // 存放mbuf pool寄存器的地址
+    uint64_t cntNotifyReadAddr;
+    uint64_t cntNotifyClearAddr;
+
+    uint64_t batchDequeuePreDotAddr;
+    uint64_t batchDequeuePostDotAddr;
+    uint64_t batchDequeueFreePreDotAddr;
+    uint64_t batchDequeueFreePostDotAddr;
+    uint64_t fullFreeHandleAddr;
+
+    uint32_t sqId;
+    uint8_t cntOffset;
+    uint8_t sizeofHandleCache;
+    uint16_t mbufPoolIndexMax;
+
+    CondMbufTraceParam dequeMbufTracePara;
+    CondMbufTraceParam freeMbufTracePara;
+};
+
+struct RtStarsDqsPrepareFcPara {
+    uint64_t dfxMbufAllocPoolIdx;
+    uint64_t dfxMbufAllocResult;
+    uint64_t ctrlSpacePtr;
+    uint16_t outputQueueNum;
+    // addrs in ctrl space -- input
+    uint64_t csPtrInputMbufHandleAddr;
+    uint64_t csPtrInputHeadPoolBaseAddr; // 含offset
+    uint64_t csPtrInputHeadPoolBlockSize;
+    // addrs in ctrl space -- output
+    uint64_t csPtrOutputMbufAllocAddr;
+    uint64_t csPtrOutputMbufHandleAddr;
+    uint64_t csPtrOutputHeadPoolBaseAddr; // 含offset
+    uint64_t csPtrOutputHeadPoolBlockSize;
+    uint64_t allocPostDotAddr;            // alloc成功计数地址
+    uint64_t prepareErrorCodeAddr;
+
+    CondMbufTraceParam allocMbufTracePara;
+};
+
+struct RtStarsDqsZeroCopyPara {
+    uint64_t mbufHandleAddr;
+    uint64_t mbufBaseAddr;
+    uint64_t blockSizeAddr;
+    uint64_t offsetAddr;
+    uint64_t destAddr;
+    uint64_t count;
+    // 零拷贝时，64bit的地址拆分为两个32bit地址，分为高32和低32，true代表拷贝时低32位在前，高32位在后
+    bool isCpyAddrLow32First;
+};
+
+struct RtStarsDqsConditionCopyPara {
+    uint64_t conditionAddr;
+    uint64_t dstAddr;
+    uint64_t srcAddr;
+    uint64_t count;
+};
+
+struct RtStarsDqsInterChipPreProcPara {
+    uint64_t dstMbufHandleAddr;
+    uint64_t dstMbuffAllocAddr;
+    uint64_t dstAllocEmptyTraceAddr;
+    uint64_t dstNotifyAddr;
+    uint64_t dstMbufHeadBlockSizeAddr;
+    uint64_t dstMbufDataBlockSizeAddr;
+    uint64_t dstMbufHeadBaseAddr;
+    uint64_t dstMbufDataBaseAddr;
+    uint64_t mbufDataSdmaSqeAddr; // mbuf data sdma
+    uint64_t mbufHeadSdmaSqeAddr; // mbuf head sdma
+
+    CondMbufTraceParam allocMbufTracePara;
+};
+
+struct RtStarsDqsInterChipPostProcPara {
+    uint64_t srcMbufHandleAddr;
+    uint64_t dstMbufHandleAddr;
+
+    uint64_t dstQueueAddr;
+    uint64_t srcMbufFreeAddr;
+    uint64_t dstMbufFreeAddr;
+    uint64_t dstQmngrOwAddr;
+    CondMbufTraceParam dstProdEnqueMbufTracePara;
+    CondMbufTraceParam srcConsFreeMbufTracePara;
+    CondMbufTraceParam dstProdFreeMbufTracePara;
+};
+
+struct RtStarsDqsAdspcFcPara {
+    uint8_t cqeSize;
+    uint8_t cqDepth;
+    uint8_t cqeHeadTailMask;
+    uint32_t mbufHandle;
+    uint64_t mbufFreeRegAddr;
+    uint64_t qmngrEnqRegAddr;
+    uint64_t qmngrOwRegAddr;
+    uint64_t cqeBaseAddr;
+    uint64_t cqeCopyAddr;
+    uint64_t cqHeadRegAddr;
+    uint64_t cqTailRegAddr;
+    uint64_t dfxAddr;
+};
+
+struct RtStarsDqsFrameAlignFcPara {
+    uint64_t inputMbufListAddr;
+    uint64_t inputMbufCacheListAddr;
+    uint64_t sqId;
+    uint8_t inputQueueNum;
+    uint8_t cntOffset;
+    uint8_t sizeofHandleCache;
+};
+} // namespace runtime
+} // namespace cce
+#endif

@@ -1,0 +1,2191 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include <iostream>
+#include <unistd.h>
+
+#include "driver/ascend_hal.h"
+#include "runtime/rt.h"
+#include "rts_dqs.h"
+#include "gtest/gtest.h"
+#include "mockcpp/mockcpp.hpp"
+#include "engine.hpp"
+#include "cond_c.hpp"
+#include "task_res.hpp"
+#include "stream.hpp"
+#include "stream_sqcq_manage.hpp"
+#include "scheduler.hpp"
+#include "runtime.hpp"
+#include "event.hpp"
+#include "event_david.hpp"
+#include "raw_device.hpp"
+#include "task_info.hpp"
+#include "context.hpp"
+#include "stream_david.hpp"
+#include "stars_david.hpp"
+#include "task_david.hpp"
+#include "event_c.hpp"
+#include "notify_c.hpp"
+#include "stream_c.hpp"
+#include "cond_c.hpp"
+#include "memcpy_c.hpp"
+#include "model_c.hpp"
+#include "task_recycle.hpp"
+#include "securec.h"
+#include "npu_driver.hpp"
+#include "task_submit.hpp"
+#include "thread_local_container.hpp"
+#include "../../rt_utest_config_define.hpp"
+#include "task_res_da.hpp"
+#include "stars_model_execute_cond_isa_define.hpp"
+#include "stars_cond_isa_helper.hpp"
+#include "stars_dqs_cond_isa_helper.hpp"
+#include "stream_creator_c.hpp"
+#include "stream_with_dqs.hpp"
+#include "dqs_c.hpp"
+#include "task_info.hpp"
+#include "dqs_task_info.hpp"
+#include "ioctl_utils.hpp"
+#include "notify.hpp"
+#include "count_notify.hpp"
+#include "../../rt_utest_api.hpp"
+#include "driver/ascend_hal.h"
+#include "api_impl_david.hpp"
+#include "aicpu_c.hpp"
+#include "aix_c.hpp"
+#include "fusion_c.hpp"
+#include "para_convertor.hpp"
+#include "api_decorator.hpp"
+#include "api_impl_v201.hpp"
+#include "capture_adapt.hpp"
+#include "task_fail_callback_manager.hpp"
+#include "notify_task.h"
+#include "davinci_kernel_task.h"
+#include "rt_unwrap.h"
+#include "profiler.hpp"
+#include "../../task_test_helper.h"
+#include "aic_aiv_sqe_common.hpp"
+#include "model_serial_sched_task.hpp"
+
+using namespace testing;
+using namespace cce::runtime;
+extern int64_t g_device_driver_version_stub;
+static rtChipType_t g_chipType;
+
+static drvError_t halResAddrMapStub(
+    unsigned int devId, struct res_addr_info* resInfo, unsigned long* va, unsigned int* len)
+{
+    UNUSED(devId);
+    UNUSED(resInfo);
+    *va = 0x1000UL;
+    *len = 0U;
+    return DRV_ERROR_NONE;
+}
+
+static drvError_t halGetDeviceInfoStub(uint32_t devId, int32_t moduleType, int32_t infoType, int64_t* value)
+{
+    if (value) {
+        if (moduleType == MODULE_TYPE_SYSTEM && infoType == INFO_TYPE_VERSION) {
+            *value = PLATFORMCONFIG_MC62CM12A;
+        } else if (moduleType == MODULE_TYPE_SYSTEM && infoType == INFO_TYPE_CORE_NUM) { // tsnum
+            *value = 2;
+        } else if (moduleType == MODULE_TYPE_AICORE && infoType == INFO_TYPE_DIE_NUM) {  // P dienum
+            *value = 1;
+        } else {
+        }
+    }
+    return DRV_ERROR_NONE;
+}
+
+rtError_t TmpCloseFd()
+{
+    throw std::runtime_error("close exception");
+    return RT_ERROR_NONE;
+}
+
+// Developers can stub the IoctlByCmd calls for different commands here.
+rtError_t IoctlByCmdMockRes(IoctlUtil* that, const stars_ioctl_cmd_t cmd, const stars_ioctl_cmd_args_t* args)
+{
+    static stars_dqs_ctrl_space_t ctrlSpace = {};
+    stars_dqs_ctrl_space_result_t* csResult = nullptr;
+    stars_dqs_queue_mbuf_pool_result_t* mbufPoolRes = nullptr;
+    stars_get_queue_mbuf_pool_info_param_t* mbufPoolInfoParam = nullptr;
+    switch (cmd) {
+        case STARS_IOCTL_CMD_DQS_CONTROL_SPACE:
+            csResult = static_cast<stars_dqs_ctrl_space_result_t*>(args->output_ptr);
+            if (csResult == nullptr) {
+                return RT_ERROR_INVALID_VALUE;
+            }
+            csResult->cs_va = &ctrlSpace;
+            break;
+        case STARS_IOCTL_CMD_GET_QUEUE_MBUF_POOL:
+            mbufPoolRes = static_cast<stars_dqs_queue_mbuf_pool_result_t*>(args->output_ptr);
+            mbufPoolInfoParam = static_cast<stars_get_queue_mbuf_pool_info_param_t*>(args->input_ptr);
+            mbufPoolRes->count = mbufPoolInfoParam->count;
+            if ((mbufPoolRes == nullptr) || (mbufPoolInfoParam == nullptr) ||
+                (mbufPoolInfoParam->count > STARS_DQS_MAX_OUTPUT_QUEUE_NUM)) {
+                return RT_ERROR_INVALID_VALUE;
+            }
+            for (uint32_t i = 0; i < mbufPoolRes->count; i++) {
+                mbufPoolRes->queue_mbuf_pool_list[i].qid = mbufPoolInfoParam->queue_list[i];
+            }
+            break;
+        default:
+            break;
+    }
+
+    return RT_ERROR_NONE;
+}
+
+rtError_t StubGetDqsQueInfo(NpuDriver* drv, const uint32_t devId, const uint32_t qid, DqsQueueInfo* queInfo)
+{
+    queInfo->queType = QMNGR_ENTITY_TYPE;
+    if (qid >= 512) {
+        queInfo->queType = GQM_ENTITY_TYPE;
+    }
+
+    return RT_ERROR_NONE;
+}
+
+class TaskTestV201 : public testing::Test {
+protected:
+    static void SetUpTestCase()
+    {
+        MOCKER(halGetDeviceInfo).stubs().will(invoke(halGetDeviceInfoStub));
+        MOCKER_CPP(&IoctlUtil::CloseFd).stubs().will(invoke(TmpCloseFd));
+        char* socVer = "MC62CM12AA";
+        MOCKER(halGetSocVersion)
+            .stubs()
+            .with(mockcpp::any(), outBoundP(socVer, strlen("MC62CM12AA")))
+            .will(returnValue(DRV_ERROR_NONE));
+        MOCKER(halSqTaskSend).stubs().will(returnValue(RT_ERROR_NONE));
+        std::cout << "TaskTestV201 SetUP" << std::endl;
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
+        rtInstance->SetDisableThread(true);
+        g_chipType = rtInstance->GetChipType();
+        rtInstance->SetChipType(CHIP_MC62CM12A);
+        GlobalContainer::SetRtChipType(CHIP_MC62CM12A);
+        rtInstance->SetConnectUbFlag(false);
+        std::cout << "TaskTestDavid start" << std::endl;
+    }
+
+    static void TearDownTestCase()
+    {
+        MOCKER(halGetDeviceInfo).stubs().will(invoke(halGetDeviceInfoStub));
+        MOCKER_CPP(&IoctlUtil::CloseFd).stubs().will(invoke(TmpCloseFd));
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
+        rtInstance->SetChipType(g_chipType);
+        GlobalContainer::SetRtChipType(g_chipType);
+        rtInstance->SetDisableThread(false);
+        rtInstance->SetConnectUbFlag(false);
+        std::cout << "TaskTestV201 end" << std::endl;
+        GlobalMockObject::verify();
+    }
+
+    virtual void SetUp()
+    {
+        MOCKER(halGetDeviceInfo).stubs().will(invoke(halGetDeviceInfoStub));
+        MOCKER_CPP(&IoctlUtil::CloseFd).stubs().will(invoke(TmpCloseFd));
+        Driver* driver = ((Runtime*)Runtime::Instance())->driverFactory_.GetDriver(NPU_DRIVER);
+        char* socVer = "MC62CM12AA";
+        MOCKER(halGetSocVersion)
+            .stubs()
+            .with(mockcpp::any(), outBoundP(socVer, strlen("MC62CM12AA")))
+            .will(returnValue(DRV_ERROR_NONE));
+        MOCKER(halSqTaskSend).stubs().will(returnValue(RT_ERROR_NONE));
+        MOCKER_CPP_VIRTUAL(driver, &Driver::StreamBindLogicCq).stubs().will(returnValue(RT_ERROR_NONE));
+        MOCKER_CPP_VIRTUAL(driver, &Driver::StreamUnBindLogicCq).stubs().will(returnValue(RT_ERROR_NONE));
+
+        bool enable = false;
+        MOCKER_CPP_VIRTUAL(driver, &Driver::GetSqEnable)
+            .stubs()
+            .with(mockcpp::any(), mockcpp::any(), mockcpp::any(), outBound(enable))
+            .will(returnValue(RT_ERROR_NONE));
+
+        MOCKER_CPP_VIRTUAL(driver, &Driver::SetSqHead).stubs().will(returnValue(RT_ERROR_NONE));
+        MOCKER_CPP_VIRTUAL(driver, &Driver::EnableSq).stubs().will(returnValue(RT_ERROR_NONE));
+
+        rtSetDevice(0);
+        rtSetTSDevice(RT_TSV_ID);
+
+        (void)rtSetSocVersion("MC62CM12AA");
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
+
+        device_ = ((Runtime*)Runtime::Instance())->DeviceRetain(0, 0);
+        device_->SetChipType(CHIP_MC62CM12A);
+        engine_ = ((RawDevice*)device_)->engine_;
+
+        MOCKER_CPP(&IoctlUtil::IoctlByCmd).defaults().will(invoke(IoctlByCmdMockRes));
+        rtError_t res = rtStreamCreateWithFlags(&streamHandle_, 0, RT_STREAM_DQS_CTRL);
+        ASSERT_EQ(res, RT_ERROR_NONE);
+        stream_ = rt_ut::UnwrapOrNull<Stream>(streamHandle_);
+        ASSERT_NE(stream_, nullptr);
+
+        stream_->SetSqMemAttr(false);
+        TaskResManageDavid* taskResMang = ((TaskResManageDavid*)(static_cast<Stream*>(stream_)->taskResMang_));
+        MOCKER_CPP_VIRTUAL(driver, &Driver::GetSqHead)
+            .stubs()
+            .with(mockcpp::any(), mockcpp::any(), mockcpp::any(), outBound(taskResMang->GetTaskPosTail()))
+            .will(returnValue(RT_ERROR_NONE));
+    }
+
+    virtual void TearDown()
+    {
+        MOCKER(halGetDeviceInfo).stubs().will(invoke(halGetDeviceInfoStub));
+        MOCKER_CPP(&IoctlUtil::CloseFd).stubs().will(invoke(TmpCloseFd));
+        if (stream_ != nullptr) {
+            while (stream_->GetPendingNum() > 0) {
+                stream_->pendingNum_.Sub(1U);
+            }
+        }
+        if (engine_ != nullptr) {
+            while (engine_->GetPendingNum() > 0) {
+                engine_->pendingNum_.Set(0U);
+            }
+        }
+        if (streamHandle_ != 0) {
+            rtStreamDestroy(streamHandle_);
+        }
+        stream_ = nullptr;
+        engine_ = nullptr;
+        streamHandle_ = 0;
+        ((Runtime*)Runtime::Instance())->DeviceRelease(device_);
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
+        rtDeviceReset(0);
+        GlobalMockObject::verify();
+    }
+
+public:
+    Device* device_ = nullptr;
+    Stream* stream_ = nullptr;
+    Engine* engine_ = nullptr;
+    rtStream_t streamHandle_ = 0;
+};
+
+TEST_F(TaskTestV201, Test_GetTsId)
+{
+    uint32_t tsId = 0U;
+    const rtError_t error = rtGetTSDevice(&tsId);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(tsId, RT_TSV_ID);
+}
+
+TEST_F(TaskTestV201, AicAivBiuPerfStreamSupportAllowsBindStream)
+{
+    stream_->SetBindFlag(false);
+    EXPECT_TRUE(IsAicAivBiuPerfStreamSupported(stream_));
+
+    stream_->SetBindFlag(true);
+    EXPECT_TRUE(IsAicAivBiuPerfStreamSupported(stream_));
+
+    stream_->SetBindFlag(false);
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_Config_multi_channel)
+{
+    rtDqsTaskCfg_t cfg = {};
+    rtDqsSchedCfg_t schedCfg = {};
+    schedCfg.inputQueueNum = 2;
+    schedCfg.outputQueueNum = 2;
+    schedCfg.type = 1;
+    schedCfg.inputQueueIds[0] = 513U;
+    schedCfg.inputQueueIds[1] = 514U;
+    schedCfg.outputQueueIds[0] = 0U;
+    schedCfg.outputQueueIds[1] = 1U;
+    cfg.cfg = &schedCfg;
+    cfg.type = RT_DQS_TASK_SCHED_CONFIG;
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::GetDqsQueInfo)
+        .stubs()
+        .will(invoke(StubGetDqsQueInfo));
+    rtError_t error = DqsLaunchTask(stream_, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_01)
+{
+    MOCKER(DavidSendTask).stubs().will(returnValue(RT_ERROR_FEATURE_NOT_SUPPORT));
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+
+    TaskInfo task1 = {};
+    DqsCommonTaskInfo dqsDequeueTask = {};
+    task1.u.dqsDequeueTask = dqsDequeueTask;
+    TaskInfo* tmpTask = &task1;
+
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_DEQUEUE;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+    cfg.type = RT_DQS_TASK_PREPARE_OUT;
+    cfg.cfg = nullptr;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_Batch_Deque_Task_Send_Excepiton) // DavidSendTask失败场景校验
+{
+    MOCKER(DavidSendTask).stubs().will(returnValue(RT_ERROR_FEATURE_NOT_SUPPORT));
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+
+    TaskInfo task1 = {};
+    DqsCommonTaskInfo dqsBatchDequeueTask = {};
+    task1.u.dqsBatchDequeueTask = dqsBatchDequeueTask;
+    TaskInfo* tmpTask = &task1;
+
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    ctrlSpace.input_queue_num = 3; /* 3为多通路场景 */
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+    MOCKER(AllocTaskInfo)
+        .stubs()
+        .with(outBoundP(&tmpTask))
+        .will(returnValue(RT_ERROR_NONE)); // AllocTaskInfo返回tmpTask，返回值为RT_ERROR_NONE
+
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_DEQUEUE;
+    cfg.cfg = nullptr;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE); // 期待返回值报错
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_Batch_Deque_Task_Copy_Excepiton) // device_->Driver_()返回RT_ERROR_DRV_ERR场景校验
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    DqsCommonTaskInfo dqsBatchDequeueTask = {};
+    task1.u.dqsBatchDequeueTask = dqsBatchDequeueTask;
+    TaskInfo* tmpTask = &task1;
+
+    MOCKER(AllocTaskInfo)
+        .stubs()
+        .with(outBoundP(&tmpTask))
+        .will(returnValue(RT_ERROR_NONE)); // AllocTaskInfo的出参返回tmpTask
+    MOCKER_CPP_VIRTUAL(device_->Driver_(), &Driver::MemCopySync)
+        .stubs()
+        .will(returnValue(RT_ERROR_DRV_ERR)); // device_->Driver_()返回RT_ERROR_DRV_ERR
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    ctrlSpace.input_queue_num = 3;            /* 3为多通路场景 */
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_DEQUEUE;
+    cfg.cfg = nullptr;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_Batch_Deque_Task_ChipID_Excepiton) // halCentreNotifyGet返回异常场景校验
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    DqsCommonTaskInfo dqsBatchDequeueTask = {};
+    task1.u.dqsBatchDequeueTask = dqsBatchDequeueTask;
+    TaskInfo* tmpTask = &task1;
+    MOCKER(halCentreNotifyGet).stubs().will(returnValue(DRV_ERROR_NO_DEVICE)); // 打桩halCentreNotifyGet异常场景
+    MOCKER(AllocTaskInfoForCapture).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    MOCKER(AllocTaskInfo)
+        .stubs()
+        .with(outBoundP(&tmpTask))
+        .will(returnValue(RT_ERROR_NONE)); // AllocTaskInfo的出参返回tmpTask
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    ctrlSpace.input_queue_num = 2U;
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+
+    TaskInfo task2 = {};
+    NotifyWaitTaskInfo notifyWaitTask = {};
+    task2.u.notifywaitTask = notifyWaitTask;
+    TaskInfo* waitTask = &task2;
+
+    MOCKER_CPP(&Stream::AllocTask).stubs().will(returnValue(waitTask));
+    MOCKER(SubmitTaskPostProc).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP(&IoctlUtil::IoctlByCmd).stubs().will(returnValue(RT_ERROR_NONE));
+
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_NOTIFY_WAIT;
+    cfg.cfg = nullptr;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    cfg = {};
+    cfg.type = RT_DQS_TASK_DEQUEUE;
+    cfg.cfg = nullptr;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE); // 期待返回值报错
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_Batch_Deque_Task) // halCentreNotifyGet正常返回场景
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    DqsCommonTaskInfo dqsBatchDequeueTask = {};
+    task1.u.dqsBatchDequeueTask = dqsBatchDequeueTask;
+    TaskInfo* tmpTask = &task1;
+    MOCKER(halCentreNotifyGet).stubs().will(returnValue(DRV_ERROR_NONE)); // 打桩halCentreNotifyGet异常场景
+    MOCKER(AllocTaskInfoForCapture).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    MOCKER(AllocTaskInfo)
+        .stubs()
+        .with(outBoundP(&tmpTask))
+        .will(returnValue(RT_ERROR_NONE)); // AllocTaskInfo的出参返回tmpTask
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    ctrlSpace.input_queue_num = 2U;
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+    auto* const cntNotify = new CountNotify(device_->Id_(), device_->DevGetTsId());
+    ASSERT_NE(cntNotify, nullptr);
+    streamWithDqs->SetDqsCountNotify(cntNotify);
+    MOCKER(halResAddrMap).stubs().will(invoke(halResAddrMapStub));
+
+    TaskInfo task2 = {};
+    NotifyWaitTaskInfo notifyWaitTask = {};
+    task2.u.notifywaitTask = notifyWaitTask;
+    TaskInfo* waitTask = &task2;
+
+    MOCKER_CPP(&Stream::AllocTask).stubs().will(returnValue(waitTask));
+    MOCKER(SubmitTaskPostProc).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP(&IoctlUtil::IoctlByCmd).stubs().will(returnValue(RT_ERROR_NONE));
+
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_NOTIFY_WAIT;
+    cfg.cfg = nullptr;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    cfg = {};
+    cfg.type = RT_DQS_TASK_DEQUEUE;
+    cfg.cfg = nullptr;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE); // 期待返回值报错
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_Enqueue_Deque_exception)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    DqsCommonTaskInfo dqsDequeueTask = {};
+    task1.u.dqsDequeueTask = dqsDequeueTask;
+    TaskInfo* tmpTask = &task1;
+
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(device_->Driver_(), &Driver::MemCopySync).stubs().will(returnValue(RT_ERROR_DRV_ERR));
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_ENQUEUE;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    DqsCommonTaskInfo enqueueTask = {};
+    task1.u.dqsEnqueueTask = enqueueTask;
+    tmpTask = &task1;
+
+    cfg.type = RT_DQS_TASK_ENQUEUE;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_SchedConfig_hal_error)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    MOCKER(halQueueGetDqsQueInfo).stubs().will(returnValue(DRV_ERROR_NOT_SUPPORT));
+    rtDqsSchedCfg_t schedCfg = {};
+    schedCfg.type = 1U;
+    schedCfg.inputQueueNum = 2;
+    schedCfg.outputQueueNum = 2;
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_SCHED_CONFIG;
+    cfg.cfg = &schedCfg;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    MOCKER(halQueueGetDqsQueInfo).stubs().will(returnValue(DRV_ERROR_NONE));
+    MOCKER(halBuffGetDQSPoolInfoById).stubs().will(returnValue(DRV_ERROR_NOT_SUPPORT));
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_SchedConfig_muti_channel)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    MOCKER(halQueueGetDqsQueInfo).stubs().will(returnValue(DRV_ERROR_NOT_SUPPORT));
+    rtDqsSchedCfg_t schedCfg = {};
+    uint64_t a = 1U;
+    schedCfg.type = 1U;
+    schedCfg.inputQueueNum = 2;
+    schedCfg.outputQueueNum = 2;
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_SCHED_CONFIG;
+    cfg.cfg = &schedCfg;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    MOCKER(halQueueGetDqsQueInfo).stubs().will(returnValue(DRV_ERROR_NONE));
+    MOCKER(halBuffGetDQSPoolInfoById).stubs().will(returnValue(DRV_ERROR_NOT_SUPPORT));
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_02)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    DqsCommonTaskInfo dqsDequeueTask = {};
+    task1.u.dqsDequeueTask = dqsDequeueTask;
+    TaskInfo* tmpTask = &task1;
+
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    ctrlSpace.input_queue_num = 1U;
+
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_DEQUEUE;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    DqsCommonTaskInfo dqsEnqueueTask = {};
+    task1.u.dqsEnqueueTask = dqsEnqueueTask;
+
+    TaskInfo task2 = {};
+    NotifyWaitTaskInfo notifyWaitTask = {};
+    task2.u.notifywaitTask = notifyWaitTask;
+    TaskInfo* waitTask = &task2;
+
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER(AllocTaskInfoForCapture).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    MOCKER(SubmitTaskPostProc).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP(&Stream::AllocTask).stubs().will(returnValue(waitTask));
+    MOCKER_CPP(&IoctlUtil::IoctlByCmd).stubs().will(returnValue(RT_ERROR_NONE));
+
+    cfg.type = RT_DQS_TASK_NOTIFY_WAIT;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    DqsQueueInfo queueInfo = {};
+    queueInfo.queType = GQM_ENTITY_TYPE;
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::GetDqsQueInfo)
+        .stubs()
+        .with(mockcpp::any(), mockcpp::any(), outBoundP(&queueInfo))
+        .will(returnValue(RT_ERROR_NONE));
+    rtDqsSchedCfg_t schedCfg = {};
+    schedCfg.inputQueueNum = 1;
+    schedCfg.outputQueueNum = 1;
+    schedCfg.type = 1;
+    cfg.cfg = &schedCfg;
+    cfg.type = RT_DQS_TASK_SCHED_CONFIG;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    cfg.type = RT_DQS_TASK_ENQUEUE;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    DqsCommonTaskInfo dqsMbufFreeTask = {};
+    task1.u.dqsMbufFreeTask = dqsMbufFreeTask;
+    MOCKER(halSqTaskSend).stubs().will(returnValue(RT_ERROR_NONE));
+
+    cfg.type = RT_DQS_TASK_FREE;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    cfg.type = RT_DQS_TASK_PREPARE_OUT;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    cfg.type = RT_DQS_TASK_FREE;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    cfg.type = RT_DQS_TASK_SCHED_END;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    ctrlSpace.type = 3;
+    cfg.type = RT_DQS_TASK_FRAME_ALIGN;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    ctrlSpace.type = 1;
+    cfg.type = RT_DQS_TASK_FRAME_ALIGN;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    cfg.type = RT_DQS_TASK_MAX;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+
+    TaskInfo task = {};
+    task.stream = stm;
+    DqsCommonTaskInfo qsEnqueueTask = {};
+    task.u.dqsEnqueueTask = qsEnqueueTask;
+    error = DqsEnqueueTaskInit(&task, stm, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    DqsCommonTaskInfo qsDequeueTask = {};
+    task.u.dqsDequeueTask = qsDequeueTask;
+    error = DqsDequeueTaskInit(&task, stm, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtDavidSqe_t davidSqe = {};
+    MemcpyAsyncTaskInfo memcpyAsyncTaskInfo = {};
+    memcpyAsyncTaskInfo.copyKind = RT_MEMCPY_SDMA_AUTOMATIC_ADD;
+    memcpyAsyncTaskInfo.copyDataType = RT_DATA_TYPE_UINT32;
+    task.u.memcpyAsyncTaskInfo = memcpyAsyncTaskInfo;
+    TaskSqeInfo sqeInfo = {0ULL, 0ULL};
+    ConstructDavidSqeForMemcpyAsyncTask(&task, static_cast<void*>(&davidSqe), sqeInfo);
+
+    ConstructDavidSqeForCmoTask(&task, static_cast<void*>(&davidSqe), sqeInfo);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_03)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    EXPECT_NE(streamWithDqs, nullptr);
+
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    ctrlSpace.output_queue_num = 1U;
+    ctrlSpace.output_queue_ids[0] = 1U;
+    ctrlSpace.output_mbuf_pool_ids[0] = 1U;
+
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+
+    rtDqsSchedCfg_t schedCfg = {};
+    schedCfg.type = 1U;
+    schedCfg.inputQueueNum = 1U;
+    schedCfg.outputQueueNum = 1U;
+    schedCfg.inputQueueIds[0] = 512U;
+    schedCfg.outputQueueIds[0] = 1U;
+
+    DqsQueueInfo inputQueueInfo = {};
+    inputQueueInfo.queType = GQM_ENTITY_TYPE;
+    DqsQueueInfo outputQueueInfo = {};
+    outputQueueInfo.prodqOwAddr = 1U;
+    outputQueueInfo.enqueOpAddr = 1U;
+    outputQueueInfo.queType = QMNGR_ENTITY_TYPE;
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::GetDqsQueInfo)
+        .stubs()
+        .will(invoke(StubGetDqsQueInfo));
+
+    DqsPoolInfo dqsPoolInfo = {};
+    dqsPoolInfo.freeOpAddr = 2U;
+
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::GetDqsMbufPoolInfo)
+        .stubs()
+        .with(mockcpp::any(), outBoundP(&dqsPoolInfo))
+        .will(returnValue(RT_ERROR_NONE));
+
+    rtDqsTaskCfg_t cfg = {};
+    cfg.cfg = &schedCfg;
+    cfg.type = RT_DQS_TASK_SCHED_CONFIG;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_dqs_cond_construct_fc_01)
+{
+    RtStarsDqsMbufFreeFc fc = {};
+    RtDqsMbufFreeFcPara funcCallPara = {};
+    ConstructMbufFreeInstrFc(fc, funcCallPara);
+
+    RtStarsDqsEnqueueFc fc1 = {};
+    RtStarsDqsFcPara fcp1 = {};
+    ConstructDqsEnqueueFc(fc1, fcp1);
+    EXPECT_EQ(fc1.andi1.opCode, RT_STARS_COND_ISA_OP_CODE_OP_IMM);
+
+    RtStarsDqsDequeueFc fc2 = {};
+    fcp1.enquePostDotAddr = 0x1000;
+    ConstructDqsDequeueFc(fc2, fcp1);
+    EXPECT_EQ(fc2.llwi1.opCode, RT_STARS_COND_ISA_OP_CODE_LWI);
+
+    RtStarsDqsPrepareFcPara funcCallPara1 = {};
+    funcCallPara1.allocPostDotAddr = 0x2000;
+    RtStarsDqsPrepareOutFc fc3 = {};
+    ConstructDqsPrepareFc(fc3, funcCallPara1);
+    EXPECT_EQ(fc3.addi1.opCode, RT_STARS_COND_ISA_OP_CODE_OP_IMM);
+
+    RtStarsDqsZeroCopyPara funcCallPara2 = {};
+    RtStarsDqsZeroCopyFc fc4 = {};
+    ConstructDqsZeroCopyFc(fc4, funcCallPara2);
+    EXPECT_EQ(fc4.addi1.opCode, RT_STARS_COND_ISA_OP_CODE_OP_IMM);
+
+    RtStarsDqsInterChipPreProcPara funcCallPara3 = {};
+    RtStarsDqsInterChipPreProcFc fc5 = {};
+    ConstructDqsInterChipPreProcFc(fc5, funcCallPara3);
+    EXPECT_EQ(fc5.llwi1.opCode, RT_STARS_COND_ISA_OP_CODE_LWI);
+
+    RtStarsDqsInterChipPostProcPara funcCallPara4 = {};
+    RtStarsDqsInterChipPostProcFc fc6 = {};
+    ConstructDqsInterChipPostProcFc(fc6, funcCallPara4);
+    EXPECT_EQ(fc6.llwi1.opCode, RT_STARS_COND_ISA_OP_CODE_LWI);
+
+    RtStarsDqsBatchDeqFcPara fcp2;
+    RtStarsDqsBatchDequeueFc fc7 = {};
+    ConstructDqsBatchDequeueFc(fc7, fcp2);
+    EXPECT_EQ(fc7.llwiAddrMask.opCode, RT_STARS_COND_ISA_OP_CODE_LWI);
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_04)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+
+    TaskInfo task1 = {};
+    DqsCommonTaskInfo dqsMbufFreeTask = {};
+    task1.u.dqsMbufFreeTask = dqsMbufFreeTask;
+
+    TaskInfo* tmpTask = &task1;
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::MemCopySync)
+        .stubs()
+        .will(returnValue(RT_ERROR_DRV_MEMORY));
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_FREE;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_05)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    DqsZeroCopyTaskInfo dqsZeroCopyTask = {};
+    task1.u.dqsZeroCopyTask = dqsZeroCopyTask;
+    TaskInfo* tmpTask = &task1;
+
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::MemCopySync)
+        .stubs()
+        .will(returnValue(RT_ERROR_NONE));
+    uint64_t dest[] = {0xFF};
+    uint64_t offset[] = {0xFF};
+    rtDqsZeroCopyCfg_t zeroCopyCfg = {};
+    zeroCopyCfg.queueId = 0;
+    zeroCopyCfg.copyType = RT_DQS_ZERO_COPY_INPUT;
+    zeroCopyCfg.count = 1;
+    zeroCopyCfg.offset = offset;
+    zeroCopyCfg.dest = dest;
+    ctrlSpace.input_queue_num = 1U;
+    ctrlSpace.input_queue_ids[0] = 0;
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_ZERO_COPY;
+    cfg.cfg = &zeroCopyCfg;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    zeroCopyCfg.copyType = RT_DQS_ZERO_COPY_OUTPUT;
+    ctrlSpace.output_queue_num = 1U;
+    ctrlSpace.output_queue_ids[0] = 0;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    cfg.cfg = nullptr;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+    zeroCopyCfg.copyType = RT_DQS_ZERO_COPY_INPUT;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_06)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    DqsZeroCopyTaskInfo dqsZeroCopyTask = {};
+    task1.u.dqsZeroCopyTask = dqsZeroCopyTask;
+    task1.stream = stm;
+    TaskInfo* tmpTask = &task1;
+
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    rtDqsZeroCopyCfg_t zeroCopyCfg = {};
+    zeroCopyCfg.queueId = 0;
+    zeroCopyCfg.copyType = RT_DQS_ZERO_COPY_INPUT;
+    ctrlSpace.input_queue_num = 1U;
+    ctrlSpace.input_queue_ids[0] = 0;
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::MemCopySync).stubs().will(returnValue(1));
+
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_ZERO_COPY;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    cfg.cfg = nullptr;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::DevMemAlloc)
+        .stubs()
+        .will(returnValue(RT_ERROR_NONE));
+    DqsTaskConfig taskCfg = {};
+    taskCfg.zeroCopyCfg = &zeroCopyCfg;
+    error = DqsZeroCopyTaskInit(&task1, stm, &taskCfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    uint32_t devId = 0;
+    PrintErrorInfoForDqsMbufFreeTask(tmpTask, devId);
+    EXPECT_EQ(0, devId);
+
+    DqsCommonTaskInfo prepareTask = {};
+    task1.u.dqsPrepareTask = prepareTask;
+    PrintErrorInfoForDqsPrepareTask(tmpTask, devId);
+    DqsPrepareTaskUnInit(tmpTask);
+
+    DqsZeroCopyTaskInfo zeroCopyTask = {};
+    task1.u.dqsZeroCopyTask = zeroCopyTask;
+    PrintErrorInfoForDqsZeroCopyTask(tmpTask, devId);
+    DqsZeroCopyTaskUnInit(tmpTask);
+
+    DqsInterChipProcTaskInfo dqsInterChipPreProcTask = {};
+    task1.u.dqsInterChipPreProcTask = dqsInterChipPreProcTask;
+    PrintErrorInfoForDqsInterChipPreProcTask(tmpTask, devId);
+    DqsInterChipPreProcTaskUnInit(tmpTask);
+
+    DqsInterChipProcTaskInfo dqsInterChipPostProcTask = {};
+    task1.u.dqsInterChipPostProcTask = dqsInterChipPostProcTask;
+    PrintErrorInfoForDqsInterChipPostProcTask(tmpTask, devId);
+    DqsInterChipPostProcTaskUnInit(tmpTask);
+
+    rtDavidSqe_t davidSqe = {};
+    TaskSqeInfo sqeInfo = {0ULL, 0ULL};
+    ConstructSqeForDqsPrepareTask(tmpTask, static_cast<void*>(&davidSqe), sqeInfo);
+    PrintErrorInfoForDqsAdspcTask(tmpTask, devId);
+
+    PrintErrorInfoForDqsBatchDequeueTask(tmpTask, devId);
+    DqsBatchDequeTaskUnInit(tmpTask);
+
+    DqsFrameAlignTaskUnInit(tmpTask);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_ZeroCopyAllocOffsetFail)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    task1.stream = stm;
+
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::DevMemAlloc)
+        .stubs()
+        .will(returnValue(RT_ERROR_NONE))
+        .then(returnValue(RT_ERROR_NONE))
+        .then(returnValue(RT_ERROR_DRV_ERR));
+
+    uint64_t dest[] = {0xFF};
+    uint64_t offset[] = {0xFF};
+    rtDqsZeroCopyCfg_t zeroCopyCfg = {};
+    zeroCopyCfg.queueId = 0;
+    zeroCopyCfg.copyType = RT_DQS_ZERO_COPY_INPUT;
+    zeroCopyCfg.count = 1;
+    zeroCopyCfg.offset = offset;
+    zeroCopyCfg.dest = dest;
+    ctrlSpace.input_queue_num = 1U;
+    ctrlSpace.input_queue_ids[0] = 0;
+
+    DqsTaskConfig taskCfg = {};
+    taskCfg.zeroCopyCfg = &zeroCopyCfg;
+    rtError_t error = DqsZeroCopyTaskInit(&task1, stm, &taskCfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_DqsTask_07)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    DqsCommonTaskInfo dqsCondCopyTask = {};
+    task1.u.dqsCondCopyTask = dqsCondCopyTask;
+    task1.stream = stm;
+    TaskInfo* tmpTask = &task1;
+
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    rtDqsTaskCfg_t cfg = {};
+    rtDqsConditionCopyCfg_t condCopyCfg = {};
+    uint64_t condition = 1;
+    uint8_t dst[32] = {0};
+    uint8_t src[32] = {0};
+    cfg.cfg = &condCopyCfg;
+    cfg.type = RT_DQS_TASK_CONDITION_COPY;
+    condCopyCfg.condition = &condition;
+    condCopyCfg.dst = (void*)&dst;
+    condCopyCfg.src = (void*)&src;
+    condCopyCfg.cnt = 32;
+    condCopyCfg.destMax = 32;
+    DqsTaskConfig dqsTaskConfig;
+    dqsTaskConfig.condCopyCfg = &condCopyCfg;
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::MemCopySync).stubs().will(returnValue(1));
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::DevMemAlloc)
+        .stubs()
+        .will(returnValue(RT_ERROR_NONE));
+    error = DqsConditionCopyTaskInit(&task1, stm, &dqsTaskConfig);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    uint32_t devId = 0;
+    rtDavidSqe_t davidSqe = {};
+    TaskSqeInfo sqeInfo = {0ULL, 0ULL};
+    ConstructSqeForDqsConditionCopyTask(tmpTask, static_cast<void*>(&davidSqe), sqeInfo);
+    PrintErrorInfoForDqsConditionCopyTask(tmpTask, devId);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_DqsInterChipTask_01)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    DqsInterChipProcTaskInfo dqsInterChipProcTask = {};
+    task1.u.dqsInterChipPreProcTask = dqsInterChipProcTask;
+    TaskInfo* tmpTask = &task1;
+
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(stm, &Stream::AddTaskToList).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER(MemcpyAsyncTaskInitV1).stubs().will(returnValue(RT_ERROR_NONE));
+
+    stars_dqs_inter_chip_space_t interChipSpace = {};
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsInterChipSpace(&interChipSpace);
+
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_INTER_CHIP_INIT;
+    cfg.cfg = nullptr;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::MemCopySync)
+        .stubs()
+        .will(returnValue(1))
+        .then(returnValue(0))
+        .then(returnValue(1));
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = DqsInterChipMemcpyTaskInit(tmpTask, 0, DqsInterChipTaskType::DQS_INTER_CHIP_TASK_PREPROC);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, TestDqsAdspcTaskWithParamError)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, 0, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task = {};
+    TaskInfo* tmpTask = &task;
+
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(stm, &Stream::AddTaskToList).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER(MemcpyAsyncTaskInitV1).stubs().will(returnValue(RT_ERROR_NONE));
+
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_ADSPC;
+    rtDqsAdspcTaskCfg_t param = {};
+    cfg.cfg = &param;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+    delete stm;
+}
+
+TEST_F(TaskTestV201, TestDqsAdspcTaskWithSuccess)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, 0, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task = {};
+    TaskInfo* tmpTask = &task;
+    DqsQueueInfo queueInfo = {};
+    queueInfo.prodqOwAddr = 1U;
+    queueInfo.enqueOpAddr = 1U;
+    queueInfo.queType = QMNGR_ENTITY_TYPE;
+
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(stm, &Stream::AddTaskToList).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER(MemcpyAsyncTaskInitV1).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::GetDqsQueInfo)
+        .stubs()
+        .with(mockcpp::any(), mockcpp::any(), outBoundP(&queueInfo))
+        .will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::GetDqsMbufPoolInfo)
+        .stubs()
+        .will(returnValue(RT_ERROR_NONE));
+
+    rtDqsAdspcTaskCfg_t param = {};
+    param.cqeSize = 32U;
+    param.cqDepth = 8U;
+    param.cqeBaseAddr = 0x5A;
+    param.cqeCopyAddr = 0x5B;
+    param.cqHeadRegAddr = 0x5C;
+    param.cqTailRegAddr = 0x5D;
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_ADSPC;
+    cfg.cfg = &param;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    delete stm;
+}
+
+TEST_F(TaskTestV201, TestDqsAdspcTaskWithCqeDepthError)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, 0, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task = {};
+    TaskInfo* tmpTask = &task;
+    DqsQueueInfo queueInfo = {};
+    queueInfo.prodqOwAddr = 1U;
+    queueInfo.enqueOpAddr = 1U;
+    queueInfo.queType = QMNGR_ENTITY_TYPE;
+
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(stm, &Stream::AddTaskToList).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER(MemcpyAsyncTaskInitV1).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::GetDqsQueInfo)
+        .stubs()
+        .with(mockcpp::any(), mockcpp::any(), outBoundP(&queueInfo))
+        .will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(device_->Driver_()), &NpuDriver::GetDqsMbufPoolInfo)
+        .stubs()
+        .will(returnValue(RT_ERROR_NONE));
+
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_ADSPC;
+    rtDqsAdspcTaskCfg_t param = {};
+    param.cqDepth = 7U;
+    cfg.cfg = &param;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_UpdateDevProperties)
+{
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    EXPECT_NE(rtInstance, nullptr);
+
+    rtInstance->UpdateDevProperties(CHIP_MC62CM12A, "MC62CM12AA");
+
+    DevProperties props = {};
+    EXPECT_EQ(GET_DEV_PROPERTIES(CHIP_MC62CM12A, props), RT_ERROR_NONE);
+    EXPECT_EQ(props.rtsqDepth, 4089U);
+    EXPECT_EQ(props.maxTaskNumPerStream, 4054U);
+    EXPECT_EQ(Runtime::starsPendingMax_, props.rtsqDepth * 3U / 4U);
+}
+
+TEST_F(TaskTestV201, Test_GetSocVersionByHardwareVer)
+{
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
+    rtChipType_t oriChipType = rtInstance->GetChipType();
+    std::string oriSocVersion = rtInstance->GetSocVersion();
+    rtInstance->SetChipType(CHIP_MC62CM12A);
+    GlobalContainer::SetRtChipType(CHIP_MC62CM12A);
+    rtError_t ret = rtInstance->GetSocVersionByHardwareVer(PLAT_COMBINE(ARCH_M510, CHIP_MC62CM12A, VER_NA), 0, 0);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    EXPECT_EQ(rtInstance->GetRawSocVersion(), "");
+    rtInstance->SetChipType(oriChipType);
+    GlobalContainer::SetRtChipType(oriChipType);
+    rtInstance->SetSocVersion(oriSocVersion);
+}
+
+TEST_F(TaskTestV201, Test_DqsCountNotifyWait)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    DqsCommonTaskInfo dqsDequeueTask = {};
+    task1.u.dqsDequeueTask = dqsDequeueTask;
+    TaskInfo* tmpTask = &task1;
+
+    MOCKER(AllocTaskInfoForCapture).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    ctrlSpace.input_queue_num = 2U;
+
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_DEQUEUE;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    TaskInfo task2 = {};
+    NotifyWaitTaskInfo notifyWaitTask = {};
+    task2.u.notifywaitTask = notifyWaitTask;
+    TaskInfo* waitTask = &task2;
+
+    MOCKER_CPP(&Stream::AllocTask).stubs().will(returnValue(waitTask));
+    MOCKER(SubmitTaskPostProc).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP(&IoctlUtil::IoctlByCmd).stubs().will(returnValue(RT_ERROR_NONE));
+    cfg.type = RT_DQS_TASK_NOTIFY_WAIT;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_DqsNotifyWaitWithInvalidQueNum)
+{
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    DqsCommonTaskInfo dqsDequeueTask = {};
+    task1.u.dqsDequeueTask = dqsDequeueTask;
+    TaskInfo* tmpTask = &task1;
+
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+
+    stars_dqs_ctrl_space_t ctrlSpace = {};
+    ctrlSpace.input_queue_num = 11U;
+
+    StreamWithDqs* streamWithDqs = (StreamWithDqs*)stm;
+    streamWithDqs->SetDqsCtrlSpace(&ctrlSpace);
+    rtDqsTaskCfg_t cfg = {};
+    cfg.type = RT_DQS_TASK_DEQUEUE;
+    rtError_t error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    cfg.type = RT_DQS_TASK_NOTIFY_WAIT;
+    error = DqsLaunchTask(stm, &cfg);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+
+    delete stm;
+}
+
+TEST_F(TaskTestV201, Test_CondIsaHelper)
+{
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
+    rtChipType_t oriChipType = rtInstance->GetChipType();
+std:
+    string oriSocVersion = rtInstance->GetSocVersion();
+    rtInstance->SetChipType(CHIP_MC62CM12A);
+    GlobalContainer::SetRtChipType(CHIP_MC62CM12A);
+
+    rtStarsModelExeFuncCallPara_t funcCallPara = {};
+    RtStarsModelExeCheckSqFsm checkSqFsm = {};
+    ConstrucModelExeCheckSqFsm(funcCallPara, checkSqFsm);
+
+    rtStarsStreamSwitchFc_t fc1 = {};
+    rtStarsStreamSwitchFcPara_t fcPara1 = {};
+    ConstructStreamSwitchFc(fc1, fcPara1);
+
+    rtInstance->SetChipType(oriChipType);
+    GlobalContainer::SetRtChipType(oriChipType);
+    rtInstance->SetSocVersion(oriSocVersion);
+}
+
+TEST_F(TaskTestV201, Test_ioctl_utils_success)
+{
+    GlobalMockObject::reset();
+    MOCKER(mmOpen2).stubs().will(returnValue(0));
+    stars_ioctl_cmd_args_t args = {};
+    rtError_t error = IoctlUtil::GetInstance().IoctlByCmd(STARS_IOCTL_CMD_BIND_QUEUE, &args);
+    EXPECT_NE(error, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTestV201, Test_GetIpcSqeWriteAddrForNotifyRecordTask)
+{
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
+    rtChipType_t oriChipType = rtInstance->GetChipType();
+    std::string oriSocVersion = rtInstance->GetSocVersion();
+    rtInstance->SetChipType(CHIP_MC62CM12A);
+    GlobalContainer::SetRtChipType(CHIP_MC62CM12A);
+    Stream* stm = CreateStreamAndGet(device_, 0, RT_STREAM_DQS_CTRL, nullptr);
+    EXPECT_NE(stm, nullptr);
+    TaskInfo task1 = {};
+    task1.stream = stm;
+    Notify* notify = new Notify(0, 0);
+    NotifyRecordTaskInfo* notifyRecord = &(task1.u.notifyrecordTask);
+    notifyRecord->uPtr.notify = notify;
+    TaskInfo* tmpTask = &task1;
+    uint64_t addr = 0ULL;
+    rtError_t error = GetIpcSqeWriteAddrForNotifyRecordTask(tmpTask, addr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    notify->adcDieId_ = 2;
+    error = GetIpcSqeWriteAddrForNotifyRecordTask(tmpTask, addr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    MOCKER(halMemAlloc).stubs().will(returnValue(DRV_ERROR_NONE));
+    void* dptr = nullptr;
+    error = ((NpuDriver*)(device_->Driver_()))
+                ->MemAllocHugePolicyPageOffline(&dptr, HUGE_PAGE_MEM_CRITICAL_VALUE + 1, RT_MEMORY_P2P_DDR, 0, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    error = ((NpuDriver*)(device_->Driver_()))
+                ->MemAllocHugePolicyPageOffline(&dptr, HUGE_PAGE_MEM_CRITICAL_VALUE, RT_MEMORY_P2P_DDR, 0, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    rtInstance->SetChipType(oriChipType);
+    GlobalContainer::SetRtChipType(oriChipType);
+    rtInstance->SetSocVersion(oriSocVersion);
+    delete notify;
+    delete stm;
+}
+
+rtError_t IoctlByCmdMock(IoctlUtil* that, const stars_ioctl_cmd_t cmd, const stars_ioctl_cmd_args_t* args)
+{
+    static stars_dqs_inter_chip_space_t space = {};
+    stars_dqs_ctrl_space_result_t* result = (stars_dqs_ctrl_space_result_t*)args->output_ptr;
+    result->cs_va = &space;
+    return RT_ERROR_NONE;
+}
+
+TEST_F(TaskTestV201, TestDqsInterChipStreamCreateSuccess)
+{
+    MOCKER_CPP(&IoctlUtil::IoctlByCmd).stubs().will(invoke(IoctlByCmdMock));
+
+    rtStream_t stream;
+    rtStreamCreateConfig_t config = {};
+    rtStreamCreateAttr_t attr = {};
+    config.attrs = &attr;
+    config.numAttrs = 1;
+    attr.id = RT_STREAM_CREATE_ATTR_FLAGS;
+    attr.value.flags = RT_STREAM_DQS_INTER_CHIP;
+    auto error = rtsStreamCreate(&stream, &config);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsStreamDestroy(stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTestV201, TestDqsInterChipStreamCreateFailed)
+{
+    MOCKER_CPP(&IoctlUtil::IoctlByCmd).stubs().will(returnValue(RT_ERROR_NONE));
+    rtStream_t stream;
+    rtStreamCreateConfig_t config = {};
+    rtStreamCreateAttr_t attr = {};
+    config.attrs = &attr;
+    config.numAttrs = 1;
+    attr.id = RT_STREAM_CREATE_ATTR_FLAGS;
+    attr.value.flags = RT_STREAM_DQS_INTER_CHIP;
+    auto error = rtsStreamCreate(&stream, &config);
+    EXPECT_EQ(error, ACL_ERROR_RT_DRV_INTERNAL_ERROR);
+}
+
+TEST_F(TaskTestV201, construct_sqe_for_stars_memcpy_async_sqe_d2d)
+{
+    void* dst = nullptr;
+    void* src = nullptr;
+    uint64_t count = 1;
+    rtMemcpyKind_t kind = RT_MEMCPY_DEVICE_TO_DEVICE;
+
+    TaskInfo task = {};
+    task.u.memcpyAsyncTaskInfo.copyDataType = RT_DATA_TYPE_BFP16;
+    (void)ReduceOpcodeHigh(&task);
+
+    rtDavidSqe_t sqe;
+    TaskSqeInfo sqeInfo = {0ULL, 0ULL};
+    InitByStream(&task, stream_);
+    MemcpyAsyncTaskInitV3(&task, kind, src, dst, count, 0, NULL);
+    ToConstructDavidSqe(&task, static_cast<void*>(&sqe), sqeInfo);
+    EXPECT_EQ(sqe.memcpyAsyncSqe.header.type, RT_DAVID_SQE_TYPE_SDMA);
+    task.id = 0;
+    ToConstructDavidSqe(&task, static_cast<void*>(&sqe), sqeInfo);
+    TaskUnInitProc(&task);
+}
+
+TEST_F(TaskTestV201, Test_Construct_Sqe)
+{
+    TaskInfo task = {};
+
+    rtDavidSqe_t* sqe = (rtDavidSqe_t*)malloc(sizeof(rtDavidSqe_t));
+    TaskSqeInfo sqeInfo = {0ULL, 0ULL};
+    InitByStream(&task, stream_);
+    AicpuTaskInit(&task, 1, (uint32_t)0);
+    task.u.aicpuTaskInfo.aicpuKernelType = KERNEL_TYPE_AICPU_KFC;
+    ToConstructDavidSqe(&task, static_cast<void*>(sqe), sqeInfo);
+
+    task.u.aicpuTaskInfo.comm.kernelFlag = 0x40;
+    ToConstructDavidSqe(&task, static_cast<void*>(sqe), sqeInfo);
+
+    task.u.aicpuTaskInfo.comm.kernelFlag = 0x10;
+    ToConstructDavidSqe(&task, static_cast<void*>(sqe), sqeInfo);
+
+    task.type = TS_TASK_TYPE_MODEL_END_GRAPH;
+    ToConstructDavidSqe(&task, static_cast<void*>(sqe), sqeInfo);
+
+    task.type = TS_TASK_TYPE_MODEL_TO_AICPU;
+    ToConstructDavidSqe(&task, static_cast<void*>(sqe), sqeInfo);
+
+    free(sqe);
+    sqe = nullptr;
+}
+
+TEST_F(TaskTestV201, Test_Construct_Fusion_Sqe)
+{
+    const void* stubFunc = (void*)0x02;
+    const char* stubName = "abc";
+    Kernel* kernel = NULL;
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICORE);
+    Program* program = &stubProg;
+    kernel = new (std::nothrow) Kernel("", 0UL, program, RT_KERNEL_ATTR_TYPE_AICORE, 0);
+    kernel->SetStub_(stubFunc);
+
+    rtError_t error;
+    rtDavidSqe_t sqe[5];
+    TaskInfo kernTask = {};
+    InitByStream(&kernTask, stream_);
+
+    uint64_t arg = 0x123456789;
+    rtFusionArgsEx_t argsInfo = {};
+    argsInfo.args = &arg;
+    argsInfo.argsSize = sizeof(arg);
+    argsInfo.aicpuNum = 1;
+    argsInfo.aicpuArgs[0].kfcArgsFmtOffset = 0xFFFF;
+    argsInfo.aicpuArgs[0].kernelNameAddrOffset = 0;
+    argsInfo.aicpuArgs[0].soNameAddrOffset = 0;
+
+    rtFunsionTaskInfo_t fusionInfo = {};
+    fusionInfo.subTaskNum = 2U;
+    fusionInfo.subTask[0].type = RT_FUSION_AICPU;
+    fusionInfo.subTask[0].task.aicpuInfo.kernelType = 0;
+    fusionInfo.subTask[0].task.aicpuInfo.flags = 0;
+    fusionInfo.subTask[0].task.aicpuInfo.blockDim = 2U;
+
+    rtLaunchAttribute_t attrs[1];
+    attrs[0].id = RT_LAUNCH_ATTRIBUTE_BLOCKDIM;
+    attrs[0].value.blockDim = 1;
+
+    rtLaunchConfig_t launchConfig = {};
+    launchConfig.numAttrs = 1;
+    launchConfig.attrs = attrs;
+    fusionInfo.subTask[1].type = RT_FUSION_AICORE;
+    fusionInfo.subTask[1].task.aicoreInfo.hdl = nullptr;
+    fusionInfo.subTask[1].task.aicoreInfo.config = &launchConfig;
+
+    rtAicAivFusionInfo_t aicAivInfo = {};
+    LaunchTaskCfgInfo_t taskCfgInfo;
+    aicAivInfo.launchTaskCfg = &taskCfgInfo;
+    FusionKernelTaskInit(&kernTask);
+    AixKernelTaskInitForFusion(&kernTask, &aicAivInfo, &taskCfgInfo);
+    kernTask.u.fusionKernelTask.fusionKernelInfo = static_cast<void*>(&fusionInfo);
+    kernTask.u.fusionKernelTask.argsInfo = &argsInfo;
+    kernTask.u.fusionKernelTask.argsSize = argsInfo.argsSize;
+    kernTask.u.fusionKernelTask.args = argsInfo.args;
+    kernTask.u.fusionKernelTask.sqeLen = 6U;
+    rtArgsSizeInfo_t argsSizeInfo;
+    argsSizeInfo.infoAddr = (void*)0x12345678;
+    argsSizeInfo.atomicIndex = 0x87654321;
+    error = rtSetExceptionExtInfo(&argsSizeInfo);
+    AixKernelTaskInitForFusion(&kernTask, &aicAivInfo, &taskCfgInfo);
+    kernTask.u.fusionKernelTask.aicAivType = 0; // aic no mix
+    TaskSqeInfo sqeInfo = {0ULL, 0ULL};
+    ToConstructDavidSqe(&kernTask, static_cast<void*>(sqe), sqeInfo);
+    EXPECT_EQ(sqe[0].aicpuSqe.header.type, RT_DAVID_SQE_TYPE_FUSION);
+
+    TaskUnInitProc(&kernTask);
+    delete kernel;
+}
+
+TEST_F(TaskTestV201, TestCpuKernelLaunch)
+{
+    rtError_t error;
+    ApiImplDavid apiImpl;
+    void* args[] = {&error, NULL};
+    rtAicpuArgsEx_t argsInfo = {};
+    argsInfo.args = args;
+    argsInfo.argsSize = sizeof(args);
+    char_t* opName = "testOp";
+    MOCKER(StreamLaunchCpuKernelExWithArgs).stubs().will(returnValue(RT_ERROR_NONE));
+    error = apiImpl.CpuKernelLaunchExWithArgs(opName, 1, &argsInfo, NULL, 2, 2);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTestV201, TestSetXpuDevice)
+{
+    ApiImplDavid apiImpl;
+    rtError_t error = apiImpl.SetXpuDevice(RT_DEV_TYPE_DPU, 0);
+    EXPECT_EQ(error, RT_ERROR_FEATURE_NOT_SUPPORT);
+}
+
+TEST_F(TaskTestV201, TestGetXpuDevCount)
+{
+    ApiImplDavid apiImpl;
+    rtError_t error = apiImpl.GetXpuDevCount(RT_DEV_TYPE_DPU, 0);
+    EXPECT_EQ(error, RT_ERROR_FEATURE_NOT_SUPPORT);
+}
+
+TEST_F(TaskTestV201, TestResetXpuDevice)
+{
+    ApiImplDavid apiImpl;
+    rtError_t error = apiImpl.ResetXpuDevice(RT_DEV_TYPE_DPU, 0);
+    EXPECT_EQ(error, RT_ERROR_FEATURE_NOT_SUPPORT);
+}
+
+TEST_F(TaskTestV201, TestXpuSetTaskFailCallback)
+{
+    ApiImplDavid apiImpl;
+    rtError_t error = apiImpl.XpuSetTaskFailCallback(RT_DEV_TYPE_DPU, nullptr, nullptr);
+    EXPECT_EQ(error, RT_ERROR_FEATURE_NOT_SUPPORT);
+}
+
+TEST_F(TaskTestV201, LaunchKernelV2_AICPU)
+{
+    Device* device = ((Runtime*)Runtime::Instance())->DeviceRetain(0, 0);
+    MOCKER_CPP(&ApiImplDavid::CpuKernelLaunchExAll).stubs().will(returnValue(RT_ERROR_NONE));
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICPU);
+    Program* program = &stubProg;
+    const char* stub = "";
+    void* stubFunc = nullptr;
+    Kernel* kernel = new (std::nothrow) Kernel("", 0ULL, program, RT_KERNEL_ATTR_TYPE_AICPU, 0);
+    kernel->SetStub_(stubFunc);
+    kernel->SetKernelRegisterType(RT_KERNEL_REG_TYPE_CPU);
+    kernel->SetAicpuKernelType_(KERNEL_TYPE_AICPU);
+    rtStream_t stream;
+    rtError_t error = rtsStreamCreate(&stream, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    RtArgsWithType argsWithType{};
+    argsWithType.type = RT_ARGS_CPU_EX;
+    rtCpuKernelArgs_t cpuArgsInfo = rtCpuKernelArgs_t{};
+    argsWithType.args.cpuArgsInfo = &cpuArgsInfo;
+    rtAicpuArgsEx_t baseArgs = rtAicpuArgsEx_t{};
+    cpuArgsInfo.baseArgs = baseArgs;
+
+    rtKernelLaunchCfg_t taskCfg;
+    taskCfg.numAttrs = 1;
+    rtLaunchKernelAttr_t attrs[1];
+    attrs[0].id = RT_LAUNCH_KERNEL_ATTR_DATA_DUMP;
+    taskCfg.attrs = attrs;
+
+    ApiImplDavid impl;
+    Stream* launchStream = rt_ut::UnwrapOrNull<Stream>(stream);
+    error = impl.LaunchKernelV2(kernel, 1, &argsWithType, launchStream, &taskCfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    delete kernel;
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    ((Runtime*)Runtime::Instance())->DeviceRelease(device);
+}
+
+TEST_F(TaskTestV201, LaunchKernelV2_NonCPU)
+{
+    Device* device = ((Runtime*)Runtime::Instance())->DeviceRetain(0, 0);
+    MOCKER(StreamLaunchKernelV2).stubs().will(returnValue(RT_ERROR_NONE));
+
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICORE);
+    Program* program = &stubProg;
+    const char* stub = "";
+    void* stubFunc = nullptr;
+    Kernel* kernel = new (std::nothrow) Kernel("", 0ULL, program, RT_KERNEL_ATTR_TYPE_AICPU, 0);
+    kernel->SetStub_(stubFunc);
+    kernel->SetKernelRegisterType(RT_KERNEL_REG_TYPE_NON_CPU);
+    rtStream_t stream;
+    rtError_t error = rtsStreamCreate(&stream, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    RtArgsWithType argsWithType{};
+    argsWithType.type = RT_ARGS_NON_CPU_EX;
+    rtCpuKernelArgs_t cpuArgsInfo = rtCpuKernelArgs_t{};
+    argsWithType.args.cpuArgsInfo = &cpuArgsInfo;
+    rtAicpuArgsEx_t baseArgs = rtAicpuArgsEx_t{};
+    cpuArgsInfo.baseArgs = baseArgs;
+
+    rtKernelLaunchCfg_t taskCfg;
+    taskCfg.numAttrs = 1;
+    rtLaunchKernelAttr_t attrs[1];
+    attrs[0].id = RT_LAUNCH_KERNEL_ATTR_BLOCK_TASK_PREFETCH;
+    attrs[0].value.isBlockTaskPrefetch = BLOCK_PREFETCH_ENABLE;
+    taskCfg.attrs = attrs;
+
+    ApiImplDavid impl;
+    MOCKER_CPP_VIRTUAL(impl, &ApiImplDavid::NopTask).stubs().will(returnValue(RT_ERROR_NONE));
+    Stream* launchStream = rt_ut::UnwrapOrNull<Stream>(stream);
+    error = impl.LaunchKernelV2(kernel, 1, &argsWithType, launchStream, &taskCfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    delete kernel;
+    ((Runtime*)Runtime::Instance())->DeviceRelease(device);
+}
+
+TEST_F(TaskTestV201, LaunchKernelV2_Handle)
+{
+    Device* device = ((Runtime*)Runtime::Instance())->DeviceRetain(0, 0);
+    MOCKER_CPP(&ApiImplDavid::LaunchKernelByHandle).stubs().will(returnValue(RT_ERROR_NONE));
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICPU);
+    Program* program = &stubProg;
+    const char* stub = "";
+    void* stubFunc = nullptr;
+    Kernel* kernel = new (std::nothrow) Kernel("", 0ULL, program, RT_KERNEL_ATTR_TYPE_AICPU, 0);
+    kernel->SetStub_(stubFunc);
+    kernel->SetKernelRegisterType(RT_KERNEL_REG_TYPE_CPU);
+    kernel->SetAicpuKernelType_(KERNEL_TYPE_AICPU);
+    rtStream_t stream;
+    rtError_t error = rtsStreamCreate(&stream, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    RtArgsWithType argsWithType{};
+    argsWithType.type = RT_ARGS_HANDLE;
+    rtCpuKernelArgs_t cpuArgsInfo = rtCpuKernelArgs_t{};
+    argsWithType.args.cpuArgsInfo = &cpuArgsInfo;
+    rtAicpuArgsEx_t baseArgs = rtAicpuArgsEx_t{};
+    cpuArgsInfo.baseArgs = baseArgs;
+
+    rtKernelLaunchCfg_t taskCfg;
+    taskCfg.numAttrs = 1;
+    rtLaunchKernelAttr_t attrs[1];
+    attrs[0].id = RT_LAUNCH_KERNEL_ATTR_DATA_DUMP;
+    taskCfg.attrs = attrs;
+
+    ApiImplDavid impl;
+    Stream* launchStream = rt_ut::UnwrapOrNull<Stream>(stream);
+    error = impl.LaunchKernelV2(kernel, 1, &argsWithType, launchStream, &taskCfg);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    delete kernel;
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    ((Runtime*)Runtime::Instance())->DeviceRelease(device);
+}
+
+TEST_F(TaskTestV201, LaunchKernelV2_RT_ARGS_MAX)
+{
+    Device* device = ((Runtime*)Runtime::Instance())->DeviceRetain(0, 0);
+    MOCKER_CPP(&ApiImplDavid::LaunchKernelByHandle).stubs().will(returnValue(RT_ERROR_NONE));
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICPU);
+    Program* program = &stubProg;
+    const char* stub = "";
+    void* stubFunc = nullptr;
+    Kernel* kernel = new (std::nothrow) Kernel("", 0ULL, program, RT_KERNEL_ATTR_TYPE_AICPU, 0);
+    kernel->SetStub_(stubFunc);
+    kernel->SetKernelRegisterType(RT_KERNEL_REG_TYPE_CPU);
+    kernel->SetAicpuKernelType_(KERNEL_TYPE_AICPU);
+    rtStream_t stream;
+    rtError_t error = rtsStreamCreate(&stream, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    RtArgsWithType argsWithType{};
+    argsWithType.type = RT_ARGS_MAX;
+    rtCpuKernelArgs_t cpuArgsInfo = rtCpuKernelArgs_t{};
+    argsWithType.args.cpuArgsInfo = &cpuArgsInfo;
+    rtAicpuArgsEx_t baseArgs = rtAicpuArgsEx_t{};
+    cpuArgsInfo.baseArgs = baseArgs;
+
+    rtKernelLaunchCfg_t taskCfg;
+    taskCfg.numAttrs = 1;
+    rtLaunchKernelAttr_t attrs[1];
+    attrs[0].id = RT_LAUNCH_KERNEL_ATTR_DATA_DUMP;
+    taskCfg.attrs = attrs;
+
+    ApiImplDavid impl;
+    Stream* launchStream = rt_ut::UnwrapOrNull<Stream>(stream);
+    error = impl.LaunchKernelV2(kernel, 1, &argsWithType, launchStream, &taskCfg);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+
+    delete kernel;
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    ((Runtime*)Runtime::Instance())->DeviceRelease(device);
+}
+
+TEST_F(TaskTestV201, Test_Construct_Simt_Sqe)
+{
+    TaskInfo task = {};
+
+    rtDavidSqe_t* sqe = (rtDavidSqe_t*)malloc(sizeof(rtDavidSqe_t));
+    InitByStream(&task, stream_);
+
+    const void* stubFunc = (void*)0x02;
+    const char* stubName = "abc";
+    Kernel* kernel = NULL;
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICORE);
+    Program* program = &stubProg;
+    program->kernelNames_ = {'a', 'b', 'c', 'd', '\0'};
+    kernel = new (std::nothrow) Kernel("", 0UL, program, RT_KERNEL_ATTR_TYPE_AICORE, 0);
+    kernel->SetStub_(stubFunc);
+    ((Runtime*)Runtime::Instance())->kernelTable_.Add(kernel);
+    kernel->SetKernelVfType_(static_cast<uint32_t>(AivTypeFlag::AIV_TYPE_SIMT_VF_ONLY));
+    kernel->SetShareMemSize_(8192);
+
+    rtDavidSqe_t* sqeAddr = sqe;
+    uint16_t pos = task.id;
+    uint64_t oldSqAddr = stream_->GetSqBaseAddr();
+    uint64_t newSqAddr = reinterpret_cast<uint64_t>(sqe);
+    stream_->SetSqBaseAddr(newSqAddr);
+    sqeAddr = reinterpret_cast<rtDavidSqe_t*>(stream_->GetSqBaseAddr() + (pos << SHIFT_SIX_SIZE));
+
+    Kernel* aicKernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    AicTaskInit(&task, aicKernel, aicKernel->GetKernelAttrType(), 1, nullptr);
+    delete aicKernel;
+    EXPECT_EQ(task.type, TS_TASK_TYPE_KERNEL_AICORE);
+    task.id = 0;
+    task.u.aicTaskInfo.kernel = kernel;
+    task.u.aicTaskInfo.dynamicShareMemSize = 8192;
+    TaskSqeInfo sqeInfo = {stream_->GetSqBaseAddr(), 0ULL};
+    ToConstructDavidSqe(&task, static_cast<void*>(sqeAddr), sqeInfo);
+    EXPECT_EQ(sqe->aicpuControlSqe.header.type, RT_DAVID_SQE_TYPE_AIC);
+
+    free(sqe);
+    sqe = nullptr;
+}
+
+TEST_F(TaskTestV201, Test_IpcRecordTask)
+{
+    rtStream_t stream;
+    rtNotify_t notify;
+    TaskInfo task1 = {};
+    NotifyRecordTaskInfo notifyRecord = {};
+    task1.u.notifyrecordTask = notifyRecord;
+    TaskInfo* tmpTask = &task1;
+    rtDavidSqe_t* sqe = (rtDavidSqe_t*)malloc(sizeof(rtDavidSqe_t));
+    rtError_t ret = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    ret = rtNotifyCreate(0, &notify);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    uint32_t pos = 0;
+    MOCKER(AllocTaskInfoForCapture)
+        .stubs()
+        .with(outBoundP(&tmpTask), mockcpp::any(), outBound(pos), mockcpp::any())
+        .will(returnValue(RT_ERROR_NONE));
+    MOCKER(halSqTaskSend).stubs().will(returnValue(DRV_ERROR_INVALID_VALUE));
+    (rt_ut::UnwrapOrNull<Stream>(stream))->SetSqBaseAddr(reinterpret_cast<uint64_t>(sqe));
+    (rt_ut::UnwrapOrNull<Notify>(notify))->isIpcNotify_ = true;
+    ret = NtyRecord(rt_ut::UnwrapOrNull<Notify>(notify), rt_ut::UnwrapOrNull<Stream>(stream));
+    EXPECT_NE(ret, RT_ERROR_DRV_INPUT);
+
+    ret = rtNotifyDestroy(notify);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    ret = rtStreamDestroy(stream);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    free(sqe);
+}
+
+TEST_F(TaskTestV201, RT_SetOpExecuteWithMs)
+{
+    rtError_t error;
+    rtStream_t stream;
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    error = rtSetOpExecuteTimeOutWithMs(33);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    uint16_t kernelCredit = GetAicpuKernelCredit(nullptr, 0);
+    EXPECT_EQ(kernelCredit, 5); // failed
+    kernelCredit = GetAicoreKernelCredit(0);
+    EXPECT_EQ(kernelCredit, 1);
+}
+
+TEST_F(TaskTestV201, ReportStreamSqInfoForProfiling_Success_Create)
+{
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    Profiler* profiler = new Profiler(nullptr);
+    rtInstance->profiler_ = profiler;
+    profiler->SetTrackProfEnable(true);
+
+    MOCKER(MsprofReportCompactInfo).stubs().will(returnValue(0));
+
+    ReportStreamSqInfoForProfiling(stream_, STREAM_STATUS_CREATE);
+
+    delete rtInstance->profiler_;
+    rtInstance->profiler_ = nullptr;
+}
+
+TEST_F(TaskTestV201, ReportStreamSqInfoForProfiling_Success_Destroy)
+{
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    Profiler* profiler = new Profiler(nullptr);
+    rtInstance->profiler_ = profiler;
+    profiler->SetTrackProfEnable(true);
+
+    MOCKER(MsprofReportCompactInfo).stubs().will(returnValue(0));
+
+    ReportStreamSqInfoForProfiling(stream_, STREAM_STATUS_DESTROY);
+
+    delete rtInstance->profiler_;
+    rtInstance->profiler_ = nullptr;
+}
+
+TEST_F(TaskTestV201, ReportStreamSqInfoForProfiling_ReportFailed)
+{
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    Profiler* profiler = new Profiler(nullptr);
+    rtInstance->profiler_ = profiler;
+    profiler->SetTrackProfEnable(true);
+
+    MOCKER(MsprofReportCompactInfo).stubs().will(returnValue(1));
+
+    ReportStreamSqInfoForProfiling(stream_, STREAM_STATUS_CREATE);
+
+    delete rtInstance->profiler_;
+    rtInstance->profiler_ = nullptr;
+}
+
+TEST_F(TaskTestV201, ReportStreamSqInfoForProfiling_Disable)
+{
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    Profiler* profiler = new Profiler(nullptr);
+    rtInstance->profiler_ = profiler;
+    profiler->SetTrackProfEnable(false);
+
+    MOCKER(MsprofReportCompactInfo).stubs().will(returnValue(0));
+
+    ReportStreamSqInfoForProfiling(stream_, STREAM_STATUS_CREATE);
+
+    delete rtInstance->profiler_;
+    rtInstance->profiler_ = nullptr;
+}
+
+TEST_F(TaskTestV201, TestGetCntNotifyAddr_TableSliceRejected)
+{
+    rtCntNotify_t inNotify;
+    rtError_t error = rtCntNotifyCreate(0, &inNotify);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    uint64_t notifyAddr = 0;
+    error = rtGetCntNotifyAddress(inNotify, &notifyAddr, NOTIFY_TABLE_SLICE);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtCntNotifyDestroy(inNotify);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTestV201, TestGetCntNotifyAddr_SuccessWithAllRegTypes)
+{
+    rtCntNotify_t inNotify;
+    rtError_t error = rtCntNotifyCreate(0, &inNotify);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER(halResAddrMap).defaults().will(returnValue(DRV_ERROR_NONE));
+    uint64_t notifyAddr = 0;
+
+    error = rtGetCntNotifyAddress(inNotify, &notifyAddr, NOTIFY_CNT_ST_SLICE);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtGetCntNotifyAddress(inNotify, &notifyAddr, NOTIFY_CNT_ADD_SLICE);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtGetCntNotifyAddress(inNotify, &notifyAddr, NOTIFY_CNT_BIT_WR_SLICE);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtGetCntNotifyAddress(inNotify, &notifyAddr, NOTIFY_CNT_BIT_CLR_SLICE);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtGetCntNotifyAddress(inNotify, &notifyAddr, NOTIFY_TYPE_MAX);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtCntNotifyDestroy(inNotify);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTestV201, SetTimeoutConfigWithUsUnit)
+{
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    EXPECT_NE(rtInstance, nullptr);
+
+    std::string oldSocVersion = rtInstance->GetSocVersion();
+    rtInstance->SetSocVersion("MC62CM12AA");
+
+    rtError_t error = rtInstance->SetTimeoutConfig(RT_TIMEOUT_TYPE_OP_EXECUTE, 1000, RT_TIME_UNIT_TYPE_US);
+    EXPECT_EQ(error, RT_ERROR_FEATURE_NOT_SUPPORT);
+
+    bool oldIsCfgOpExcTaskTimeout = rtInstance->timeoutConfig_.isCfgOpExcTaskTimeout;
+    uint64_t oldOpExcTaskTimeout = rtInstance->timeoutConfig_.opExcTaskTimeout;
+
+    error = rtInstance->SetTimeoutConfig(RT_TIMEOUT_TYPE_OP_EXECUTE, 1000, RT_TIME_UNIT_TYPE_MS);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtInstance->SetSocVersion(oldSocVersion);
+    rtInstance->timeoutConfig_.isCfgOpExcTaskTimeout = oldIsCfgOpExcTaskTimeout;
+    rtInstance->timeoutConfig_.opExcTaskTimeout = oldOpExcTaskTimeout;
+}
+
+TEST_F(TaskTestV201, ProcReportIsDvppErrorAndRetryTest)
+{
+    TaskInfo task = {};
+    rtCqReport_t report;
+    report.sqeType = static_cast<uint16_t>(RT_DAVID_SQE_TYPE_VPC);
+    report.errorType = static_cast<uint16_t>(RT_STARS_CQE_ERR_TYPE_TASK_TIMEOUT);
+
+    rtError_t error = ProcReportIsDvppErrorAndRetry(report, &task);
+    EXPECT_EQ(error, false);
+}
+
+TEST_F(TaskTestV201, Test_ConstructSqeForModelSerialSchedTask)
+{
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+    ModelSerialSchedTaskInfo modelTask = {};
+    modelTask.modelId = 1U;
+    modelTask.modelPriority = 2U;
+    modelTask.notifyId = 3U;
+    modelTask.sqId = 4U;
+    modelTask.pid = 5U;
+    modelTask.groupId = 6U;
+    task.u.modelSerialSchedTask = modelTask;
+
+    rtDavidSqe_t davidSqe = {};
+    TaskSqeInfo sqeInfo = {0ULL, 0ULL};
+
+    ConstructSqeForModelSerialSchedPreProcTask(&task, static_cast<void*>(&davidSqe), sqeInfo);
+    EXPECT_EQ(davidSqe.aicpuDqsSqe.header.type, RT_DAVID_SQE_TYPE_AICPU_H);
+    EXPECT_EQ(davidSqe.aicpuDqsSqe.modelId, 1U);
+    EXPECT_EQ(davidSqe.aicpuDqsSqe.modelPriority, 2U);
+    EXPECT_EQ(davidSqe.aicpuDqsSqe.notifyId, 3U);
+    EXPECT_EQ(davidSqe.aicpuDqsSqe.sqId, 4U);
+    EXPECT_EQ(davidSqe.aicpuDqsSqe.pid, 5U);
+    EXPECT_EQ(davidSqe.aicpuDqsSqe.userGroupId, 6U);
+
+    ConstructSqeForModelSerialSchedPostProcTask(&task, static_cast<void*>(&davidSqe), sqeInfo);
+    EXPECT_EQ(davidSqe.aicpuDqsSqe.header.type, RT_DAVID_SQE_TYPE_AICPU_H);
+    EXPECT_EQ(davidSqe.aicpuDqsSqe.modelId, 1U);
+
+    ConstructSqeForModelSerialSchedNotifyWaitTask(&task, static_cast<void*>(&davidSqe), sqeInfo);
+    EXPECT_EQ(davidSqe.notifySqe.header.type, RT_DAVID_SQE_TYPE_NOTIFY_WAIT);
+    EXPECT_EQ(davidSqe.notifySqe.notifyId, 3U);
+    EXPECT_EQ(davidSqe.notifySqe.clrFlag, true);
+    EXPECT_EQ(davidSqe.notifySqe.cntFlag, false);
+}
+
+TEST_F(TaskTestV201, Test_PrintErrorInfoForModelSerialSchedTask)
+{
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+    ModelSerialSchedTaskInfo modelTask = {};
+    modelTask.modelId = 10U;
+    modelTask.modelPriority = 20U;
+    modelTask.notifyId = 30U;
+    modelTask.sqId = 40U;
+    modelTask.pid = 50U;
+    modelTask.groupId = 60U;
+    task.u.modelSerialSchedTask = modelTask;
+
+    PrintErrorInfoForModelSerialSchedPreProcTask(&task, 0U);
+    PrintErrorInfoForModelSerialSchedNotifyWaitTask(&task, 0U);
+    PrintErrorInfoForModelSerialSchedPostProcTask(&task, 0U);
+}
+
+TEST_F(TaskTestV201, Test_StarsSetResultForModelSerialSchedTask)
+{
+    TaskInfo task = {};
+    rtCqReport_t logicCq = {};
+
+    task.type = TS_TASK_TYPE_DQS_ENQUEUE;
+    logicCq.errorCode = TS_ERROR_TASK_TIMEOUT;
+    StarsSetResultForModelSerialSchedTask(&task, logicCq);
+    EXPECT_EQ(task.errorCode, 0U);
+
+    task.type = TS_TASK_TYPE_MODEL_SERIAL_SCHED_PREPROC;
+    logicCq.errorCode = TS_ERROR_TASK_TIMEOUT;
+    StarsSetResultForModelSerialSchedTask(&task, logicCq);
+    EXPECT_EQ(task.errorCode, static_cast<uint32_t>(TS_ERROR_TASK_TIMEOUT));
+
+    task.errorCode = 0U;
+    task.type = TS_TASK_TYPE_MODEL_SERIAL_SCHED_POSTPROC;
+    logicCq.errorCode = TS_ERROR_TASK_TIMEOUT;
+    StarsSetResultForModelSerialSchedTask(&task, logicCq);
+    EXPECT_EQ(task.errorCode, static_cast<uint32_t>(TS_ERROR_TASK_TIMEOUT));
+
+    task.errorCode = 0U;
+    task.type = TS_TASK_TYPE_MODEL_SERIAL_SCHED_PREPROC;
+    logicCq.errorCode = static_cast<uint32_t>(1U << RT_AICPU_ERROR_CODE_BIT_MOVE);
+    StarsSetResultForModelSerialSchedTask(&task, logicCq);
+    EXPECT_EQ(task.errorCode, static_cast<uint32_t>(TS_ERROR_TASK_EXCEPTION));
+}
+
+TEST_F(TaskTestV201, Test_ModelSerialSchedPreProc_EmptyHeadStream)
+{
+    rtModel_t model;
+    rtError_t ret = rtModelCreate(&model, 0);
+    ASSERT_EQ(ret, RT_ERROR_NONE);
+    Model* mdl = rt_ut::UnwrapOrNull<Model>(model);
+    ASSERT_NE(mdl, nullptr);
+
+    Notify* notify = new (std::nothrow) Notify(0, 0);
+    ASSERT_NE(notify, nullptr);
+
+    TaskInfo task = {};
+    TaskInfo* tmpTask = &task;
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+
+    ret = ModelSerialSchedPreProc(stream_, notify, mdl);
+    EXPECT_NE(ret, RT_ERROR_NONE);
+
+    delete notify;
+    ret = rtModelDestroy(model);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTestV201, Test_ModelSerialSchedPostProc_EmptyHeadStream)
+{
+    rtModel_t model;
+    rtError_t ret = rtModelCreate(&model, 0);
+    ASSERT_EQ(ret, RT_ERROR_NONE);
+    Model* mdl = rt_ut::UnwrapOrNull<Model>(model);
+    ASSERT_NE(mdl, nullptr);
+
+    Notify* notify = new (std::nothrow) Notify(0, 0);
+    ASSERT_NE(notify, nullptr);
+
+    TaskInfo task = {};
+    TaskInfo* tmpTask = &task;
+    MOCKER(CheckTaskCanSend).stubs().will(returnValue(RT_ERROR_NONE));
+    MOCKER(AllocTaskInfo).stubs().with(outBoundP(&tmpTask)).will(returnValue(RT_ERROR_NONE));
+
+    ret = ModelSerialSchedPostProc(stream_, notify, mdl);
+    EXPECT_NE(ret, RT_ERROR_NONE);
+
+    delete notify;
+    ret = rtModelDestroy(model);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTestV201, Test_ModelSerialSchedPreProc_Mc32EarlyReturn)
+{
+    rtModel_t model;
+    rtError_t ret = rtModelCreate(&model, 0);
+    ASSERT_EQ(ret, RT_ERROR_NONE);
+    Model* mdl = rt_ut::UnwrapOrNull<Model>(model);
+    ASSERT_NE(mdl, nullptr);
+
+    Notify* notify = new (std::nothrow) Notify(0, 0);
+    ASSERT_NE(notify, nullptr);
+
+    DevProperties origProps = stream_->Device_()->GetDevProperties();
+    DevProperties props = origProps;
+    props.aivNumPerDie = 4U;
+    stream_->Device_()->RefreshDevProperties(props);
+
+    ret = ModelSerialSchedPreProc(stream_, notify, mdl);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    stream_->Device_()->RefreshDevProperties(origProps);
+    delete notify;
+    ret = rtModelDestroy(model);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTestV201, Test_ModelSerialSchedPostProc_Mc32EarlyReturn)
+{
+    rtModel_t model;
+    rtError_t ret = rtModelCreate(&model, 0);
+    ASSERT_EQ(ret, RT_ERROR_NONE);
+    Model* mdl = rt_ut::UnwrapOrNull<Model>(model);
+    ASSERT_NE(mdl, nullptr);
+
+    Notify* notify = new (std::nothrow) Notify(0, 0);
+    ASSERT_NE(notify, nullptr);
+
+    DevProperties origProps = stream_->Device_()->GetDevProperties();
+    DevProperties props = origProps;
+    props.aivNumPerDie = 4U;
+    stream_->Device_()->RefreshDevProperties(props);
+
+    ret = ModelSerialSchedPostProc(stream_, notify, mdl);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    stream_->Device_()->RefreshDevProperties(origProps);
+    delete notify;
+    ret = rtModelDestroy(model);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTestV201, rtLaunchDqsTask_NullApiInstance)
+{
+    MOCKER(Api::Instance).stubs().will(returnValue((Api*)NULL));
+    rtDqsTaskCfg_t taskCfg = {};
+    rtError_t ret = rtLaunchDqsTask(streamHandle_, &taskCfg);
+    EXPECT_EQ(ret, ACL_ERROR_RT_INTERNAL_ERROR);
+}
+
+TEST_F(TaskTestV201, rtLaunchDqsTask_NullStream)
+{
+    rtDqsTaskCfg_t taskCfg = {};
+    rtError_t ret = rtLaunchDqsTask(nullptr, &taskCfg);
+    EXPECT_NE(ret, ACL_RT_SUCCESS);
+}
+
+TEST_F(TaskTestV201, rtLaunchDqsTask_Success)
+{
+    static ApiImpl impl;
+    MOCKER(Api::Instance).stubs().will(returnValue(static_cast<Api*>(&impl)));
+    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::LaunchDqsTask).stubs().will(returnValue(RT_ERROR_NONE));
+
+    rtDqsTaskCfg_t taskCfg = {};
+    taskCfg.type = RT_DQS_TASK_SCHED_CONFIG;
+    rtError_t ret = rtLaunchDqsTask(streamHandle_, &taskCfg);
+    EXPECT_EQ(ret, ACL_RT_SUCCESS);
+}
+
+TEST_F(TaskTestV201, rtLaunchDqsTask_LaunchFail)
+{
+    static ApiImpl impl;
+    MOCKER(Api::Instance).stubs().will(returnValue(static_cast<Api*>(&impl)));
+    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::LaunchDqsTask).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+
+    rtDqsTaskCfg_t taskCfg = {};
+    taskCfg.type = RT_DQS_TASK_SCHED_CONFIG;
+    rtError_t ret = rtLaunchDqsTask(streamHandle_, &taskCfg);
+    EXPECT_NE(ret, ACL_RT_SUCCESS);
+}
+
+TEST_F(TaskTestV201, ApiImplV201_LaunchDqsTask)
+{
+    ApiImplV201 implV201;
+    MOCKER(DqsLaunchTask).stubs().will(returnValue(RT_ERROR_NONE));
+    rtDqsTaskCfg_t taskCfg = {};
+    taskCfg.type = RT_DQS_TASK_SCHED_CONFIG;
+    rtError_t ret = implV201.LaunchDqsTask(stream_, &taskCfg);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTestV201, ApiImplV201_EventRecord_ExternalNotSupport)
+{
+    ApiImplV201 implV201;
+    Event evt;
+    rtError_t ret = implV201.EventRecord(&evt, stream_, RT_EVENT_RECORD_EXTERNAL);
+    EXPECT_EQ(ret, RT_ERROR_FEATURE_NOT_SUPPORT);
+}
+
+TEST_F(TaskTestV201, ApiImplV201_EventRecord_DefaultFlag)
+{
+    ApiImplV201 implV201;
+    rtEvent_t eventHandle = nullptr;
+    rtError_t createRet = rtEventCreate(&eventHandle);
+    ASSERT_EQ(createRet, RT_ERROR_NONE);
+    Event* evt = rt_ut::UnwrapOrNull<Event>(eventHandle);
+    ASSERT_NE(evt, nullptr);
+    MOCKER_CPP(&ApiImpl::CurrentContext).stubs().will(returnValue(static_cast<Context*>(nullptr)));
+    rtError_t ret = implV201.EventRecord(evt, stream_, RT_EVENT_RECORD_DEFAULT);
+    EXPECT_EQ(ret, RT_ERROR_CONTEXT_NULL);
+    rtEventDestroy(eventHandle);
+}
+
+TEST_F(TaskTestV201, ApiImplV201_StreamWaitEvent_ExternalNotSupport)
+{
+    ApiImplV201 implV201;
+    Event evt;
+    rtError_t ret = implV201.StreamWaitEvent(stream_, &evt, 0U, RT_EVENT_WAIT_EXTERNAL);
+    EXPECT_EQ(ret, RT_ERROR_FEATURE_NOT_SUPPORT);
+}
+
+TEST_F(TaskTestV201, ApiImplV201_StreamWaitEvent_DefaultFlag)
+{
+    ApiImplV201 implV201;
+    rtEvent_t eventHandle = nullptr;
+    rtError_t createRet = rtEventCreate(&eventHandle);
+    ASSERT_EQ(createRet, RT_ERROR_NONE);
+    Event* evt = rt_ut::UnwrapOrNull<Event>(eventHandle);
+    ASSERT_NE(evt, nullptr);
+    MOCKER_CPP(&ApiImpl::CurrentContext).stubs().will(returnValue(static_cast<Context*>(nullptr)));
+    rtError_t ret = implV201.StreamWaitEvent(stream_, evt, 0U, RT_EVENT_WAIT_DEFAULT);
+    EXPECT_EQ(ret, RT_ERROR_CONTEXT_NULL);
+    rtEventDestroy(eventHandle);
+}
+
+TEST_F(TaskTestV201, CheckKernelMemoryCorruption_V201_AllNull)
+{
+    EXPECT_NO_THROW(CheckKernelMemoryCorruption(nullptr, nullptr, 0, nullptr));
+}
+
+TEST_F(TaskTestV201, ConstructDavidAsyncUbDbSqe_AllNull)
+{
+    EXPECT_NO_THROW(ConstructDavidAsyncUbDbSqe(nullptr, nullptr));
+}
+
+TEST_F(TaskTestV201, GetStreamTaskInfo_NullDev)
+{
+    TaskInfo* result = GetStreamTaskInfo(nullptr, 0, 0);
+    EXPECT_EQ(result, nullptr);
+}
+
+TEST_F(TaskTestV201, GetStreamTaskInfo_NullStream)
+{
+    TaskInfo* result = GetStreamTaskInfo(device_, 999, 0);
+    EXPECT_EQ(result, nullptr);
+}

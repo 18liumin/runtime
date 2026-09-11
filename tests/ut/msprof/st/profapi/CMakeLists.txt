@@ -15,10 +15,10 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/common/platform/platform.cpp
     ${MSPROF_SOURCE_DIR}/basic/osal/osal.c
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dev_api.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/msprof_drv_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_acl_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_tx_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_plugin.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_atls_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_cann_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_runtime_plugin.cpp 
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_inner_api.cpp
@@ -77,7 +77,7 @@ target_compile_options(prof_api_stest PRIVATE
     -g
     -pipe
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Werror
 )
@@ -146,7 +146,7 @@ target_compile_options(prof_api_c_stest PRIVATE
     -g
     -pipe
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Werror
 )

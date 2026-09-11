@@ -11,6 +11,12 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  *
  */
+
+/**
+ * This header file is not part of the public API. Compatibility is not guaranteed,
+ * and it will be deprecated in future versions.
+ */
+
 #ifndef DEVPROF_PUB_H
 #define DEVPROF_PUB_H
 
@@ -77,7 +83,7 @@ MSVP_PROF_API int32_t AdprofAicpuStartRegister(AicpuStartFunc aicpuStartCallback
  * @name  AdprofReportAdditionalInfo
  * @brief aicpu report profiling data func
  * @param[in] agingFlag  0 isn't aging, !0 is aging
- * @param[in] data       profiling data of additional infomation
+ * @param[in] data       profiling data of additional information
  * @param[in] length     length of profiling data
  * @return 0:SUCCESS, !0:FAILED
  */
@@ -88,7 +94,7 @@ MSVP_PROF_API int32_t AdprofReportAdditionalInfo(uint32_t nonPersistantFlag, con
  * @name  AdprofReportBatchAdditionalInfo
  * @brief aicpu report batch profiling data func
  * @param[in] agingFlag  0 isn't aging, !0 is aging
- * @param[in] data       profiling data of additional infomation
+ * @param[in] data       profiling data of additional information
  * @param[in] length     length of profiling data
  * @return 0:SUCCESS, !0:FAILED
  */
@@ -107,8 +113,8 @@ MSVP_PROF_API size_t AdprofGetBatchReportMaxSize(uint32_t type);
  * @ingroup libascend_devprof
  * @name  AdprofStr2Id
  * @brief return hash id of hash info
- * @param[in] hashInfo  infomation to be hashed
- * @param[in] length    the length of infomation to be hashed
+ * @param[in] hashInfo  information to be hashed
+ * @param[in] length    the length of information to be hashed
  * @return hash id
  */
 MSVP_PROF_API uint64_t AdprofStr2Id(const char *hashInfo, size_t length);

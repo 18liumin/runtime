@@ -8,11 +8,12 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 set(msProfHeader
-    ${RUNTIME_DIR}/src/dfx/error_manager
     ${RUNTIME_DIR}/include/external
     ${RUNTIME_DIR}/include/external/acl
     ${RUNTIME_DIR}/src/inc
     ${RUNTIME_DIR}/src/inc/external
+    ${RUNTIME_DIR}/pkg_inc/runtime
+    ${RUNTIME_DIR}/pkg_inc/runtime/runtime
     ${LIBC_SEC_HEADER}
     ../common
     ../common/logger
@@ -36,12 +37,14 @@ set(profApiCpp
     src/prof_impl_inner_api.cpp
     src/prof_plugin_manager.cpp
     src/prof_cann_plugin.cpp
-    src/prof_atls_plugin.cpp
     src/prof_plugin.cpp
     src/prof_tx_plugin.cpp
     src/prof_acl_plugin.cpp
     src/prof_runtime_plugin.cpp
     src/prof_mstx_plugin.cpp
+    ../common/cmd_log/cmd_log.cpp
+    ../common/utils/utils.cpp
+    ${PROF_BASIC_DIR}/osal/osal.c
 )
 
 ####################### libprofapi static lib for windows  begin ###########################
@@ -121,10 +124,11 @@ set_target_properties(profapi_share
 target_compile_options(profapi_share PRIVATE
     -fstack-protector-all
     -fvisibility=hidden
-    -fvisibility-inlines-hidden
+    $<$<COMPILE_LANGUAGE:CXX>:-fvisibility-inlines-hidden>
     -fno-common
     -Wall
-    -std=c++11
+    $<$<COMPILE_LANGUAGE:CXX>:-std=c++11>
+    $<$<COMPILE_LANGUAGE:C>:-std=c11>
     -Wextra
     -Wfloat-equal
     $<$<CONFIG:Release>:-D_FORTIFY_SOURCE=2 -Os>
@@ -146,6 +150,7 @@ target_link_libraries(profapi_share
         intf_pub
         mmpa_headers
         slog_headers
+        $<BUILD_INTERFACE:error_manager_headers>
         -Wl,--no-as-needed
         mmpa
         alog
@@ -154,6 +159,8 @@ target_link_libraries(profapi_share
     PUBLIC
         msprof_headers
 )
+
+add_library(profapi ALIAS profapi_share)
 ####################### libprofapi.so ###########################
 
 ####################### libprofapi_lite.so ###########################
@@ -186,6 +193,8 @@ target_compile_options(profapi_lite_share PRIVATE
     -Wextra
     -Wfloat-equal
     -fno-common
+    $<$<CONFIG:Release>:-D_FORTIFY_SOURCE=2 -Os>
+    $<$<CONFIG:Debug>:-D_FORTIFY_SOURCE=2 -Os>
 )
 
 target_link_options(profapi_lite_share PRIVATE
@@ -216,49 +225,51 @@ install(TARGETS profapi_lite_share OPTIONAL
 
 ####################### libprofapi_lite.so ###########################
 ####################### libprofapi.so device side ###########################
-# add_library(profapi_share_device SHARED
-#     src/prof_device_api.cpp
-# )
+if (NOT ENABLE_OPEN_SRC AND NOT BUILD_PROFILING_OPEN_PROJECT)
+    add_library(profapi_share_device SHARED
+        src/prof_device_api.cpp
+    )
 
-# set_target_properties(profapi_share_device
-#     PROPERTIES
-#     OUTPUT_NAME profapi
-#     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/
-# )
+    set_target_properties(profapi_share_device
+        PROPERTIES
+        OUTPUT_NAME profapi
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/
+    )
 
-# target_compile_options(profapi_share_device PRIVATE
-#     -fstack-protector-all
-#     -fvisibility=hidden
-#     -fvisibility-inlines-hidden
-#     -fno-common
-#     -Wall
-#     -std=c++11
-#     -Wextra
-#     -Wfloat-equal
-#     $<$<CONFIG:Release>:-D_FORTIFY_SOURCE=2 -Os>
-#     $<$<CONFIG:Debug>:-D_FORTIFY_SOURCE=2 -Os>
-# )
+    target_compile_options(profapi_share_device PRIVATE
+        -fstack-protector-all
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden
+        -fno-common
+        -Wall
+        -std=c++11
+        -Wextra
+        -Wfloat-equal
+        $<$<CONFIG:Release>:-D_FORTIFY_SOURCE=2 -Os>
+        $<$<CONFIG:Debug>:-D_FORTIFY_SOURCE=2 -Os>
+    )
 
-# target_link_options(profapi_share_device PRIVATE
-#     -Wl,-z,relro,-z,now,-z,noexecstack
-#     -Wl,-Bsymbolic
-#     -Wl,--exclude-libs=ALL
-# )
+    target_link_options(profapi_share_device PRIVATE
+        -Wl,-z,relro,-z,now,-z,noexecstack
+        -Wl,-Bsymbolic
+        -Wl,--exclude-libs=ALL
+    )
 
-# target_include_directories(profapi_share_device PRIVATE
-#     inc
-#     ../common
-#     ../common/logger
-#     ../common/errno
-#     ${RUNTIME_DIR}/abl/msprof/inc/toolchain
-# )
+    target_include_directories(profapi_share_device PRIVATE
+        inc
+        ../common
+        ../common/logger
+        ../common/errno
+        ${RUNTIME_DIR}/abl/msprof/inc/toolchain
+    )
 
-# target_link_libraries(profapi_share_device
-#     $<BUILD_INTERFACE:intf_pub>
-#     $<BUILD_INTERFACE:slog_headers>
-#     $<BUILD_INTERFACE:msprof_headers>
-#     c_sec
-#     unified_dlog
-# )
+    target_link_libraries(profapi_share_device
+        $<BUILD_INTERFACE:intf_pub>
+        $<BUILD_INTERFACE:slog_headers>
+        $<BUILD_INTERFACE:msprof_headers>
+        c_sec
+        unified_dlog
+    )
+endif()
 ####################### libprofapi.so device side  ###########################
 endif()

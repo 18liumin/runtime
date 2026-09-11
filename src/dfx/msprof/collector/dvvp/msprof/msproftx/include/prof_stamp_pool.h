@@ -26,6 +26,7 @@ constexpr uint32_t CURRENT_STAMP_SIZE = 100;
 
 struct MsprofStampInstance {
     MsprofTxInfo txInfo;
+    int8_t isEnable;
     int32_t id;
     struct MsprofStampInstance* next;
     struct MsprofStampInstance* prev;
@@ -63,12 +64,12 @@ public:
     int32_t GetIdByStamp(const MsprofStampInstance* const stamp) const;
 
 private:
-    std::vector<MsprofStampInstance *> singleTStack_;
+    std::vector<MsprofStampInstance*> singleTStack_;
     std::mutex singleTStackMtx_;
     std::mutex memoryListMtx_;
 };
 
-}
-}
+} // namespace MsprofTx
+} // namespace Msprof
 
 #endif // PROF_STAMP_POOL_H

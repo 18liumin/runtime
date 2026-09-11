@@ -15,40 +15,25 @@
 
 #include "base.h"
 #include "event.h"
+#include "runtime/rt_external_stream.h"
+#include "runtime/rt_external_model.h"
 
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
-/**
- * @ingroup stream_flags
- * @brief stream op bit flags
- */
-#define RT_STREAM_DEFAULT (0x00U)
-#define RT_STREAM_PERSISTENT (0x01U)
-#define RT_STREAM_FORCE_COPY (0x02U)
-#define RT_STREAM_HUGE (0x04U)
-#define RT_STREAM_AICPU (0x08U)
-#define RT_STREAM_CPU_SCHEDULE (0x08U)
-#define RT_STREAM_FORBIDDEN_DEFAULT (0x10U)
-#define RT_STREAM_HEAD (0x20U)
-#define RT_STREAM_PRIMARY_DEFAULT (0x40U)
-#define RT_STREAM_PRIMARY_FIRST_DEFAULT (0x80U)
-#define RT_STREAM_OVERFLOW (0x100U)
+RT_RUNTIME_DEPRECATED_DECLS_BEGIN
+
 #define RT_STREAM_FAST_LAUNCH (0x200U)
-#define RT_STREAM_FAST_SYNC   (0x400U)
+#define RT_STREAM_FAST_SYNC (0x400U)
 #define RT_STREAM_CP_PROCESS_USE (0x800U) // RT_STREAM_CP_PROCESS_USE does not support OR with other flags
-#define RT_STREAM_VECTOR_CORE_USE (0x1000U)
-#define RT_STREAM_ACSQ_LOCK (0x2000U)
-#define RT_STREAM_DQS_CTRL (0x4000U)
-#define RT_STREAM_DQS_INTER_CHIP (0x8000U)
 
 /**
  * @ingroup stream_config
  * @brief stream config params
  */
 typedef struct TagStreamConfigHandle {
-    void *workPtr;
+    void* workPtr;
     size_t workSize;
     size_t flag;
     uint32_t priority;
@@ -60,41 +45,18 @@ typedef enum tagRtClearStep {
 } rtClearStep_t;
 
 /**
- * @ingroup stream_capture_mode
- * @brief stream capture mode
- */
-typedef enum tagRtStreamCaptureMode {
-    RT_STREAM_CAPTURE_MODE_GLOBAL       = 0,
-    RT_STREAM_CAPTURE_MODE_THREAD_LOCAL = 1,
-    RT_STREAM_CAPTURE_MODE_RELAXED      = 2,
-
-    RT_STREAM_CAPTURE_MODE_MAX
-} rtStreamCaptureMode;
-
-/**
  * @ingroup stream_capture_status
  * @brief stream capture status
  */
 typedef enum tagRtStreamCaptureStatus {
-    RT_STREAM_CAPTURE_STATUS_NONE        = 0, /* The stream is not capturing */
-    RT_STREAM_CAPTURE_STATUS_ACTIVE      = 1, /* The stream is capturing */
-    RT_STREAM_CAPTURE_STATUS_INVALIDATED = 2, /* The stream was capturing but an error has invalidated the capture sequence. 
-                                                 The capture sequence must be terminated with rtStreamEndCapture on the stream. */
+    RT_STREAM_CAPTURE_STATUS_NONE = 0,   /* The stream is not capturing */
+    RT_STREAM_CAPTURE_STATUS_ACTIVE = 1, /* The stream is capturing */
+    RT_STREAM_CAPTURE_STATUS_INVALIDATED =
+        2,                               /* The stream was capturing but an error has invalidated the capture sequence.
+                                            The capture sequence must be terminated with rtStreamEndCapture on the stream. */
 
     RT_STREAM_CAPTURE_STATUS_MAX
 } rtStreamCaptureStatus;
-
-/**
- * @ingroup stream_type
- * @brief stream type
- */
-#define RT_NORMAL_STREAM    (0x00U)
-#define RT_HUGE_STREAM      (0x01U)
-
-/**
- * priority level default value when create a stream
- */
-#define RT_STREAM_PRIORITY_DEFAULT (0U)
 
 #define RT_MAX_MODELS_IN_ONE_STREAM (256)
 
@@ -106,7 +68,8 @@ typedef enum tagRtStreamCaptureStatus {
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamCreate(rtStream_t *stm, int32_t priority);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamCreate(rtStream_t* stm, int32_t priority);
 
 /**
  * @ingroup dvrt_stream
@@ -117,18 +80,8 @@ RTS_API rtError_t rtStreamCreate(rtStream_t *stm, int32_t priority);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamCreateWithFlagsExternal(rtStream_t *stm, int32_t priority, uint32_t flags);
-
-/**
- * @ingroup dvrt_stream
- * @brief create stream instance
- * @param [in|out] stm   created stream
- * @param [in] priority   stream priority
- * @param [in] flags  stream op flags
- * @return RT_ERROR_NONE for ok
- * @return RT_ERROR_INVALID_VALUE for error input
- */
-RTS_API rtError_t rtStreamCreateWithFlags(rtStream_t *stm, int32_t priority, uint32_t flags);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamCreateWithFlagsExternal(rtStream_t* stm, int32_t priority, uint32_t flags);
 
 /**
  * @ingroup dvrt_stream
@@ -138,7 +91,8 @@ RTS_API rtError_t rtStreamCreateWithFlags(rtStream_t *stm, int32_t priority, uin
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamCreateWithConfig(rtStream_t *stm, rtStreamConfigHandle *handle);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamCreateWithConfig(rtStream_t* stm, rtStreamConfigHandle* handle);
 
 /**
  * @ingroup dvrt_stream
@@ -148,7 +102,8 @@ RTS_API rtError_t rtStreamCreateWithConfig(rtStream_t *stm, rtStreamConfigHandle
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamGetPriority(const rtStream_t stm, uint32_t *priority);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamGetPriority(const rtStream_t stm, uint32_t* priority);
 
 /**
  * @ingroup dvrt_stream
@@ -158,40 +113,8 @@ RTS_API rtError_t rtStreamGetPriority(const rtStream_t stm, uint32_t *priority);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamGetFlags(const rtStream_t stm, uint32_t *flags);
-
-
-/**
- * @ingroup dvrt_stream
- * @brief create stream instance
- * @param [in] stm   stream hadle
- * @param [out] sqId   stream op sqId
- * @return RT_ERROR_NONE for ok
- * @return RT_ERROR_INVALID_VALUE for error input
- */
-RTS_API rtError_t rtStreamGetSqid(const rtStream_t stm, uint32_t *sqId);
-
-/**
- * @ingroup dvrt_stream
- * @brief get stream cq info
- * @param [in] stm   stream hadle
- * @param [out] sqId   stream op cqId
- * @param [out] cqId   stream op logic cqId
- * @return RT_ERROR_NONE for ok
- * @return RT_ERROR_INVALID_VALUE for error input
- */
-RTS_API rtError_t rtStreamGetCqid(const rtStream_t stm, uint32_t *cqId, uint32_t *logicCqId);
-
-/**
- * @ingroup dvrt_stream
- * @brief create stream instance
- * @param [in] stm   stream hadle
- * @param [out] workaddr   workaddr on stream
- * @param [out] worksize   worksize on stream
- * @return RT_ERROR_NONE for ok
- * @return RT_ERROR_INVALID_VALUE for error input
- */
-RTS_API rtError_t rtStreamGetWorkspace(const rtStream_t stm, void **workaddr, size_t *worksize);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamGetFlags(const rtStream_t stm, uint32_t* flags);
 
 /**
  * @ingroup dvrt_stream
@@ -200,7 +123,7 @@ RTS_API rtError_t rtStreamGetWorkspace(const rtStream_t stm, void **workaddr, si
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamDestroy(rtStream_t stm);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtStreamDestroy(rtStream_t stm);
 
 /**
  * @ingroup dvrt_stream
@@ -209,7 +132,7 @@ RTS_API rtError_t rtStreamDestroy(rtStream_t stm);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamDestroyForce(rtStream_t stm);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtStreamDestroyForce(rtStream_t stm);
 
 /**
  * @ingroup dvrt_stream
@@ -219,7 +142,7 @@ RTS_API rtError_t rtStreamDestroyForce(rtStream_t stm);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamWaitEvent(rtStream_t stm, rtEvent_t evt);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtStreamWaitEvent(rtStream_t stm, rtEvent_t evt);
 
 /**
  * @ingroup dvrt_stream
@@ -230,7 +153,8 @@ RTS_API rtError_t rtStreamWaitEvent(rtStream_t stm, rtEvent_t evt);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamWaitEventWithTimeout(rtStream_t stm, rtEvent_t evt, uint32_t timeout);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamWaitEventWithTimeout(rtStream_t stm, rtEvent_t evt, uint32_t timeout);
 
 /**
  * @ingroup dvrt_stream
@@ -239,7 +163,7 @@ RTS_API rtError_t rtStreamWaitEventWithTimeout(rtStream_t stm, rtEvent_t evt, ui
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamSynchronize(rtStream_t stm);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtStreamSynchronize(rtStream_t stm);
 
 /**
  * @ingroup dvrt_stream
@@ -249,7 +173,8 @@ RTS_API rtError_t rtStreamSynchronize(rtStream_t stm);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamSynchronizeWithTimeout(rtStream_t stm, int32_t timeout);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamSynchronizeWithTimeout(rtStream_t stm, int32_t timeout);
 
 /**
  * @ingroup dvrt_stream
@@ -258,7 +183,7 @@ RTS_API rtError_t rtStreamSynchronizeWithTimeout(rtStream_t stm, int32_t timeout
  * @return RT_ERROR_NONE for complete
  * @return RT_ERROR_STREAM_NOT_COMPLETE for not complete
  */
-RTS_API rtError_t rtStreamQuery(rtStream_t stm);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtStreamQuery(rtStream_t stm);
 
 /**
  * @ingroup dvrt_stream
@@ -268,37 +193,27 @@ RTS_API rtError_t rtStreamQuery(rtStream_t stm);
  * @return RT_ERROR_NONE for complete
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtGetStreamId(rtStream_t stm, int32_t *streamId);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtGetStreamId(rtStream_t stm, int32_t* streamId);
 
 /**
  * @ingroup dvrt_stream
- * @brief inquire max stream count and max task count per stream
+ * @brief inquire available stream count
  * @param [in] streamType   Stream Type
- * @param [in] MaxStrCount   Max stream count
- * @param [in] MaxTaskCount   max task count per stream
+ * @param [out] streamCount  available streamCount
  * @return RT_ERROR_NONE for complete
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtGetMaxStreamAndTask(uint32_t streamType, uint32_t *maxStrCount, uint32_t *maxTaskCount);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtGetAvailStreamNum(const uint32_t streamType, uint32_t* const streamCount);
 
 /**
  * @ingroup dvrt_stream
- * @brief inquire avaliable stream count
- * @param [in] streamType   Stream Type
- * @param [out] streamCount  avaliable streamCount
+ * @brief inquire available event count
+ * @param [out] eventCount  available event Count
  * @return RT_ERROR_NONE for complete
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtGetAvailStreamNum(const uint32_t streamType, uint32_t * const streamCount);
-
-/**
- * @ingroup dvrt_stream
- * @brief inquire avaliable event count
- * @param [out] eventCount  avaliable event Count
- * @return RT_ERROR_NONE for complete
- * @return RT_ERROR_INVALID_VALUE for error input
- */
-rtError_t rtGetAvailEventNum(uint32_t * const eventCount);
+RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtGetAvailEventNum(uint32_t* const eventCount);
 
 /**
  * @ingroup dvrt_stream
@@ -308,7 +223,7 @@ rtError_t rtGetAvailEventNum(uint32_t * const eventCount);
  * @return RT_ERROR_NONE for complete
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtNameStream(rtStream_t stm, const char_t *name);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtNameStream(rtStream_t stm, const char_t* name);
 
 /**
  * @brief execute extensible stream switch task
@@ -320,8 +235,9 @@ RTS_API rtError_t rtNameStream(rtStream_t stm, const char_t *name);
  * @param [in] dataType   data type of target value
  * @return RT_ERROR_NONE for complete
  */
-RTS_API rtError_t rtStreamSwitchEx(void *ptr, rtCondition_t condition, void *valuePtr, rtStream_t trueStream,
-                                   rtStream_t stm, rtSwitchDataType_t dataType);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtStreamSwitchEx(
+    void* ptr, rtCondition_t condition, void* valuePtr, rtStream_t trueStream, rtStream_t stm,
+    rtSwitchDataType_t dataType);
 
 /**
  * @ingroup dvrt_stream
@@ -331,7 +247,8 @@ RTS_API rtError_t rtStreamSwitchEx(void *ptr, rtCondition_t condition, void *val
  * @return RT_ERROR_NONE for complete
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamActive(rtStream_t activeStream, rtStream_t stm);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamActive(rtStream_t activeStream, rtStream_t stm);
 
 /**
  * @brief execute extensible stream case switch task
@@ -344,29 +261,9 @@ RTS_API rtError_t rtStreamActive(rtStream_t activeStream, rtStream_t stm);
  * @param [in] dataType   data type of target value
  * @return RT_ERROR_NONE for complete
  */
-RTS_API rtError_t rtStreamSwitchN(void *ptr, uint32_t size, void *valuePtr, rtStream_t *trueStreamPtr,
-                                  uint32_t elementSize, rtStream_t stm, rtSwitchDataType_t dataType);
-
-/*
- * @ingroup dvrt_stream
- * @brief enable debug for dump overflow exception with stream
- * @param [in] addr: ddr address of kernel exception dumpped
- * @param [in] stm: stream handle
- * @param [in] flag: debug flag
- * @return RT_ERROR_NONE for ok
- * @return RT_ERROR_INVALID_VALUE for error input
- */
-RTS_API rtError_t rtDebugRegisterForStream(rtStream_t stm, uint32_t flag, const void *addr,
-                                           uint32_t *streamId, uint32_t *taskId);
-
-/*
- * @ingroup rt_model
- * @brief disable debug for dump overflow exception with stream
- * @param [in] stm: stream handle
- * @return RT_ERROR_NONE for ok
- * @return RT_ERROR_INVALID_VALUE for error input
- */
-RTS_API rtError_t rtDebugUnRegisterForStream(rtStream_t stm);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtStreamSwitchN(
+    void* ptr, uint32_t size, void* valuePtr, rtStream_t* trueStreamPtr, uint32_t elementSize, rtStream_t stm,
+    rtSwitchDataType_t dataType);
 
 /*
  * @ingroup dvrt_stream
@@ -376,7 +273,8 @@ RTS_API rtError_t rtDebugUnRegisterForStream(rtStream_t stm);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtSetStreamOverflowSwitch(rtStream_t stm, uint32_t flags);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtSetStreamOverflowSwitch(rtStream_t stm, uint32_t flags);
 
 /*
  * @ingroup dvrt_stream
@@ -386,7 +284,8 @@ RTS_API rtError_t rtSetStreamOverflowSwitch(rtStream_t stm, uint32_t flags);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtGetStreamOverflowSwitch(rtStream_t stm, uint32_t *flags);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtGetStreamOverflowSwitch(rtStream_t stm, uint32_t* flags);
 
 /*
  * @ingroup dvrt_stream
@@ -396,7 +295,8 @@ RTS_API rtError_t rtGetStreamOverflowSwitch(rtStream_t stm, uint32_t *flags);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtGetStreamTag(rtStream_t stm, uint32_t *geOpTag);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtGetStreamTag(rtStream_t stm, uint32_t* geOpTag);
 
 /**
  * @ingroup dvrt_stream
@@ -405,7 +305,8 @@ RTS_API rtError_t rtGetStreamTag(rtStream_t stm, uint32_t *geOpTag);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamClear(rtStream_t stm, rtClearStep_t step);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamClear(rtStream_t stm, rtClearStep_t step);
 
 /**
  * @ingroup dvrt_stream
@@ -414,7 +315,7 @@ RTS_API rtError_t rtStreamClear(rtStream_t stm, rtClearStep_t step);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamTaskClean(rtStream_t stm);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtStreamTaskClean(rtStream_t stm);
 
 /**
  * @ingroup dvrt_stream
@@ -423,7 +324,7 @@ RTS_API rtError_t rtStreamTaskClean(rtStream_t stm);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtCtxGetCurrentDefaultStream(rtStream_t *stm);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtCtxGetCurrentDefaultStream(rtStream_t* stm);
 
 /**
  * @ingroup dvrt_stream
@@ -433,7 +334,8 @@ RTS_API rtError_t rtCtxGetCurrentDefaultStream(rtStream_t *stm);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtRegStreamStateCallback(const char_t *regName, const rtStreamStateCallback callback);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtRegStreamStateCallback(const char_t* regName, const rtStreamStateCallback callback);
 
 /**
  * @ingroup dvrt_stream
@@ -442,7 +344,7 @@ RTS_API rtError_t rtRegStreamStateCallback(const char_t *regName, const rtStream
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamAbort(rtStream_t stm);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtStreamAbort(rtStream_t stm);
 
 /**
  * @ingroup dvrt_stream
@@ -452,7 +354,8 @@ RTS_API rtError_t rtStreamAbort(rtStream_t stm);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamBeginCapture(rtStream_t stm, const rtStreamCaptureMode mode);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamBeginCapture(rtStream_t stm, const rtStreamCaptureMode mode);
 
 /**
  * @ingroup dvrt_stream
@@ -462,7 +365,8 @@ RTS_API rtError_t rtStreamBeginCapture(rtStream_t stm, const rtStreamCaptureMode
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamEndCapture(rtStream_t stm, rtModel_t *captureMdl);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamEndCapture(rtStream_t stm, rtModel_t* captureMdl);
 
 /**
  * @ingroup dvrt_stream
@@ -473,8 +377,8 @@ RTS_API rtError_t rtStreamEndCapture(rtStream_t stm, rtModel_t *captureMdl);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtStreamGetCaptureInfo(rtStream_t stm, rtStreamCaptureStatus * const status,
-                                         rtModel_t *captureMdl);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtStreamGetCaptureInfo(rtStream_t stm, rtStreamCaptureStatus* const status, rtModel_t* captureMdl);
 
 /**
  * @ingroup dvrt_stream
@@ -484,10 +388,12 @@ RTS_API rtError_t rtStreamGetCaptureInfo(rtStream_t stm, rtStreamCaptureStatus *
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtThreadExchangeCaptureMode(rtStreamCaptureMode *mode);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtThreadExchangeCaptureMode(rtStreamCaptureMode* mode);
 
+RT_RUNTIME_DEPRECATED_DECLS_END
 #if defined(__cplusplus)
 }
 #endif
 
-#endif  // CCE_RUNTIME_STREAM_H
+#endif // CCE_RUNTIME_STREAM_H

@@ -23,11 +23,12 @@ typedef struct AwdWatchDog {
 typedef struct AwdWatchdogMgr {
     AwdWatchDog awd[AWD_WATCHDOG_TYPE_MAX];
     bool enable; // watchdog feature is support on current platform or not
-    bool monitorStarted;  // monitor thread start or not
+    // Monitor thread starts lazily on first AwdWatchdogCreate, and failed start can retry.
+    bool monitorStarted;
 } AwdWatchdogMgr;
 
-AwdThreadWatchdog *AwdWatchdogCreate(uint32_t dogId, uint32_t timeout, AwatchdogCallbackFunc callback,
-    enum AwdWatchdogType type);
+AwdThreadWatchdog* AwdWatchdogCreate(
+    uint32_t dogId, uint32_t timeout, AwatchdogCallbackFunc callback, enum AwdWatchdogType type);
 struct AwdWatchDog* AwdGetWatchDog(enum AwdWatchdogType type);
 
 #endif

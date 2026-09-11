@@ -18,9 +18,9 @@ endif()
 
 add_library(mmpa_headers INTERFACE)
 target_include_directories(mmpa_headers INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/inc>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/inc/mmpa>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/inc/mmpa/sub_inc>
+    $<BUILD_INTERFACE:${MMPA_DIR}/../../pkg_inc>
+    $<BUILD_INTERFACE:${MMPA_DIR}/../../pkg_inc/mmpa>
+    $<BUILD_INTERFACE:${MMPA_DIR}/../../pkg_inc/mmpa/sub_inc>
     $<INSTALL_INTERFACE:include>
     $<INSTALL_INTERFACE:include/mmpa>
     $<INSTALL_INTERFACE:include/mmpa/sub_inc>
@@ -47,16 +47,17 @@ add_library(mmpa SHARED
     $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:src/mmpa_win_message.cpp>
     $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:src/mmpa_win_option.cpp>
 )
-target_include_directories(mmpa PRIVATE
-    ${LIBC_SEC_HEADER}
-)
 target_link_libraries(mmpa
     PRIVATE
         intf_pub
+        $<BUILD_INTERFACE:c_sec_headers>
         c_sec
         "$<$<STREQUAL:${TARGET_SYSTEM_NAME},Linux>:dl;rt>"
     PUBLIC
         mmpa_headers
+)
+target_link_options(mmpa PRIVATE
+    $<$<OR:$<STREQUAL:${TARGET_SYSTEM_NAME},Linux>,$<STREQUAL:${TARGET_SYSTEM_NAME},Android>>:-Wl,-z,relro,-z,now>
 )
 target_compile_options(mmpa PRIVATE
     $<$<STREQUAL:${TARGET_SYSTEM_NAME},Linux>:-fvisibility=hidden>
@@ -96,9 +97,6 @@ add_library(static_mmpa  STATIC
     $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:src/mmpa_win_message.cpp>
     $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:src/mmpa_win_option.cpp>
 )
-target_include_directories(static_mmpa PRIVATE
-${LIBC_SEC_HEADER}
-)
 target_compile_definitions(static_mmpa PRIVATE
     $<IF:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>,OS_TYPE=WIN,OS_TYPE=0>
     $<$<STREQUAL:${PRODUCT},ascend035>:STRERROR_R_RETURN_INT>
@@ -112,6 +110,7 @@ target_compile_options(static_mmpa PRIVATE
 target_link_libraries(static_mmpa
     PRIVATE
         $<BUILD_INTERFACE:intf_pub>
+        $<BUILD_INTERFACE:c_sec_headers>
     PUBLIC
         mmpa_headers
 )
@@ -119,16 +118,22 @@ set_target_properties(static_mmpa PROPERTIES
     ARCHIVE_OUTPUT_NAME $<IF:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>,libstatic_mmpa,mmpa>
 )
 
-install_package(
-    PACKAGE mmpa
-    TARGETS mmpa static_mmpa mmpa_headers
-    FILES   ${MMPA_DIR}/inc/mmpa/mmpa_api.h
-    DESTINATION ${INSTALL_INCLUDE_DIR}/mmpa
-    FILES   ${MMPA_DIR}/inc/mmpa/sub_inc/mmpa_linux.h
-            ${MMPA_DIR}/inc/mmpa/sub_inc/mmpa_typedef_linux.h
-            ${MMPA_DIR}/inc/mmpa/sub_inc/mmpa_env_define.h
-    DESTINATION ${INSTALL_INCLUDE_DIR}/mmpa/sub_inc
-)
+if(PRODUCT_SIDE STREQUAL "host" OR NOT ENABLE_OPEN_SRC)
+    install_package(
+        PACKAGE mmpa
+        TARGETS mmpa static_mmpa mmpa_headers
+        FILES   ${MMPA_DIR}/../../pkg_inc/mmpa/mmpa_api.h
+        DESTINATION ${INSTALL_INCLUDE_DIR}/mmpa
+        FILES   ${MMPA_DIR}/../../pkg_inc/mmpa/sub_inc/mmpa_linux.h
+                ${MMPA_DIR}/../../pkg_inc/mmpa/sub_inc/mmpa_typedef_linux.h
+                ${MMPA_DIR}/../../pkg_inc/mmpa/sub_inc/mmpa_env_define.h
+        DESTINATION ${INSTALL_INCLUDE_DIR}/mmpa/sub_inc
+    )
+else()
+    install(TARGETS mmpa
+        DESTINATION ${DEVICE_LIBRARY_PATH} COMPONENT npu-runtime
+    )
+endif()
 
 if (WIN32)
     install(FILES $<TARGET_PDB_FILE:mmpa> DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL)

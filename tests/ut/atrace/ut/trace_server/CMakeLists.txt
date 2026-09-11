@@ -1,3 +1,13 @@
+# Ensure TOP_DIR and ATRACE_SOURCE_DIR are defined (may not be inherited in some CI environments)
+if(NOT DEFINED TOP_DIR)
+    set(TOP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../.." CACHE PATH "Project top directory")
+endif()
+
+if(NOT DEFINED ATRACE_SOURCE_DIR)
+    set(ADIAG_DIR ${TOP_DIR}/src/dfx/trace)
+    set(ATRACE_SOURCE_DIR ${ADIAG_DIR}/atrace)
+endif()
+
 set(UTRACE_SOURCE_DIR ${ATRACE_SOURCE_DIR}/utrace)
 ############################# libutrace.so(linux)   ###########################
 set(libutraceSrcFiles
@@ -19,17 +29,15 @@ set(libutraceSrcFiles
     ${UTRACE_SOURCE_DIR}/stacktrace/stacktrace_unwind_dfx.c
     ${UTRACE_SOURCE_DIR}/stacktrace/stacktrace_logger.c
     ${UTRACE_SOURCE_DIR}/stacktrace/stacktrace_dumper.c
+    ${UTRACE_SOURCE_DIR}/stacktrace/stacktrace_exec.c
     ${UTRACE_SOURCE_DIR}/stacktrace/stacktrace_monitor.c
     ${UTRACE_SOURCE_DIR}/stacktrace/stacktrace_dumper/scd_util.c
-    ${UTRACE_SOURCE_DIR}/stacktrace/dumper_process/dumper_core.c
-    ${UTRACE_SOURCE_DIR}/stacktrace/dumper_process/dumper_process.c
-    ${UTRACE_SOURCE_DIR}/stacktrace/dumper_process/dumper_thread.c
     ${UTRACE_SOURCE_DIR}/stacktrace/stacktrace_parse.c
     ${UTRACE_SOURCE_DIR}/utrace_client/utrace_socket.c
     ${UTRACE_SOURCE_DIR}/util/trace_driver_api.c
-    ${TOP_DIR}/abl/atrace/common/adiag_list.c
-    ${TOP_DIR}/abl/atrace/common/adiag_utils.c
-    ${TOP_DIR}/abl/atrace/common/adiag_lock.c
+    ${ADIAG_DIR}/common/adiag_list.c
+    ${ADIAG_DIR}/common/adiag_utils.c
+    ${ADIAG_DIR}/common/adiag_lock.c
     ${UTRACE_SOURCE_DIR}/ringbuffer/trace_rb_log.c
     ${UTRACE_SOURCE_DIR}/../utils/trace_load_library.c
     ${UTRACE_SOURCE_DIR}/../utils/trace_system_api.c
@@ -51,20 +59,17 @@ set(libutraceHeaderDir
     ${UTRACE_SOURCE_DIR}/ringbuffer
     ${UTRACE_SOURCE_DIR}/tracer
     ${UTRACE_SOURCE_DIR}/stacktrace
-    ${UTRACE_SOURCE_DIR}/stacktrace/dumper_process
     ${UTRACE_SOURCE_DIR}/stacktrace/stacktrace_dumper
     ${UTRACE_SOURCE_DIR}/util
     ${UTRACE_SOURCE_DIR}/include
     ${UTRACE_SOURCE_DIR}/../utils
     ${ADIAG_DIR}/inc/utrace
-    ${TOP_DIR}/abl/libc_sec/include
-    ${TOP_DIR}/inc/driver
-    ${TOP_DIR}/abl/adump/inc/adump
-    ${TOP_DIR}/abl/adump/external
-    ${TOP_DIR}/abl/atrace/common
+    ${LIBC_SEC_HEADER}
+    ${TOP_DIR}/pkg_inc/driver
+    ${ADIAG_DIR}/common
 )
- 
- 
+
+
 add_library(utrace_share_utest
     SHARED
         ${libutraceSrcFiles}
@@ -72,7 +77,7 @@ add_library(utrace_share_utest
  
 target_include_directories(utrace_share_utest
     PRIVATE
-        ${TOP_DIR}/abl/libc_sec/include
+        ${LIBC_SEC_HEADER}
         ${libutraceHeaderDir})
  
 target_compile_definitions(utrace_share_utest
@@ -156,8 +161,9 @@ set(SRC_FILE
     ${ATRACE_SOURCE_DIR}/trace_server/session_mgr/trace_node.c
     ${ATRACE_SOURCE_DIR}/trace_server/utrace_server/trace_server_socket.c
     ${ATRACE_SOURCE_DIR}/utils/trace_system_api.c
-    ${TOP_DIR}/abl/atrace/common/adiag_lock.c
-    ${TOP_DIR}/abl/atrace/common/adiag_list.c
+    ${ADIAG_DIR}/common/adiag_lock.c
+    ${ADIAG_DIR}/common/adiag_list.c
+    ${ADIAG_DIR}/common/adiag_utils.c
 )
 
 set(INCLUDE_DIR
@@ -173,14 +179,15 @@ set(INCLUDE_DIR
     ${ATRACE_SOURCE_DIR}/utrace
     ${UTRACE_SOURCE_DIR}/utrace_client
     ${ATRACE_SOURCE_DIR}/utils
-    ${TOP_DIR}/abl/libc_sec/include
-    ${TOP_DIR}/inc/driver
-    ${TOP_DIR}/abl/adump/inc/adump
-    ${TOP_DIR}/abl/adump/external
-    ${TOP_DIR}/abl/atrace/common
+    ${LIBC_SEC_HEADER}
+    ${TOP_DIR}/src/dfx/adump/inc/adump
+    ${TOP_DIR}/src/dfx/adump/external
+    ${TOP_DIR}/pkg_inc/driver
+    ${ADIAG_DIR}/common
 )
 
 set(TEST_SRC
+    testcase/main.cc
     testcase/trace_server_utest.cc
     testcase/trace_session_utest.cc
     testcase/trace_send_utest.cc
@@ -201,7 +208,7 @@ target_compile_options(trace_server_utest PRIVATE
     -g
     -Wall
     -Werror
-    -std=c++11
+    -include ${CMAKE_CURRENT_SOURCE_DIR}/../stub/ascend_hal_stub.h
 )
 
 target_compile_definitions(trace_server_utest PRIVATE
@@ -222,7 +229,9 @@ target_link_libraries(trace_server_utest PRIVATE
     $<BUILD_INTERFACE:intf_llt_pub>
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:mmpa_headers>
+    $<BUILD_INTERFACE:adump_headers>
     c_sec
+    dl
     utrace_share_utest
 )
 
@@ -232,7 +241,9 @@ set_target_properties(trace_server_utest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-run_llt_test(
-    TARGET trace_server_utest
-    TASK_NUM 1
-)
+if(COMMAND run_llt_test)
+    run_llt_test(
+        TARGET trace_server_utest
+        TASK_NUM 1
+    )
+endif()

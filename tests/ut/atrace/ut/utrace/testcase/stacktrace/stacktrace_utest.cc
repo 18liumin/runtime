@@ -18,7 +18,7 @@
 #include <sys/ptrace.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
-#include "dumper_core.h"
+#include "stacktrace_exec.h"
 #include "tracer_core.h"
 #include "adiag_utils.h"
 #include "stacktrace_dumper.h"
@@ -27,44 +27,30 @@
 #include "stacktrace_unwind.h"
 #include "stacktrace_safe_recorder.h"
 #include "trace_recorder.h"
-#include "dumper_process.h"
 #include "trace_system_api.h"
 #include "ascend_hal_stub.h"
 #include "slog_stub.h"
+#include "stacktrace_ut_common.h"
 
 extern "C" {
-    void TraceInit(void);
-    void TraceExit(void);
-    TraStatus TraceGetSelfMap(uintptr_t pc, char *data, uint32_t len);
-    void TraceSignalHandler(int32_t signo, siginfo_t *siginfo, void *ucontext);
-    int32_t ScdCoreEntry(void *args);
-    bool TraceCheckRegister(uintptr_t rbp, uintptr_t rsp);
-    TraStatus TraceSafeWrite(int32_t fd, const char *data, size_t len);
-    TraStatus DumperSignalHandler(const TraceSignalInfo *arg);
-    uintptr_t TraceGetStackBaseAddr(void);
-    TraStatus TraceSafeWriteMemoryInfo(int32_t fd);
-    TraStatus TraceSafeWriteStatusInfo(int32_t fd, int32_t pid);
-    TraStatus TraceSafeWriteLimitsInfo(int32_t fd, int32_t pid);
-    TraStatus TraceSafeWriteMapsInfo(int32_t fd, int32_t pid);
-    TraStatus TraceSaveProcessTask(int32_t pid);
+TraStatus TraceGetSelfMap(uintptr_t pc, char* data, uint32_t len);
+void TraceSignalHandler(int32_t signo, siginfo_t* siginfo, void* ucontext);
+bool TraceCheckRegister(uintptr_t rbp, uintptr_t rsp);
+TraStatus TraceSafeWrite(int32_t fd, const char* data, size_t len);
+TraStatus DumperSignalHandler(const TraceSignalInfo* arg);
+uintptr_t TraceGetStackBaseAddr(void);
+TraStatus TraceSafeWriteMemoryInfo(int32_t fd);
+TraStatus TraceSafeWriteStatusInfo(int32_t fd, int32_t pid);
+TraStatus TraceSafeWriteLimitsInfo(int32_t fd, int32_t pid);
+TraStatus TraceSafeWriteMapsInfo(int32_t fd, int32_t pid);
+TraStatus TraceSaveProcessTask(int32_t pid);
 }
 
 extern TraceStackInfo g_stackInfo;
-static void CheckStackLayer(int32_t exceptLayer)
-{
-    EXPECT_EQ(exceptLayer, g_stackInfo.layer);
-}
-class TraceStackcoreUtest: public testing::Test {
+static void CheckStackLayer(int32_t exceptLayer) { EXPECT_EQ(exceptLayer, g_stackInfo.layer); }
+class TraceStackcoreUtest : public testing::Test {
 protected:
-    virtual void SetUp()
-    {
-        system("mkdir -p " LLT_TEST_DIR );
-        system("rm -rf " LLT_TEST_DIR "/*");
-        struct passwd *pwd = getpwuid(getuid());
-        pwd->pw_dir = LLT_TEST_DIR;
-        MOCKER(getpwuid).stubs().will(returnValue(pwd));
-        TraceInit();
-    }
+    virtual void SetUp() { SetupTraceUtestEnv(); }
 
     virtual void TearDown()
     {
@@ -73,13 +59,9 @@ protected:
         TraceExit();
     }
 
-    static void SetUpTestCase()
-    {
-    }
+    static void SetUpTestCase() {}
 
-    static void TearDownTestCase()
-    {
-    }
+    static void TearDownTestCase() {}
 };
 
 TEST_F(TraceStackcoreUtest, TraceStackInfoInit_failed)
@@ -92,12 +74,22 @@ TEST_F(TraceStackcoreUtest, TraceStackInfoInit_failed)
     EXPECT_EQ(0, ret);
 }
 
+TEST_F(TraceStackcoreUtest, TestStacktracePathLimitsUseTraceMaxPath)
+{
+    EXPECT_LT(static_cast<size_t>(SCD_MAX_FILEDIR_LEN), static_cast<size_t>(SCD_MAX_FULLPATH_LEN));
+    EXPECT_LT(static_cast<size_t>(SCD_MAX_FILEPATH_LEN), static_cast<size_t>(SCD_MAX_FULLPATH_LEN));
+    EXPECT_LE(
+        static_cast<size_t>(SCD_MAX_FILEPATH_LEN) + static_cast<size_t>(SCD_FILE_RESERVED_LEN),
+        static_cast<size_t>(SCD_MAX_FULLPATH_LEN));
+    EXPECT_EQ(static_cast<size_t>(TRACE_MAX_PATH - 1U), static_cast<size_t>(SCD_MAX_FULLPATH_LEN));
+}
+
 TEST_F(TraceStackcoreUtest, TestTraceStackFp_failed)
 {
     TraStatus ret = TRACE_FAILURE;
-    ThreadArgument arg = { 0 };
-    TraceStackInfo info = { 0 };
-    uintptr_t regs[TRACE_CORE_REG_NUM] = { 0 };
+    ThreadArgument arg = {0};
+    TraceStackInfo info = {0};
+    uintptr_t regs[TRACE_CORE_REG_NUM] = {0};
 
     // arg==NULL
     ret = TraceStackFp(NULL, regs, TRACE_CORE_REG_NUM, &info);
@@ -114,18 +106,18 @@ TEST_F(TraceStackcoreUtest, TestTraceStackFp_failed)
 
 TEST_F(TraceStackcoreUtest, TraceSignal_NullMyact)
 {
-    ThreadArgument arg = { 0 };
+    ThreadArgument arg = {0};
     auto ret = TraceStackSigHandler(&arg);
     EXPECT_EQ(TRACE_SUCCESS, ret); // execute success and no core dump occurs.
 }
- 
+
 TEST_F(TraceStackcoreUtest, TestTraceStackSigHandler)
 {
     siginfo_t siginfo;
     ucontext_t ucontext;
-    TraceSignalInfo info = { 2, &siginfo, (void *)&ucontext, std::time(0) };
+    TraceSignalInfo info = {2, &siginfo, (void*)&ucontext, std::time(0)};
 
-    MOCKER(ScdCoreStart).stubs().will(returnValue(TRACE_FAILURE));
+    MOCKER(ScExecStart).stubs().will(returnValue(TRACE_FAILURE));
     MOCKER(TraceStackSigHandler).expects(once()).will(returnValue(TRACE_SUCCESS));
     auto ret = DumperSignalHandler(&info);
     EXPECT_EQ(TRACE_SUCCESS, ret);
@@ -141,7 +133,7 @@ TEST_F(TraceStackcoreUtest, TestDumperSignalSetArgs)
 {
     siginfo_t siginfo;
     ucontext_t ucontext;
-    TraceSignalInfo info = { 2, &siginfo, (void *)&ucontext, std::time(0) };
+    TraceSignalInfo info = {2, &siginfo, (void*)&ucontext, std::time(0)};
 
     MOCKER(memcpy_s).stubs().will(returnValue(-1));
     auto ret = DumperSignalHandler(&info);
@@ -164,28 +156,15 @@ TEST_F(TraceStackcoreUtest, TestDumperSignalSetArgs)
     GlobalMockObject::verify();
 }
 
-TEST_F(TraceStackcoreUtest, TestSignal_WriteInfoFailed)
-{
-    ThreadArgument info = { 0 };
-    int32_t ret = 0;
-
-    ret = ScdCoreEntry(NULL);
-    EXPECT_EQ(1, ret);
-
-    // ptrace attach failed
-    ret = ScdCoreEntry((void *)&info);
-    EXPECT_EQ(1, ret);
-}
-
 TEST_F(TraceStackcoreUtest, TestSignal_TracerExit)
 {
     TracerExit(); // TracerExit before receive signal
     siginfo_t siginfo;
     ucontext_t ucontext;
-    TraceSignalInfo info = { 2, &siginfo, (void *)&ucontext, std::time(0) };
+    TraceSignalInfo info = {2, &siginfo, (void*)&ucontext, std::time(0)};
 
     MOCKER(TraceRecorderWrite).expects(never());
-    MOCKER(ScdCoreStart).stubs().will(returnValue(TRACE_FAILURE));
+    MOCKER(ScExecStart).stubs().will(returnValue(TRACE_FAILURE));
     auto ret = DumperSignalHandler(&info);
     EXPECT_EQ(TRACE_SUCCESS, ret); // execute success and no core dump occurs.
 }
@@ -196,81 +175,13 @@ TEST_F(TraceStackcoreUtest, TestDumpSetCallback_Null)
     EXPECT_EQ(TRACE_INVALID_PARAM, ret);
 }
 
-static int32_t g_waitpid_status = 0;
-static void waitpid_set(int32_t status)
-{
-    g_waitpid_status = status;
-}
-
-static pid_t waitpid_stub(pid_t pid, int *wstatus, int options)
-{
-    if (pid == -1) {
-        errno = 0;
-        return -1;
-    }
-    if (pid > 0) {
-        errno = 0;
-        *wstatus = g_waitpid_status;
-        return 0;
-    }
-    return 0;
-}
-
-TEST_F(TraceStackcoreUtest, TestWaitpid_Timeout)
-{
-    TraStatus ret = TRACE_FAILURE;
-    pid_t child = 123;
-    MOCKER(waitpid).stubs().will(returnValue(0));
- 
-    ret = ScdCoreEnd(child);
-    EXPECT_EQ(TRACE_SUCCESS, ret);
-}
- 
-TEST_F(TraceStackcoreUtest, TestWaitpid_Failed)
-{
-    TraStatus ret = TRACE_FAILURE;
-    pid_t child = -1;
-    MOCKER(waitpid).stubs().will(invoke(waitpid_stub));
-
-    ret = ScdCoreEnd(child);
-    EXPECT_EQ(TRACE_FAILURE, ret);
-}
-
-TEST_F(TraceStackcoreUtest, TestScdCoreEnd_Failed)
-{
-    TraStatus ret = TRACE_FAILURE;
-    pid_t child = 123;
-    MOCKER(waitpid).stubs().will(invoke(waitpid_stub));
-
-    // child terminated normally with non-zero exit status(1)
-    waitpid_set(0x0100);
-    ret = ScdCoreEnd(child);
-    EXPECT_EQ(TRACE_FAILURE, ret);
-
-    // child terminated by a signal(3)
-    waitpid_set(0x0083);
-    ret = ScdCoreEnd(child);
-    EXPECT_EQ(TRACE_FAILURE, ret);
-
-    // child terminated with other error status(255)
-    waitpid_set(0x00FF);
-    ret = ScdCoreEnd(child);
-    EXPECT_EQ(TRACE_FAILURE, ret);
-}
-
-TEST_F(TraceStackcoreUtest, TestScdCoreStart_Failed)
-{
-    auto ret = ScdCoreStart(NULL, NULL, NULL);
-    EXPECT_EQ(TRACE_FAILURE, ret);
-}
-
 TEST_F(TraceStackcoreUtest, TestTraceDumperInit_Failed)
 {
     auto ret = TraceDumperInit();
     EXPECT_EQ(TRACE_SUCCESS, ret);
 
     // malloc failed
-    MOCKER(AdiagMalloc).stubs().will(returnValue((void *)0));
+    MOCKER(AdiagMalloc).stubs().will(returnValue((void*)0));
     TraceDumperExit();
     ret = TraceDumperInit();
     EXPECT_EQ(TRACE_FAILURE, ret);
@@ -278,17 +189,17 @@ TEST_F(TraceStackcoreUtest, TestTraceDumperInit_Failed)
 
 TEST_F(TraceStackcoreUtest, TestTraceStackSigHandler_Failed)
 {
-    ThreadArgument arg = { 0 };
+    ThreadArgument arg = {0};
     arg.stackBaseAddr = TraceGetStackBaseAddr();
     TraStatus ret = TRACE_FAILURE;
- 
+
     // invalid register
     MOCKER(TraceCheckRegister).stubs().will(returnValue(false));
     ret = TraceStackSigHandler(&arg);
     CheckStackLayer(-1);
     EXPECT_EQ(TRACE_SUCCESS, ret);
     GlobalMockObject::verify();
- 
+
     // copy pc frame
     MOCKER(memcpy_s).stubs().will(returnValue(-1));
     MOCKER(TraceSafeGetFd).stubs().will(returnValue(TRACE_FAILURE));
@@ -296,10 +207,9 @@ TEST_F(TraceStackcoreUtest, TestTraceStackSigHandler_Failed)
     CheckStackLayer(-1);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
- 
+
     // copy stack frame
-    MOCKER(memcpy_s).stubs().will(returnValue(0))
-                            .then(returnValue(-1));
+    MOCKER(memcpy_s).stubs().will(returnValue(0)).then(returnValue(-1));
     MOCKER(TraceSafeGetFd).stubs().will(returnValue(TRACE_FAILURE));
     ret = TraceStackSigHandler(&arg);
     CheckStackLayer(0);
@@ -313,11 +223,11 @@ TEST_F(TraceStackcoreUtest, TestSignal_CheckPid)
     int32_t parent = 123;
     int32_t child = 134;
     MOCKER(getpid).stubs().will(returnValue(parent)).then(returnValue(parent)).then(returnValue(child));
-    MOCKER(ScdCoreStart).stubs().will(returnValue(TRACE_FAILURE));
+    MOCKER(ScExecStart).stubs().will(returnValue(TRACE_FAILURE));
 
     siginfo_t siginfo;
     ucontext_t ucontext;
-    TraceSignalInfo info = { 11, &siginfo, (void *)&ucontext, std::time(0) };
+    TraceSignalInfo info = {11, &siginfo, (void*)&ucontext, std::time(0)};
     auto ret = DumperSignalHandler(&info);
     EXPECT_EQ(TRACE_SUCCESS, ret);
 
@@ -326,7 +236,7 @@ TEST_F(TraceStackcoreUtest, TestSignal_CheckPid)
 }
 
 // safe recorder
-static ssize_t read_stub(int fd, void *buf, size_t count)
+static ssize_t read_stub(int fd, void* buf, size_t count)
 {
     static int32_t cnt = 0;
     cnt++;
@@ -367,7 +277,7 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeGetFd)
     int32_t signo = 2;
     int32_t pid = getpid();
     int32_t tid = gettid();
-    TraceStackRecorderInfo info = { crashTime, signo, pid, tid };
+    TraceStackRecorderInfo info = {crashTime, signo, pid, tid};
     int32_t fd = 1;
     TraStatus ret = TRACE_FAILURE;
 
@@ -379,14 +289,13 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeGetFd)
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
 
-    MOCKER(TimestampToFileStr).stubs().will(returnValue(TRACE_SUCCESS))
-                                      .then(returnValue(TRACE_FAILURE));
+    MOCKER(TimestampToFileStr).stubs().will(returnValue(TRACE_SUCCESS)).then(returnValue(TRACE_FAILURE));
     ret = TraceSafeGetFd(&info, ".txt", &fd);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
 }
 
-static ssize_t write_stub(int fd, void const*buf, size_t count)
+static ssize_t write_stub(int fd, void const* buf, size_t count)
 {
     static int32_t cnt = 0;
     cnt++;
@@ -416,8 +325,7 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeWriteSystemInfo)
     EXPECT_EQ(TRACE_SUCCESS, ret);
     GlobalMockObject::verify();
 
-    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS))
-                                  .then(returnValue(TRACE_FAILURE));
+    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS)).then(returnValue(TRACE_FAILURE));
     ret = TraceSafeWriteSystemInfo(fd, pid);
     EXPECT_EQ(TRACE_SUCCESS, ret);
     GlobalMockObject::verify();
@@ -426,13 +334,11 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeWriteSystemInfo)
 TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeWriteStackInfo)
 {
     std::array<const char*, 3> strings = {
-        "error log : invalid register\n",
-        "#0 0x00007f4f17af9db5 0x00007f4f17ab8000 /home/libatrace_test.so\n",
-        "#1 0x00007f4f17ea8609 0x00007f4f17ea0000 /usr/lib/x86_64-linux-gnu/libpthread-2.31.so\n"
-    };
+        "error log : invalid register\n", "#0 0x00007f4f17af9db5 0x00007f4f17ab8000 /home/libatrace_test.so\n",
+        "#1 0x00007f4f17ea8609 0x00007f4f17ea0000 /usr/lib/x86_64-linux-gnu/libpthread-2.31.so\n"};
     int32_t fd = 1;
     TraStatus ret = TRACE_FAILURE;
-    TraceStackInfo stackInfo = { 0 };
+    TraceStackInfo stackInfo = {0};
     TraStatus status = TRACE_FAILURE;
 
     ret = TraceSafeWriteStackInfo(fd, NULL);
@@ -457,8 +363,7 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeWriteStackInfo)
     (void)memcpy_s(stackInfo.frame[1].info, CORE_BUFFER_LEN, strings[2], strlen(strings[2]));
     ret = TraceSafeWriteStackInfo(fd, &stackInfo);
     EXPECT_EQ(TRACE_SUCCESS, ret);
-    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS))
-                                  .then(returnValue(status));
+    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS)).then(returnValue(status));
     ret = TraceSafeWriteStackInfo(fd, &stackInfo);
     EXPECT_EQ(status, ret);
     GlobalMockObject::verify();
@@ -468,7 +373,7 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeWriteProcessInfo)
 {
     int32_t fd = 1;
     TraStatus ret = TRACE_FAILURE;
-    TraceStackProcessInfo processInfo = { 11, getpid(), gettid(), 139977600800512, 139977600798400 };
+    TraceStackProcessInfo processInfo = {11, getpid(), gettid(), 139977600800512, 139977600798400};
     TraStatus status = TRACE_FAILURE;
 
     ret = TraceSafeWriteProcessInfo(fd, NULL);
@@ -479,8 +384,7 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeWriteProcessInfo)
     EXPECT_EQ(status, ret);
     GlobalMockObject::verify();
 
-    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS))
-                                  .then(returnValue(status));
+    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS)).then(returnValue(status));
     ret = TraceSafeWriteProcessInfo(fd, &processInfo);
     EXPECT_EQ(status, ret);
     GlobalMockObject::verify();
@@ -490,7 +394,7 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSaveStackInfo)
 {
     int32_t fd = 1;
     TraStatus ret = TRACE_FAILURE;
-    TraceStackInfo stackInfo = { 0 };
+    TraceStackInfo stackInfo = {0};
     TraStatus status = TRACE_FAILURE;
 
     ret = TraceSaveStackInfo(NULL);
@@ -537,14 +441,13 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeWriteMemoryInfo)
     TraStatus ret = TRACE_FAILURE;
     int32_t fd = 1;
 
-    auto mocker = reinterpret_cast<int (*)(char *, int)>(open);
+    auto mocker = reinterpret_cast<int (*)(char*, int)>(open);
     MOCKER(mocker).stubs().will(returnValue(-1));
     ret = TraceSafeWriteMemoryInfo(fd);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
 
-    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS))
-                                  .then(returnValue(TRACE_FAILURE));
+    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS)).then(returnValue(TRACE_FAILURE));
     ret = TraceSafeWriteMemoryInfo(fd);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
@@ -556,19 +459,18 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeWriteStatusInfo)
     int32_t fd = 1;
     int32_t pid = getpid();
 
-    MOCKER(vsnprintf_s).stubs().will(returnValue(-1));// snprintf_s failed
+    MOCKER(vsnprintf_s).stubs().will(returnValue(-1)); // snprintf_s failed
     ret = TraceSafeWriteStatusInfo(fd, pid);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
 
-    auto mocker = reinterpret_cast<int (*)(char *, int)>(open);
+    auto mocker = reinterpret_cast<int (*)(char*, int)>(open);
     MOCKER(mocker).stubs().will(returnValue(-1));
     ret = TraceSafeWriteStatusInfo(fd, pid);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
 
-    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS))
-                                  .then(returnValue(TRACE_FAILURE));
+    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS)).then(returnValue(TRACE_FAILURE));
     ret = TraceSafeWriteStatusInfo(fd, pid);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
@@ -580,19 +482,18 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeWriteLimitsInfo)
     int32_t fd = 1;
     int32_t pid = getpid();
 
-    MOCKER(vsnprintf_s).stubs().will(returnValue(-1));// snprintf_s failed
+    MOCKER(vsnprintf_s).stubs().will(returnValue(-1)); // snprintf_s failed
     ret = TraceSafeWriteLimitsInfo(fd, pid);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
 
-    auto mocker = reinterpret_cast<int (*)(char *, int)>(open);
+    auto mocker = reinterpret_cast<int (*)(char*, int)>(open);
     MOCKER(mocker).stubs().will(returnValue(-1));
     ret = TraceSafeWriteLimitsInfo(fd, pid);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
 
-    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS))
-                                  .then(returnValue(TRACE_FAILURE));
+    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS)).then(returnValue(TRACE_FAILURE));
     ret = TraceSafeWriteLimitsInfo(fd, pid);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
@@ -604,42 +505,19 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeWriteMapsInfo)
     int32_t fd = 1;
     int32_t pid = getpid();
 
-    MOCKER(vsnprintf_s).stubs().will(returnValue(-1));// snprintf_s failed
+    MOCKER(vsnprintf_s).stubs().will(returnValue(-1)); // snprintf_s failed
     ret = TraceSafeWriteMapsInfo(fd, pid);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
 
-    auto mocker = reinterpret_cast<int (*)(char *, int)>(open);
+    auto mocker = reinterpret_cast<int (*)(char*, int)>(open);
     MOCKER(mocker).stubs().will(returnValue(-1));
     ret = TraceSafeWriteMapsInfo(fd, pid);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
 
-    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS))
-                                  .then(returnValue(TRACE_FAILURE));
+    MOCKER(TraceSafeWrite).stubs().will(returnValue(TRACE_SUCCESS)).then(returnValue(TRACE_FAILURE));
     ret = TraceSafeWriteMapsInfo(fd, pid);
-    EXPECT_EQ(TRACE_FAILURE, ret);
-    GlobalMockObject::verify();
-}
-
-TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSaveProcessTask)
-{
-    TraStatus ret = TRACE_FAILURE;
-    int32_t pid = getpid();
-
-    MOCKER(vsnprintf_s).stubs().will(returnValue(-1));// snprintf_s failed
-    ret = TraceSaveProcessTask(pid);
-    EXPECT_EQ(TRACE_FAILURE, ret);
-    GlobalMockObject::verify();
-
-    auto mocker = reinterpret_cast<int (*)(char *, int)>(open);
-    MOCKER(mocker).stubs().will(returnValue(-1));
-    ret = TraceSaveProcessTask(pid);
-    EXPECT_EQ(TRACE_FAILURE, ret);
-    GlobalMockObject::verify();
-
-    MOCKER(TraceSafeReadLine).stubs().will(returnValue(-1));
-    ret = TraceSaveProcessTask(pid);
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
 }
@@ -650,7 +528,7 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeMkdirPath)
     int32_t signo = 2;
     int32_t pid = getpid();
     int32_t tid = gettid();
-    TraceStackRecorderInfo info = { crashTime, signo, pid, tid };
+    TraceStackRecorderInfo info = {crashTime, signo, pid, tid};
     TraStatus ret = TRACE_FAILURE;
     char path[1024] = {0};
 
@@ -672,7 +550,7 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeGetDirPath)
     int32_t signo = 2;
     int32_t pid = getpid();
     int32_t tid = gettid();
-    TraceStackRecorderInfo info = { crashTime, signo, pid, tid };
+    TraceStackRecorderInfo info = {crashTime, signo, pid, tid};
     TraStatus ret = TRACE_FAILURE;
     char path[1024] = {0};
 
@@ -692,7 +570,7 @@ TEST_F(TraceStackcoreUtest, TestSafeRecorder_TraceSafeGetFileName)
     int32_t signo = 2;
     int32_t pid = getpid();
     int32_t tid = gettid();
-    TraceStackRecorderInfo info = { crashTime, signo, pid, tid };
+    TraceStackRecorderInfo info = {crashTime, signo, pid, tid};
     TraStatus ret = TRACE_FAILURE;
     char name[1024] = {0};
 
@@ -733,10 +611,28 @@ TEST_F(TraceStackcoreUtest, TestTraceSignalInit)
 {
     MOCKER(sigaction).stubs().will(returnValue(-1));
     TraStatus ret = TRACE_FAILURE;
-    
+
     ret = TraceSignalInit();
     EXPECT_EQ(TRACE_FAILURE, ret);
 
+    TraceSignalExit();
+}
+
+TEST_F(TraceStackcoreUtest, TestTraceSignalInit_AltStack)
+{
+    // Verify the alternate signal stack is installed so a stack-overflow
+    // SIGSEGV can be captured (issue #699, coredump scenario enhancement).
+    TraStatus ret = TraceSignalInit();
+    EXPECT_EQ(TRACE_SUCCESS, ret);
+
+    stack_t curStack = {0};
+    ASSERT_EQ(0, sigaltstack(NULL, &curStack));
+    EXPECT_EQ(0, curStack.ss_flags & SS_DISABLE);
+    EXPECT_NE(nullptr, curStack.ss_sp);
+    EXPECT_GT(curStack.ss_size, 0U);
+
+    // TraceSignalExit() now disables the alt stack (SS_DISABLE), symmetric
+    // with TraceSignalInit(), so no manual sigaltstack cleanup is needed here.
     TraceSignalExit();
 }
 
@@ -752,7 +648,7 @@ TEST_F(TraceStackcoreUtest, TestStackcoreLogSave)
 
     StacktraceLogSetPath(LLT_TEST_DIR, "test_log");
     StacktraceLogSetPath(LLT_TEST_DIR "../", "test_log");
-    StacktraceLogSetPath(LLT_TEST_DIR , "../test_log");
+    StacktraceLogSetPath(LLT_TEST_DIR, "../test_log");
     STACKTRACE_LOG_RUN("test log");
     StackcoreLogSave();
     StackcoreLogExit();
@@ -762,8 +658,8 @@ TEST_F(TraceStackcoreUtest, TestStackcoreLogSave_Failed)
 {
     TraceExit();
     TraStatus ret = TRACE_FAILURE;
-    
-    MOCKER(AdiagMalloc).stubs().will(returnValue((void *)NULL));
+
+    MOCKER(AdiagMalloc).stubs().will(returnValue((void*)NULL));
     ret = StacktraceLogInit("[test logcat]");
     EXPECT_EQ(TRACE_FAILURE, ret);
 

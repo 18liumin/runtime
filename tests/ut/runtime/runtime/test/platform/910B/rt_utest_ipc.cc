@@ -20,7 +20,6 @@
 #include "notify.hpp"
 #include "event.hpp"
 #include "task_info.hpp"
-#include "task_info.h"
 #include "ffts_task.h"
 #include "device/device_error_proc.hpp"
 #include "program.hpp"
@@ -46,15 +45,13 @@ using namespace cce::runtime;
 
 class CloudV2IpcApiTest : public testing::Test {
 protected:
-    static void SetUpTestCase()
-    {}
+    static void SetUpTestCase() {}
 
-    static void TearDownTestCase()
-    {}
+    static void TearDownTestCase() {}
 
     virtual void SetUp()
     {
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
         isCfgOpWaitTaskTimeout = rtInstance->timeoutConfig_.isCfgOpWaitTaskTimeout;
         isCfgOpExcTaskTimeout = rtInstance->timeoutConfig_.isCfgOpExcTaskTimeout;
         rtInstance->timeoutConfig_.isCfgOpWaitTaskTimeout = false;
@@ -63,7 +60,7 @@ protected:
 
     virtual void TearDown()
     {
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
         rtInstance->timeoutConfig_.isCfgOpWaitTaskTimeout = isCfgOpWaitTaskTimeout;
         rtInstance->timeoutConfig_.isCfgOpExcTaskTimeout = isCfgOpExcTaskTimeout;
         GlobalMockObject::verify();
@@ -78,7 +75,6 @@ private:
 
 TEST_F(CloudV2IpcApiTest, IpcNotifyExportAndImport)
 {
-
     rtNotify_t notify;
     int32_t devId = 0;
     rtError_t error = rtSetDevice(devId);
@@ -107,7 +103,7 @@ TEST_F(CloudV2IpcApiTest, IpcMemExportAndImport)
     rtError_t error = rtSetDevice(devId);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
-    void *devPtr = nullptr;
+    void* devPtr = nullptr;
     uint64_t size = 32;
     error = rtMalloc(&devPtr, size, RT_MEMORY_HBM, DEFAULT_MODULEID);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
@@ -117,7 +113,7 @@ TEST_F(CloudV2IpcApiTest, IpcMemExportAndImport)
     error = rtsIpcMemGetExportKey(devPtr, size, name, 65, RT_IPC_MEM_EXPORT_FLAG_DISABLE_PID_VALIDATION);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
-    void *importDevPtr = nullptr;
+    void* importDevPtr = nullptr;
     error = rtsIpcMemImportByKey(&importDevPtr, name, RT_IPC_MEM_IMPORT_FLAG_ENABLE_PEER_ACCESS);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
@@ -136,7 +132,7 @@ TEST_F(CloudV2IpcApiTest, VmmMemExportAndImport)
 
     rtDrvMemHandle handle = nullptr;
     rtDrvMemProp_t prop = {};
-    prop.mem_type = RT_MEMORY_DEFAULT;  // HBM 内存，当前只支持申请HBM内存
+    prop.mem_type = RT_MEMORY_DEFAULT; // HBM 内存，当前只支持申请HBM内存
     prop.pg_type = 1;
     prop.side = 1;
     prop.devid = devId;
@@ -151,9 +147,7 @@ TEST_F(CloudV2IpcApiTest, VmmMemExportAndImport)
     EXPECT_EQ(ACL_RT_SUCCESS, error);
 
     rtDrvMemHandle importHandle;
-    MOCKER(halMemShareHandleInfoGet)
-        .stubs()
-        .will(returnValue(DRV_ERROR_NOT_SUPPORT));
+    MOCKER(halMemShareHandleInfoGet).stubs().will(returnValue(DRV_ERROR_NOT_SUPPORT));
     error = rtsMemImportFromShareableHandle(shareableHandle, devId, &importHandle);
     EXPECT_EQ(ACL_RT_SUCCESS, error);
 
@@ -172,7 +166,7 @@ TEST_F(CloudV2IpcApiTest, VmmMemExportAndImportv2)
 
     rtDrvMemHandle handle = nullptr;
     rtDrvMemProp_t prop = {};
-    prop.mem_type = RT_MEMORY_DEFAULT;  // HBM 内存，当前只支持申请HBM内存
+    prop.mem_type = RT_MEMORY_DEFAULT; // HBM 内存，当前只支持申请HBM内存
     prop.pg_type = 1;
     prop.side = 1;
     prop.devid = devId;
@@ -190,13 +184,13 @@ TEST_F(CloudV2IpcApiTest, VmmMemExportAndImportv2)
     MOCKER(halGetHostID).stubs().with(outBoundP(&hostid, sizeof(hostid))).will(returnValue(DRV_ERROR_NONE));
 
     rtDrvMemHandle importHandle;
-    error = rtMemImportFromShareableHandleV2(&shareableHandle, RT_MEM_SHARE_HANDLE_TYPE_DEFAULT, 0, devId, &importHandle);
+    error =
+        rtMemImportFromShareableHandleV2(&shareableHandle, RT_MEM_SHARE_HANDLE_TYPE_DEFAULT, 0, devId, &importHandle);
     EXPECT_EQ(ACL_RT_SUCCESS, error);
 
-    MOCKER(halMemShareHandleInfoGet)
-        .stubs()
-        .will(returnValue(DRV_ERROR_NOT_SUPPORT));
-    error = rtMemImportFromShareableHandleV2(&shareableHandle, RT_MEM_SHARE_HANDLE_TYPE_DEFAULT, 0, devId, &importHandle);
+    MOCKER(halMemShareHandleInfoGet).stubs().will(returnValue(DRV_ERROR_NOT_SUPPORT));
+    error =
+        rtMemImportFromShareableHandleV2(&shareableHandle, RT_MEM_SHARE_HANDLE_TYPE_DEFAULT, 0, devId, &importHandle);
 
     error = rtFreePhysical(handle);
     EXPECT_EQ(ACL_RT_SUCCESS, error);
@@ -213,7 +207,7 @@ TEST_F(CloudV2IpcApiTest, VmmMemExportAndImportv2Fabric)
 
     rtDrvMemHandle handle = nullptr;
     rtDrvMemProp_t prop = {};
-    prop.mem_type = RT_MEMORY_DEFAULT;  // HBM 内存，当前只支持申请HBM内存
+    prop.mem_type = RT_MEMORY_DEFAULT; // HBM 内存，当前只支持申请HBM内存
     prop.pg_type = 1;
     prop.side = 1;
     prop.devid = devId;
@@ -231,10 +225,12 @@ TEST_F(CloudV2IpcApiTest, VmmMemExportAndImportv2Fabric)
     uint32_t hostid = 1U;
     int64_t serverId = 0x3FF;
     MOCKER(halGetHostID).stubs().with(outBoundP(&hostid, sizeof(hostid))).will(returnValue(DRV_ERROR_NONE));
-    error = rtMemImportFromShareableHandleV2(&shareableHandle, RT_MEM_SHARE_HANDLE_TYPE_FABRIC, 0, devId, &importHandle);
+    error =
+        rtMemImportFromShareableHandleV2(&shareableHandle, RT_MEM_SHARE_HANDLE_TYPE_FABRIC, 0, devId, &importHandle);
     EXPECT_EQ(ACL_RT_SUCCESS, error);
 
-    error = rtMemImportFromShareableHandleV2(&shareableHandle, RT_MEM_SHARE_HANDLE_TYPE_FABRIC, 0, devId, &importHandle);
+    error =
+        rtMemImportFromShareableHandleV2(&shareableHandle, RT_MEM_SHARE_HANDLE_TYPE_FABRIC, 0, devId, &importHandle);
 
     error = rtFreePhysical(handle);
     EXPECT_EQ(ACL_RT_SUCCESS, error);
@@ -251,7 +247,7 @@ TEST_F(CloudV2IpcApiTest, rtMemAddressFabric)
 
     error = rtReserveMemAddress(nullptr, 0, 0, nullptr, 0);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
- 
+
     error = rtReleaseMemAddress(nullptr);
     EXPECT_EQ(error, RT_ERROR_NONE);
     rtDrvMemHandle handVal;
@@ -261,26 +257,26 @@ TEST_F(CloudV2IpcApiTest, rtMemAddressFabric)
     rtDrvMemHandle* handle = &handVal;
     error = rtMallocPhysical(handle, 0, &prop, 0);
     EXPECT_EQ(error, RT_ERROR_NONE);
- 
+
     error = rtFreePhysical(nullptr);
     EXPECT_EQ(error, RT_ERROR_NONE);
- 
+
     error = rtMapMem(nullptr, 0, 0, nullptr, 0);
     EXPECT_EQ(error, RT_ERROR_NONE);
- 
+
     error = rtUnmapMem(nullptr);
     EXPECT_EQ(error, RT_ERROR_NONE);
-    
+
     rtMemLocation location;
     location.type = RT_MEMORY_LOC_HOST;
     location.id = 0;
- 
-    size_t size = 1024*1024;//1mb
+
+    size_t size = 1024 * 1024; // 1mb
     rtMemAccessDesc desc = {};
     desc.location = location;
     desc.flags = RT_MEM_ACCESS_FLAGS_READWRITE;
 
-    void *virPtr = nullptr;
+    void* virPtr = nullptr;
     error = rtMalloc(&virPtr, size, RT_MEMORY_HBM, DEFAULT_MODULEID);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
@@ -301,12 +297,10 @@ TEST_F(CloudV2IpcApiTest, rtMemAddressFabric)
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 
     rtDrvMemFabricHandle shareableHandle = {};
-    error = rtMemExportToShareableHandleV2(
-        handle, RT_MEM_SHARE_HANDLE_TYPE_FABRIC, 0, &shareableHandle);
+    error = rtMemExportToShareableHandleV2(handle, RT_MEM_SHARE_HANDLE_TYPE_FABRIC, 0, &shareableHandle);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
-    error = rtMemExportToShareableHandleV2(
-        handle, RT_MEM_SHARE_HANDLE_TYPE_FABRIC, 30, &shareableHandle);
+    error = rtMemExportToShareableHandleV2(handle, RT_MEM_SHARE_HANDLE_TYPE_FABRIC, 30, &shareableHandle);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 
     error = rtMemImportFromShareableHandleV2(&shareableHandle, RT_MEM_SHARE_HANDLE_TYPE_FABRIC, 0, 0, handle);
@@ -326,17 +320,15 @@ TEST_F(CloudV2IpcApiTest, rtMemAddressFabric)
     error = rtMemGetAllocationGranularity(&prop, RT_MEM_ALLOC_GRANULARITY_MINIMUM, &granularity);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
-    MOCKER(halMemGetAllocationGranularity)
-        .stubs()
-        .will(returnValue(DRV_ERROR_INVALID_VALUE));
+    MOCKER(halMemGetAllocationGranularity).stubs().will(returnValue(DRV_ERROR_INVALID_VALUE));
     error = rtMemGetAllocationGranularity(&prop, RT_MEM_ALLOC_GRANULARITY_MINIMUM, &granularity);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 }
 
 TEST_F(CloudV2IpcApiTest, VmmMemExportAndImportv2_decorator_test)
 {
-    Api *oldApi_ = const_cast<Api *>(Runtime::runtime_->api_);
-    ApiDecorator *apiDecorator_ = new ApiDecorator(oldApi_);
+    Api* oldApi_ = const_cast<Api*>(Runtime::runtime_->api_);
+    ApiDecorator* apiDecorator_ = new ApiDecorator(oldApi_);
 
     ApiImpl impl;
     ApiDecorator apiDecorator(&impl);
@@ -372,8 +364,8 @@ TEST_F(CloudV2IpcApiTest, VmmMemExportAndImportv2_decorator_test)
 
 TEST_F(CloudV2IpcApiTest, enableP2p)
 {
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
-    Device *device = rtInstance->DeviceRetain(0, 0);
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    Device* device = rtInstance->DeviceRetain(0, 0);
     auto error = device->EnableP2PWithOtherDevice(1U);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     rtInstance->DeviceRelease(device);
@@ -386,23 +378,14 @@ TEST_F(CloudV2IpcApiTest, failedSetMemShareHandle)
     EXPECT_EQ(error, RT_ERROR_DRV_INPUT);
 }
 
-TEST_F(CloudV2IpcApiTest, GetIpcNotifyPeerPhyDevIdFailed)
-{
-    MOCKER(halShrIdInfoGet).stubs().will(returnValue(DRV_ERROR_INVALID_VALUE));
-    char name[65] = {0};
-    uint32_t peerPhyDevId = 0U;
-    auto error = NpuDriver::GetIpcNotifyPeerPhyDevId(name, &peerPhyDevId);
-    EXPECT_EQ(error, RT_ERROR_DRV_INPUT);
-}
-
 TEST_F(CloudV2IpcApiTest, MemRetainAllocationHandle01)
 {
-    size_t size = 1024*1024;//1mb
-    void *virPtr = nullptr;
+    size_t size = 1024 * 1024; // 1mb
+    void* virPtr = nullptr;
     auto error = rtMalloc(&virPtr, size, RT_MEMORY_HBM, DEFAULT_MODULEID);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
-    void *handle = nullptr;
+    void* handle = nullptr;
     MOCKER(halMemRetainAllocationHandle).stubs().will(returnValue(DRV_ERROR_INVALID_VALUE));
     error = rtMemRetainAllocationHandle(virPtr, &handle);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
@@ -413,12 +396,12 @@ TEST_F(CloudV2IpcApiTest, MemRetainAllocationHandle01)
 
 TEST_F(CloudV2IpcApiTest, MemRetainAllocationHandle02)
 {
-    size_t size = 1024*1024;//1mb
-    void *virPtr = nullptr;
+    size_t size = 1024 * 1024; // 1mb
+    void* virPtr = nullptr;
     auto error = rtMalloc(&virPtr, size, RT_MEMORY_HBM, DEFAULT_MODULEID);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
-    void *handle = nullptr;
+    void* handle = nullptr;
     MOCKER(halMemRetainAllocationHandle).stubs().will(returnValue(DRV_ERROR_NONE));
     error = rtMemRetainAllocationHandle(virPtr, &handle);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -427,10 +410,105 @@ TEST_F(CloudV2IpcApiTest, MemRetainAllocationHandle02)
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
 
+TEST_F(CloudV2IpcApiTest, MemGetAddressRange)
+{
+    void* ptr = (void*)0xff;
+    ;
+    void* pbase = (void*)0x01U;
+    size_t psize = 0;
+    MOCKER(halMemGetAddressRange).stubs().will(returnValue(DRV_ERROR_NONE));
+    rtError_t error = rtMemGetAddressRange(ptr, &pbase, &psize);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2IpcApiTest, HostGetDevicePointerAddrRange)
+{
+    rtAddrRange addrRange;
+    uint32_t count = 1;
+    MOCKER(halHostGetDevicePointerAddrCount).stubs().will(returnValue(DRV_ERROR_NONE));
+    MOCKER(halHostGetDevicePointerAddrRange).stubs().will(returnValue(DRV_ERROR_NONE));
+    rtError_t error = rtHostGetDevicePointerAddrRange(&addrRange, &count);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtHostGetDevicePointerAddrRange(nullptr, &count);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+drvError_t halMemGetAddressRangeStub(DVdeviceptr ptr, DVdeviceptr* pbase, size_t* psize)
+{
+    if (pbase) {
+        *pbase = ptr;
+    }
+    if (psize) {
+        *psize = 32;
+    }
+    return DRV_ERROR_NONE;
+}
+
+drvError_t halMemRetainAllocationHandleStub(drv_mem_handle_t** handle, void* ptr)
+{
+    if (handle) {
+        *handle = (drv_mem_handle_t*)ptr;
+    };
+    return DRV_ERROR_NONE;
+}
+
+TEST_F(CloudV2IpcApiTest, MemMapSelectedLink)
+{
+    uint32_t mem1[8];
+    uint32_t mem2[8];
+    size_t size = 32;
+    uint32_t linkIdx = RT_MEM_LINK_IDX_1;
+
+    rtError_t error = rtMemMapSelectedLink(nullptr, size, (void*)mem2, linkIdx);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtMemMapSelectedLink((void*)mem2, 0, (void*)mem2, linkIdx);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtMemMapSelectedLink((void*)mem2, size, nullptr, linkIdx);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtMemMapSelectedLink((void*)mem2, size, (void*)mem2, linkIdx + 1);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    MOCKER(halMemGetAddressRange).stubs().will(invoke(halMemGetAddressRangeStub));
+    MOCKER(halMemRetainAllocationHandle).stubs().will(invoke(halMemRetainAllocationHandleStub));
+    MOCKER(halMemHandleGetAttribute).stubs().will(returnValue(DRV_ERROR_NONE));
+    MOCKER(halMemHandleSetAttribute).stubs().will(returnValue(DRV_ERROR_NONE));
+    MOCKER(halMemMap).stubs().will(returnValue(DRV_ERROR_NONE));
+    MOCKER(halMemRelease).stubs().will(returnValue(DRV_ERROR_NONE));
+    error = rtMemMapSelectedLink((void*)mem2, size, (void*)mem2, linkIdx);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2IpcApiTest, MemMapSetLink)
+{
+    rtDrvMemHandle handVal = 0;
+    rtDrvMemHandle* handle = &handVal;
+    rtMemLinkType adviceLink = RT_MEM_ACCESS_UB_MULTI_PORT_PATH;
+
+    rtError_t error = rtMemMapSetLink(nullptr, adviceLink);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    adviceLink = RT_MEM_ACCESS_LINK_MAX;
+    error = rtMemMapSetLink(handle, adviceLink);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    adviceLink = RT_MEM_ACCESS_LINK_SIO;
+    error = rtMemMapSetLink(handle, adviceLink);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER(halMemHandleSetAttribute).stubs().will(returnValue(DRV_ERROR_NOT_EXIST));
+    adviceLink = RT_MEM_ACCESS_UB_MULTI_PORT_PATH;
+    error = rtMemMapSetLink(handle, adviceLink);
+    EXPECT_EQ(error, ACL_ERROR_RT_LINK_TYPE_NOT_SUPPORTED);
+}
+
 TEST_F(CloudV2IpcApiTest, MemGetAllocationPropertiesFromHandle01)
 {
-    size_t size = 1024*1024;//1mb
-    void *handle = nullptr;
+    size_t size = 1024 * 1024; // 1mb
+    void* handle = nullptr;
     auto error = rtMalloc(&handle, size, RT_MEMORY_HBM, DEFAULT_MODULEID);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
@@ -445,8 +523,8 @@ TEST_F(CloudV2IpcApiTest, MemGetAllocationPropertiesFromHandle01)
 
 TEST_F(CloudV2IpcApiTest, MemGetAllocationPropertiesFromHandle02)
 {
-    size_t size = 1024*1024;//1mb
-    void *handle = nullptr;
+    size_t size = 1024 * 1024; // 1mb
+    void* handle = nullptr;
     auto error = rtMalloc(&handle, size, RT_MEMORY_HBM, DEFAULT_MODULEID);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
@@ -461,8 +539,8 @@ TEST_F(CloudV2IpcApiTest, MemGetAllocationPropertiesFromHandle02)
 
 TEST_F(CloudV2IpcApiTest, MemGetAllocationPropertiesFromHandle_Prop_decorator)
 {
-    Api *oldApi_ = const_cast<Api *>(Runtime::runtime_->api_);
-    ApiDecorator *apiDecorator_ = new ApiDecorator(oldApi_);
+    Api* oldApi_ = const_cast<Api*>(Runtime::runtime_->api_);
+    ApiDecorator* apiDecorator_ = new ApiDecorator(oldApi_);
 
     ApiImpl impl;
     ApiDecorator apiDecorator(&impl);
@@ -480,7 +558,7 @@ TEST_F(CloudV2IpcApiTest, MemGetAllocationPropertiesFromHandle_Prop_decorator)
     rtDrvMemProp_t* prop = {};
     error = apiDecorator_->MemGetAllocationPropertiesFromHandle(hdl, prop);
     EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
-   
+
     delete apiDecorator_;
 }
 
@@ -489,5 +567,71 @@ TEST_F(CloudV2IpcApiTest, ipc_memory_close_normal)
     rtError_t error;
 
     error = rtsIpcMemClose("aaa");
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2IpcApiTest, ipc_memory_close_NotSupportChip)
+{
+    rtError_t error;
+
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    rtChipType_t oldChipType = rtInstance->GetChipType();
+    rtChipType_t oldGlobalChipType = GlobalContainer::GetRtChipType();
+
+    GlobalContainer::SetRtChipType(CHIP_MINI);
+    rtInstance->SetChipType(CHIP_MINI);
+
+    error = rtsIpcMemClose("test_key");
+    EXPECT_EQ(error, ACL_ERROR_RT_FEATURE_NOT_SUPPORT);
+
+    GlobalContainer::SetRtChipType(oldGlobalChipType);
+    rtInstance->SetChipType(oldChipType);
+}
+
+TEST_F(CloudV2IpcApiTest, ipc_memory_close_by_name_normal)
+{
+    const char* ipcName = "aaa";
+    int64_t devPtr = 1;
+    void* ptr = RtValueToPtr<void*>(devPtr);
+    rtError_t error = rtsIpcMemImportByKey(&ptr, ipcName, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Context* context = Runtime::Instance()->CurrentContext();
+    Driver* driver = context->Device_()->Driver_();
+    MOCKER_CPP_VIRTUAL(driver, &Driver::CloseIpcMem).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtsIpcMemClose(ipcName);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2IpcApiTest, ipc_memory_close_by_name_error)
+{
+    const char* ipcName = "bbb";
+    int64_t devPtr = 1;
+    void* ptr = RtValueToPtr<void*>(devPtr);
+    rtError_t error = rtsIpcMemImportByKey(&ptr, ipcName, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Context* context = Runtime::Instance()->CurrentContext();
+    Driver* driver = context->Device_()->Driver_();
+    MOCKER_CPP_VIRTUAL(driver, &Driver::CloseIpcMem).stubs().will(returnValue(RT_ERROR_DRV_INPUT));
+
+    error = rtsIpcMemClose(ipcName);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+}
+
+TEST_F(CloudV2IpcApiTest, ipc_mem_close_normal)
+{
+    const char* ipcName = "aaa";
+    int64_t devPtr = 1;
+    void* ptr = RtValueToPtr<void*>(devPtr);
+    rtError_t error = rtsIpcMemImportByKey(&ptr, ipcName, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Context* context = Runtime::Instance()->CurrentContext();
+    Driver* driver = context->Device_()->Driver_();
+    MOCKER_CPP_VIRTUAL(driver, &Driver::CloseIpcMem).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtIpcCloseMemory(RtValueToPtr<void*>(devPtr));
     EXPECT_EQ(error, RT_ERROR_NONE);
 }

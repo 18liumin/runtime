@@ -13,6 +13,6 @@ int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);
 
     // Runs all tests using Google Test.
-    // testing::GTEST_FLAG(filter) = "CliDavidStest.CliSysCpuProfiling";
+    // testing::GTEST_FLAG(filter) = "CliMilanStest.*";
     return RUN_ALL_TESTS();
 }

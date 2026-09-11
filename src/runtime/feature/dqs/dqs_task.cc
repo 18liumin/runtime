@@ -1,0 +1,2043 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include "base.hpp"
+#include "stream_with_dqs.hpp"
+#include "memory_task.h"
+#include "stars_cond_isa_struct.hpp"
+#include "error_message_manage.hpp"
+#include "dqs_task_info.hpp"
+#include "stars_cond_isa_helper.hpp"
+#include "stars_dqs_cond_isa_helper.hpp"
+#include "stars_cond_isa_batch_struct.hpp"
+#include "stars_david.hpp"
+#include "ascend_hal_define.h"
+#include "stars_cond_isa_para.hpp"
+#include "model_serial_sched_task.hpp"
+#include "runtime_task_manager.h"
+
+namespace cce {
+namespace runtime {
+
+constexpr uint32_t dqsPoolIdMask = 0x3FFU; // pool_id in mbuf handle. bit[9:0]
+
+static void InitOutputCommonMbufTracePara(CondMbufTraceParam& para, const uint64_t ctrlSpaceAddr, uint32_t streamId)
+{
+    size_t offset = offsetof(stars_dqs_ctrl_space_t, output_mbuf_trace_block_size_list);
+    para.traceBlockSizeAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, output_trace_base_addrs);
+    para.traceBaseAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, lp_sys_cnt_addr);
+    para.lpSysCntAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, output_queue_ids);
+    para.qidAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(dqs_mbuf_prod_trace, prod_owner_info);
+    offset = offset + offsetof(dqs_mbuf_owner_info, bits);
+    para.opTypeOffset = offset + offsetof(mbuf_owner_info_ext, op_type);
+    para.ownerIdOffset = offset + offsetof(mbuf_owner_info_ext, owner_id);
+    para.opQidOffset = offset + offsetof(mbuf_owner_info_ext, op_qid);
+    para.streamId = streamId;
+
+    return;
+}
+
+static void InitEnqueMbufTracePara(CondMbufTraceParam& para, const uint64_t ctrlSpaceAddr, const uint32_t streamId)
+{
+    InitOutputCommonMbufTracePara(para, ctrlSpaceAddr, streamId);
+    para.updateTimeOffset = offsetof(dqs_mbuf_prod_trace, prodq_enque_time);
+    para.opTypeVal = C_CORE_ENQUE_PRODQ;
+
+    return;
+}
+
+static void InitEnqueOwFreeMbufTracePara(
+    CondMbufTraceParam& para, const uint64_t ctrlSpaceAddr, const uint32_t streamId)
+{
+    InitOutputCommonMbufTracePara(para, ctrlSpaceAddr, streamId);
+    para.updateTimeOffset = offsetof(dqs_mbuf_prod_trace, prod_free_time);
+    para.opTypeVal = C_CORE_FREE;
+
+    return;
+}
+
+static rtError_t InitFuncCallParaForDqsEnqueueTask(TaskInfo* taskInfo, RtStarsDqsFcPara& fcPara)
+{
+    StreamWithDqs* stm = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    NULL_PTR_RETURN_MSG(stm, RT_ERROR_STREAM_NULL);
+    stars_dqs_ctrl_space_t* ctrlSpacePtr = stm->GetDqsCtrlSpace();
+    COND_RETURN_ERROR_MSG_INNER(
+        (ctrlSpacePtr == nullptr), RT_ERROR_INVALID_VALUE,
+        "InitFuncCallParaForDqsEnqueueTask failed because ctrlSpacePtr cannot be a NULL pointer.");
+
+    uint16_t* const execTimesSvm = stm->GetExecutedTimesSvm();
+    fcPara.streamExecTimesAddr = RtPtrToValue(execTimesSvm);
+    fcPara.sqId = static_cast<uint32_t>(stm->GetSqId());
+
+    fcPara.ctrlSpaceAddr = RtPtrToValue(ctrlSpacePtr);
+    fcPara.mbufPoolIndexMax = ctrlSpacePtr->output_queue_num;
+
+    size_t offset = offsetof(stars_dqs_ctrl_space_t, output_qmngr_enqueue_addrs);
+    fcPara.enqueOpAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, output_qmngr_ow_addrs);
+    fcPara.prodqOwAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, output_mbuf_list);
+    fcPara.ouputMbufHandleAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset =
+        offsetof(stars_dqs_ctrl_space_t, output_mbuf_free_addrs); // 这里使用ctrlSpace地址，是共享内存，内核态做了映射
+    fcPara.mbufFreePara.mbufFreeAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, mbuf_list_op_snapshot);
+    offset += offsetof(mbuf_list_op_snapshot_info, enqueue_post_dot);
+    fcPara.enquePostDotAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, mbuf_list_op_snapshot);
+    offset += offsetof(mbuf_list_op_snapshot_info, enqueue_pre_dot);
+    fcPara.enquePreDotAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    const uint32_t streamId = static_cast<uint32_t>(stm->Id_());
+    InitEnqueOwFreeMbufTracePara(fcPara.owFreeMbufTracePara, fcPara.ctrlSpaceAddr, streamId);
+    InitEnqueMbufTracePara(fcPara.enqueMbufTracePara, fcPara.ctrlSpaceAddr, streamId);
+
+    return RT_ERROR_NONE;
+}
+
+static inline void InitDqsCommonTaskInfo(
+    DqsCommonTaskInfo* const commonTaskInfo, const size_t funCallMemSize, const uint32_t sqId)
+{
+    commonTaskInfo->funcCallSvmMem = nullptr;
+    commonTaskInfo->baseFuncCallSvmMem = nullptr;
+    commonTaskInfo->dfxPtr = nullptr;
+    commonTaskInfo->funCallMemSize = funCallMemSize;
+    commonTaskInfo->sqId = sqId;
+
+    return;
+}
+
+static rtError_t AllocDqsCommonTaskFuncCall(DqsCommonTaskInfo* const commonTaskInfo, const TaskInfo* const taskInfo)
+{
+    void* devMem = nullptr;
+    const auto dev = taskInfo->stream->Device_();
+    const uint64_t allocSize = commonTaskInfo->funCallMemSize + TS_STARS_COND_DFX_SIZE + FUNC_CALL_INSTR_ALIGN_SIZE;
+    const rtError_t ret = dev->Driver_()->DevMemAlloc(&devMem, allocSize, RT_MEMORY_DDR, dev->Id_());
+    COND_RETURN_ERROR(
+        (ret != RT_ERROR_NONE) || (devMem == nullptr), ret,
+        "alloc func call memory failed,retCode=%#x,size=%" PRIu64 "(Byte),dev_id=%u", ret,
+        commonTaskInfo->funCallMemSize, dev->Id_());
+
+    commonTaskInfo->baseFuncCallSvmMem = devMem;
+    // instr addr should align to 256b
+    if ((RtPtrToValue(devMem) & 0xFFULL) != 0ULL) {
+        // 2 ^ 8 is 256 align
+        const uint64_t devMemAlign = (((RtPtrToValue(devMem)) >> 8U) + 1UL) << 8U;
+        devMem = RtValueToPtr<void*>(devMemAlign);
+    }
+    commonTaskInfo->funcCallSvmMem = devMem;
+    commonTaskInfo->dfxPtr =
+        RtValueToPtr<void*>(RtPtrToValue(commonTaskInfo->funcCallSvmMem) + commonTaskInfo->funCallMemSize);
+
+    return RT_ERROR_NONE;
+}
+
+static rtError_t FreeDqsCommonTaskFuncCall(DqsCommonTaskInfo* const commonTaskInfo, const TaskInfo* const taskInfo)
+{
+    if (commonTaskInfo->baseFuncCallSvmMem != nullptr) {
+        const auto dev = taskInfo->stream->Device_();
+        const rtError_t ret = dev->Driver_()->DevMemFree(commonTaskInfo->baseFuncCallSvmMem, dev->Id_());
+        COND_RETURN_ERROR(
+            ret != RT_ERROR_NONE, ret, "Free func call mem failed,retCode=%#x,dev_id=%u.", ret, dev->Id_());
+        commonTaskInfo->baseFuncCallSvmMem = nullptr;
+        commonTaskInfo->dfxPtr = nullptr;
+        commonTaskInfo->funcCallSvmMem = nullptr;
+    }
+
+    commonTaskInfo->funCallMemSize = 0UL;
+    return RT_ERROR_NONE;
+}
+
+static rtError_t PrepareSqeInfoForDqsEnqueueTask(TaskInfo* taskInfo)
+{
+    RtStarsDqsFcPara fcPara = {};
+    rtError_t ret = InitFuncCallParaForDqsEnqueueTask(taskInfo, fcPara);
+    ERROR_RETURN(ret, "Init func call param failed,retCode=%#x.", ret);
+    DqsCommonTaskInfo* dqsEnqueueTask = &(taskInfo->u.dqsEnqueueTask);
+    ret = AllocDqsCommonTaskFuncCall(dqsEnqueueTask, taskInfo);
+    ERROR_RETURN(ret, "Alloc func call svm failed,retCode=%#x.", ret);
+    fcPara.dfxAddr = RtPtrToValue(dqsEnqueueTask->dfxPtr);
+    RtStarsDqsEnqueueFc fc = {};
+    ConstructDqsEnqueueFc(fc, fcPara);
+    const auto dev = taskInfo->stream->Device_();
+    ret = dev->Driver_()->MemCopySync(
+        dqsEnqueueTask->funcCallSvmMem, dqsEnqueueTask->funCallMemSize, &fc, dqsEnqueueTask->funCallMemSize,
+        RT_MEMCPY_HOST_TO_DEVICE);
+    if (ret != RT_ERROR_NONE) {
+        (void)FreeDqsCommonTaskFuncCall(dqsEnqueueTask, taskInfo);
+        RT_LOG(RT_LOG_ERROR, "MemCopySync for Dqs Enqueue func call failed,retCode=%#x.", ret);
+    }
+
+    return ret;
+}
+
+static void InitDequeMbufTracePara(CondMbufTraceParam& para, const uint64_t ctrlSpaceAddr, const uint32_t streamId)
+{
+    size_t offset = offsetof(stars_dqs_ctrl_space_t, input_mbuf_trace_block_size_list);
+    para.traceBlockSizeAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, input_trace_base_addrs);
+    para.traceBaseAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, lp_sys_cnt_addr);
+    para.lpSysCntAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, input_queue_ids);
+    para.qidAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    para.updateTimeOffset = offsetof(dqs_mbuf_cons_trace, cons_deque_copy_ref_time);
+
+    offset = offsetof(dqs_mbuf_cons_trace, cons_owner_info);
+    offset = offset + offsetof(dqs_mbuf_owner_info, bits);
+    para.opTypeOffset = offset + offsetof(mbuf_owner_info_ext, op_type);
+    para.ownerIdOffset = offset + offsetof(mbuf_owner_info_ext, owner_id);
+    para.opQidOffset = offset + offsetof(mbuf_owner_info_ext, op_qid);
+    para.opTypeVal = C_CORE_DEQUE_CONSQ;
+    para.streamId = streamId;
+
+    return;
+}
+
+static rtError_t InitFuncCallParaForDqsDequeueTask(TaskInfo* taskInfo, RtStarsDqsFcPara& fcPara)
+{
+    StreamWithDqs* stm = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    NULL_PTR_RETURN_MSG(stm, RT_ERROR_STREAM_NULL);
+    stars_dqs_ctrl_space_t* ctrlSpacePtr = stm->GetDqsCtrlSpace();
+    COND_RETURN_ERROR((ctrlSpacePtr == nullptr), RT_ERROR_INVALID_VALUE, "ctrl space is nullptr.");
+
+    uint16_t* const execTimesSvm = stm->GetExecutedTimesSvm();
+    fcPara.streamExecTimesAddr = RtPtrToValue(execTimesSvm);
+    fcPara.sqId = static_cast<uint32_t>(stm->GetSqId());
+
+    fcPara.ctrlSpaceAddr = RtPtrToValue(ctrlSpacePtr);
+
+    size_t offset = offsetof(stars_dqs_ctrl_space_t, input_mbuf_list);
+    fcPara.inputMbufHandleAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, input_queue_gqm_base_addrs);
+    fcPara.gqmAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, mbuf_list_op_snapshot);
+    offset = offset + offsetof(mbuf_list_op_snapshot_info, deque_post_dot);
+    fcPara.dequeuePostDotAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    const uint32_t streamId = static_cast<uint32_t>(stm->Id_());
+    InitDequeMbufTracePara(fcPara.dequeMbufTracePara, fcPara.ctrlSpaceAddr, streamId);
+
+    RT_LOG(RT_LOG_INFO, "gqmAddr=%#llx, inputMbufHandleAddr=%#llx", fcPara.gqmAddr, fcPara.inputMbufHandleAddr);
+
+    return RT_ERROR_NONE;
+}
+
+static rtError_t PrepareSqeInfoForDqsDequeueTask(TaskInfo* taskInfo)
+{
+    RtStarsDqsFcPara fcPara = {};
+    rtError_t ret = InitFuncCallParaForDqsDequeueTask(taskInfo, fcPara);
+    ERROR_RETURN(ret, "Init func call param failed,retCode=%#x.", ret);
+    DqsCommonTaskInfo* dqsDequeueTask = &(taskInfo->u.dqsDequeueTask);
+    ret = AllocDqsCommonTaskFuncCall(dqsDequeueTask, taskInfo);
+    ERROR_RETURN(ret, "Alloc func call svm failed,retCode=%#x.", ret);
+    fcPara.dfxAddr = RtPtrToValue(dqsDequeueTask->dfxPtr);
+    RtStarsDqsDequeueFc fc = {};
+    ConstructDqsDequeueFc(fc, fcPara);
+    const auto dev = taskInfo->stream->Device_();
+    ret = dev->Driver_()->MemCopySync(
+        dqsDequeueTask->funcCallSvmMem, dqsDequeueTask->funCallMemSize, &fc, dqsDequeueTask->funCallMemSize,
+        RT_MEMCPY_DEVICE_TO_DEVICE);
+    if (ret != RT_ERROR_NONE) {
+        (void)FreeDqsCommonTaskFuncCall(dqsDequeueTask, taskInfo);
+        RT_LOG(RT_LOG_ERROR, "MemCopySync for Dqs Dequeue func call failed,retCode=%#x.", ret);
+    }
+
+    return ret;
+}
+
+static uint64_t GetNotifyRecordAddr(bool isRead, const StreamWithDqs* stm)
+{
+    const CountNotify* notify = stm->GetDqsCountNotify();
+    NULL_PTR_RETURN_MSG(notify, RT_ERROR_NOTIFY_NULL);
+
+    uint64_t addr = 0ULL;
+    const rtNotifyType_t regType = isRead ? NOTIFY_CNT_ST_SLICE : NOTIFY_CNT_BIT_CLR_SLICE;
+    const rtError_t error = notify->GetCntNotifyAddress(addr, regType);
+    if (error != RT_ERROR_NONE) {
+        RT_LOG(
+            RT_LOG_ERROR, "GetCntNotifyAddress failed, isRead=%d, retCode=%#x.", static_cast<int32_t>(isRead),
+            static_cast<uint32_t>(error));
+        return 0x0ULL;
+    }
+
+    return addr;
+}
+
+static void InitFreeMbufTracePara(CondMbufTraceParam& param, uint64_t ctrlSpaceAddr, const uint32_t streamId)
+{
+    size_t offset = offsetof(stars_dqs_ctrl_space_t, input_mbuf_trace_block_size_list);
+    param.traceBlockSizeAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, input_trace_base_addrs);
+    param.traceBaseAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, lp_sys_cnt_addr);
+    param.lpSysCntAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, input_queue_ids);
+    param.qidAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    param.updateTimeOffset = offsetof(dqs_mbuf_cons_trace, cons_free_time);
+
+    offset = offsetof(dqs_mbuf_cons_trace, cons_owner_info);
+    offset = offset + offsetof(dqs_mbuf_owner_info, bits);
+    param.opTypeOffset = offset + offsetof(mbuf_owner_info_ext, op_type);
+    param.opQidOffset = offset + offsetof(mbuf_owner_info_ext, op_qid);
+    param.ownerIdOffset = offset + offsetof(mbuf_owner_info_ext, owner_id);
+    param.opTypeVal = C_CORE_FREE;
+    param.streamId = streamId;
+
+    return;
+}
+
+static rtError_t InitFuncCallParaForDqsBatchDequeueTask(TaskInfo* taskInfo, RtStarsDqsBatchDeqFcPara& fcPara)
+{
+    StreamWithDqs* stm = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    NULL_PTR_RETURN_MSG(stm, RT_ERROR_STREAM_NULL);
+    stars_dqs_ctrl_space_t* ctrlSpacePtr = stm->GetDqsCtrlSpace();
+    COND_RETURN_ERROR((ctrlSpacePtr == nullptr), RT_ERROR_INVALID_VALUE, "ctrl space is nullptr.");
+    fcPara.dfxAddr = 0x0ULL;
+    fcPara.gqmAddr = RtPtrToValue(ctrlSpacePtr->input_queue_gqm_base_addrs);
+    fcPara.inputMbufHandleAddr = RtPtrToValue(ctrlSpacePtr->input_mbuf_cache_list);
+    fcPara.mbufFreeAddr = RtPtrToValue(ctrlSpacePtr->input_mbuf_free_addrs);
+
+    fcPara.cntNotifyReadAddr = GetNotifyRecordAddr(true, stm);
+    fcPara.cntNotifyClearAddr = GetNotifyRecordAddr(false, stm);
+    if ((fcPara.cntNotifyReadAddr == 0x0ULL) || (fcPara.cntNotifyClearAddr == 0x0ULL)) {
+        return RT_ERROR_NOTIFY_BASE;
+    }
+    fcPara.sqId = static_cast<uint32_t>(stm->GetSqId());
+
+    fcPara.cntOffset = static_cast<uint8_t>(offsetof(input_mbuf_cache_t, cnt));
+    fcPara.sizeofHandleCache = static_cast<uint8_t>(sizeof(input_mbuf_cache_t));
+
+    fcPara.mbufPoolIndexMax = static_cast<uint16_t>(ctrlSpacePtr->input_queue_num);
+
+    fcPara.batchDequeuePreDotAddr = RtPtrToValue(&(ctrlSpacePtr->mbuf_list_op_snapshot.batch_deque_pre_dot));
+    fcPara.batchDequeuePostDotAddr = RtPtrToValue(&(ctrlSpacePtr->mbuf_list_op_snapshot.batch_deque_post_dot));
+    fcPara.batchDequeueFreePreDotAddr = RtPtrToValue(&(ctrlSpacePtr->mbuf_list_op_snapshot.batch_deque_free_pre_dot));
+    fcPara.batchDequeueFreePostDotAddr = RtPtrToValue(&(ctrlSpacePtr->mbuf_list_op_snapshot.batch_deque_free_post_dot));
+    fcPara.fullFreeHandleAddr = RtPtrToValue(&(ctrlSpacePtr->full_free_handle));
+
+    const uint32_t streamId = static_cast<uint32_t>(stm->Id_());
+    InitDequeMbufTracePara(fcPara.dequeMbufTracePara, RtPtrToValue(ctrlSpacePtr), streamId);
+    InitFreeMbufTracePara(fcPara.freeMbufTracePara, RtPtrToValue(ctrlSpacePtr), streamId);
+
+    RT_LOG(
+        RT_LOG_INFO,
+        "gqmAddr=%#llx, inputMbufHandleAddr=%#llx cntNotifyReadAddr=%#llx cntNotifyClearAddr=%#llx mbufFreeAddr=%#llx",
+        fcPara.gqmAddr, fcPara.inputMbufHandleAddr, fcPara.cntNotifyReadAddr, fcPara.cntNotifyClearAddr,
+        fcPara.mbufFreeAddr);
+
+    RT_LOG(
+        RT_LOG_INFO, "sqId=%#llx, cntOffset=%#llx sizeofHandleCache=%#llx mbufPoolIndexMax=%#llx", fcPara.sqId,
+        fcPara.cntOffset, fcPara.sizeofHandleCache, fcPara.mbufPoolIndexMax);
+
+    return RT_ERROR_NONE;
+}
+
+static rtError_t PrepareSqeInfoForDqsBatchDequeueTask(TaskInfo* taskInfo)
+{
+    RtStarsDqsBatchDeqFcPara fcPara = {};
+    rtError_t ret = InitFuncCallParaForDqsBatchDequeueTask(taskInfo, fcPara);
+    ERROR_RETURN(ret, "Init func call param failed,retCode=%#x.", ret);
+    DqsCommonTaskInfo* dqsBatchDequeueTask = &(taskInfo->u.dqsBatchDequeueTask);
+    ret = AllocDqsCommonTaskFuncCall(dqsBatchDequeueTask, taskInfo);
+    ERROR_RETURN(ret, "Alloc func call svm failed,retCode=%#x.", ret);
+    fcPara.dfxAddr = RtPtrToValue(dqsBatchDequeueTask->dfxPtr);
+    RtStarsDqsBatchDequeueFc fc = {};
+    ConstructDqsBatchDequeueFc(fc, fcPara);
+    const auto dev = taskInfo->stream->Device_();
+    ret = dev->Driver_()->MemCopySync(
+        dqsBatchDequeueTask->funcCallSvmMem, dqsBatchDequeueTask->funCallMemSize, &fc,
+        dqsBatchDequeueTask->funCallMemSize, RT_MEMCPY_DEVICE_TO_DEVICE);
+    if (ret != RT_ERROR_NONE) {
+        (void)FreeDqsCommonTaskFuncCall(dqsBatchDequeueTask, taskInfo);
+        RT_LOG(RT_LOG_ERROR, "MemCopySync for Dqs Dequeue func call failed,retCode=%#x.", ret);
+    }
+
+    return ret;
+}
+
+static rtError_t FreeSvmMemForDqsZeroCopyTask(TaskInfo* const taskInfo)
+{
+    DqsZeroCopyTaskInfo* dqsZeroCopyTask = &(taskInfo->u.dqsZeroCopyTask);
+    rtError_t ret = FreeDqsCommonTaskFuncCall(&(dqsZeroCopyTask->commonTaskInfo), taskInfo);
+    ERROR_RETURN(ret, "free dqs common task func call failed, retCode=%#x", static_cast<uint32_t>(ret));
+
+    const auto dev = taskInfo->stream->Device_();
+    if (dqsZeroCopyTask->destPtr != nullptr) {
+        ret = dev->Driver_()->DevMemFree(dqsZeroCopyTask->destPtr, dev->Id_());
+        COND_RETURN_ERROR(
+            ret != RT_ERROR_NONE, ret, "Free dest svm mem failed,retCode=%#x,dev_id=%u.", ret, dev->Id_());
+        dqsZeroCopyTask->destPtr = nullptr;
+    }
+
+    if (dqsZeroCopyTask->offsetPtr != nullptr) {
+        ret = dev->Driver_()->DevMemFree(dqsZeroCopyTask->offsetPtr, dev->Id_());
+        COND_RETURN_ERROR(
+            ret != RT_ERROR_NONE, ret, "Free offset svm mem failed,retCode=%#x,dev_id=%u.", ret, dev->Id_());
+        dqsZeroCopyTask->offsetPtr = nullptr;
+    }
+
+    dqsZeroCopyTask->allocSize = 0ULL;
+    return RT_ERROR_NONE;
+}
+
+static rtError_t AllocSvmMemForDqsZeroCopyTask(TaskInfo* const taskInfo, const DqsTaskConfig* const cfg)
+{
+    DqsZeroCopyTaskInfo* dqsZeroCopyTask = &(taskInfo->u.dqsZeroCopyTask);
+    rtError_t ret = AllocDqsCommonTaskFuncCall(&(dqsZeroCopyTask->commonTaskInfo), taskInfo);
+    COND_RETURN_WITH_NOLOG(ret != RT_ERROR_NONE, ret);
+
+    std::function<void()> const errRecycle = [&ret, &taskInfo]() {
+        if (ret != RT_ERROR_NONE) {
+            (void)FreeSvmMemForDqsZeroCopyTask(taskInfo);
+        }
+    };
+    ScopeGuard drvErrRecycle(errRecycle);
+
+    void* dest = nullptr;
+    const uint64_t count = cfg->zeroCopyCfg->count;
+    const uint64_t allocSize = sizeof(uint64_t) * count;
+    const auto dev = taskInfo->stream->Device_();
+    ret = dev->Driver_()->DevMemAlloc(&dest, allocSize, RT_MEMORY_DDR, dev->Id_());
+    ERROR_RETURN(
+        ret, "Alloc dest memory failed, retCode=%#x, size=%" PRIu64 "(Byte), dev_id=%u", ret, allocSize, dev->Id_());
+    dqsZeroCopyTask->destPtr = dest;
+
+    void* offset = nullptr;
+    ret = dev->Driver_()->DevMemAlloc(&offset, allocSize, RT_MEMORY_DDR, dev->Id_());
+    ERROR_RETURN(
+        ret, "Alloc offset memory failed, retCode=%#x, size=%" PRIu64 "(bytes), dev_id=%u", ret, allocSize, dev->Id_());
+    drvErrRecycle.ReleaseGuard();
+
+    dqsZeroCopyTask->offsetPtr = offset;
+    dqsZeroCopyTask->allocSize = allocSize;
+    RT_LOG(
+        RT_LOG_INFO, "Alloc svm mem for DqsZeroCopy with offset, destAddr=%#llx, offsetAddr=%#llx, size=%" PRIu64, dest,
+        offset, allocSize);
+    return RT_ERROR_NONE;
+}
+
+static rtError_t InitFuncCallParaForDqsZeroCopyTask(
+    TaskInfo* const taskInfo, RtStarsDqsZeroCopyPara& fcPara, const DqsTaskConfig* const cfg)
+{
+    const rtDqsZeroCopyType copyType = cfg->zeroCopyCfg->copyType;
+    const uint16_t queueId = cfg->zeroCopyCfg->queueId;
+    uint32_t queueIndex = 0U;
+    StreamWithDqs* stm = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    NULL_PTR_RETURN_MSG(stm, RT_ERROR_STREAM_NULL);
+    stars_dqs_ctrl_space_t* ctrlSpacePtr = stm->GetDqsCtrlSpace();
+    NULL_PTR_RETURN_MSG(ctrlSpacePtr, RT_ERRORCODE_BASE);
+
+    if (copyType == RT_DQS_ZERO_COPY_INPUT) {
+        for (; queueIndex < ctrlSpacePtr->input_queue_num; queueIndex++) {
+            if (queueId == ctrlSpacePtr->input_queue_ids[queueIndex]) {
+                fcPara.mbufHandleAddr = RtPtrToValue(&ctrlSpacePtr->input_mbuf_list[queueIndex]);
+                fcPara.mbufBaseAddr = RtPtrToValue(&ctrlSpacePtr->input_data_pool_base_addrs[queueIndex]);
+                fcPara.blockSizeAddr = RtPtrToValue(&ctrlSpacePtr->input_data_pool_block_size_list[queueIndex]);
+                break;
+            }
+        }
+        COND_RETURN_ERROR((queueIndex >= ctrlSpacePtr->input_queue_num), RT_ERROR_INVALID_VALUE, "Invalid queueId!");
+    } else if (copyType == RT_DQS_ZERO_COPY_OUTPUT) {
+        for (; queueIndex < ctrlSpacePtr->output_queue_num; queueIndex++) {
+            if (queueId == ctrlSpacePtr->output_queue_ids[queueIndex]) {
+                fcPara.mbufHandleAddr = RtPtrToValue(&ctrlSpacePtr->output_mbuf_list[queueIndex]);
+                fcPara.mbufBaseAddr = RtPtrToValue(&ctrlSpacePtr->output_data_pool_base_addrs[queueIndex]);
+                fcPara.blockSizeAddr = RtPtrToValue(&ctrlSpacePtr->output_data_pool_block_size_list[queueIndex]);
+                break;
+            }
+        }
+        COND_RETURN_ERROR((queueIndex >= ctrlSpacePtr->output_queue_num), RT_ERROR_INVALID_VALUE, "Invalid queueId!");
+    } else {
+        RT_LOG(RT_LOG_ERROR, "Invalid DqsZeroCopy type, copyType=%u", static_cast<uint32_t>(copyType));
+        return RT_ERROR_INVALID_VALUE;
+    }
+
+    fcPara.count = cfg->zeroCopyCfg->count;
+    fcPara.isCpyAddrLow32First = (cfg->zeroCopyCfg->cpyAddrOrder == RT_DQS_ZERO_COPY_ADDR_ORDER_LOW32_FIRST);
+    RT_LOG(
+        RT_LOG_INFO,
+        "Init DqsZeroCopy with offset function call params, copyType=%u, isCpyAddrLow32First=%u, "
+        "mbufHandleAddr=%#llx, mbufBaseAddr=%#llx, blockSizeAddr=%#llx, count=%u, queueId=%u",
+        static_cast<uint32_t>(cfg->zeroCopyCfg->copyType), static_cast<uint32_t>(fcPara.isCpyAddrLow32First),
+        fcPara.mbufHandleAddr, fcPara.mbufBaseAddr, fcPara.blockSizeAddr, fcPara.count, queueId);
+    return RT_ERROR_NONE;
+}
+
+static rtError_t PrepareSqeInfoForDqsZeroCopyTask(TaskInfo* const taskInfo, const DqsTaskConfig* const cfg)
+{
+    rtError_t ret = AllocSvmMemForDqsZeroCopyTask(taskInfo, cfg);
+    ERROR_RETURN(ret, "Alloc svm mem failed, retCode=%#x.", static_cast<uint32_t>(ret));
+    RtStarsDqsZeroCopyPara fcPara = {};
+    DqsZeroCopyTaskInfo* dqsZeroCopyTask = &(taskInfo->u.dqsZeroCopyTask);
+    fcPara.destAddr = RtPtrToValue(dqsZeroCopyTask->destPtr);
+    fcPara.offsetAddr = RtPtrToValue(dqsZeroCopyTask->offsetPtr);
+
+    std::function<void()> const errRecycle = [&ret, &taskInfo]() {
+        if (ret != RT_ERROR_NONE) {
+            (void)FreeSvmMemForDqsZeroCopyTask(taskInfo);
+        }
+    };
+    ScopeGuard tskErrRecycle(errRecycle);
+    ret = InitFuncCallParaForDqsZeroCopyTask(taskInfo, fcPara, cfg);
+    ERROR_RETURN(ret, "Init func call para failed, retCode=%#x.", static_cast<uint32_t>(ret));
+
+    RtStarsDqsZeroCopyFc fc = {};
+    ConstructDqsZeroCopyFc(fc, fcPara);
+
+    DqsCommonTaskInfo* const commonTaskInfo = &(dqsZeroCopyTask->commonTaskInfo);
+    const auto dev = taskInfo->stream->Device_();
+    ret = dev->Driver_()->MemCopySync(
+        commonTaskInfo->funcCallSvmMem, commonTaskInfo->funCallMemSize, &fc, commonTaskInfo->funCallMemSize,
+        RT_MEMCPY_DEVICE_TO_DEVICE);
+    ERROR_RETURN(ret, "MemCopySync for DqsZeroCopy func call failed, retCode=%#x.", ret);
+
+    ret = dev->Driver_()->MemCopySync(
+        dqsZeroCopyTask->destPtr, dqsZeroCopyTask->allocSize, cfg->zeroCopyCfg->dest, dqsZeroCopyTask->allocSize,
+        RT_MEMCPY_DEVICE_TO_DEVICE);
+    ERROR_RETURN(ret, "MemCopySync for DqsZeroCopy dest failed, retCode=%#x.", ret);
+
+    ret = dev->Driver_()->MemCopySync(
+        dqsZeroCopyTask->offsetPtr, dqsZeroCopyTask->allocSize, cfg->zeroCopyCfg->offset, dqsZeroCopyTask->allocSize,
+        RT_MEMCPY_DEVICE_TO_DEVICE);
+    ERROR_RETURN(ret, "MemCopySync for DqsZeroCopy offset failed, retCode=%#x.", ret);
+    tskErrRecycle.ReleaseGuard();
+
+    return ret;
+}
+
+static rtError_t InitFuncCallParaForDqsMbufFreeTask(TaskInfo* const taskInfo, RtDqsMbufFreeFcPara& fcPara)
+{
+    // 由于执行条件算子下发时，mbuf pool id 还没确定，无法从驱动接口查询，从ctrlSpace中 input_mbuf_free_addrs 获取
+    StreamWithDqs* streamWithDqs = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    COND_RETURN_ERROR(streamWithDqs == nullptr, RT_ERROR_INVALID_VALUE, "streamWithDqs is nullptr");
+
+    stars_dqs_ctrl_space_t* ctrlSpacePtr = streamWithDqs->GetDqsCtrlSpace();
+    COND_RETURN_ERROR((ctrlSpacePtr == nullptr), RT_ERROR_INVALID_VALUE, "ctrl space is nullptr.");
+
+    fcPara.ctrlSpaceAddr = RtPtrToValue(ctrlSpacePtr);
+
+    size_t offset =
+        offsetof(stars_dqs_ctrl_space_t, input_mbuf_free_addrs); // 这里使用ctrlSpace地址，是共享内存，内核态做了映射
+    fcPara.mbufFreeAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, input_mbuf_list);
+    fcPara.mbufHandleAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    fcPara.mbufPoolIndexMax = ctrlSpacePtr->input_queue_num;
+
+    fcPara.schedType = ctrlSpacePtr->type;
+    fcPara.lastMbufHandleAddr = RtPtrToValue(&ctrlSpacePtr->input_mbuf_cache_list[0].last_used_handle);
+    fcPara.sizeofHandleCache = static_cast<uint8_t>(sizeof(input_mbuf_cache_t));
+
+    size_t snap_offset = offsetof(stars_dqs_ctrl_space_t, mbuf_list_op_snapshot);
+    offset = snap_offset + offsetof(mbuf_list_op_snapshot_info, free_post_dot);
+    fcPara.freePostDotAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = snap_offset + offsetof(mbuf_list_op_snapshot_info, free_pre_dot);
+    fcPara.freePreDotAddr = fcPara.ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    const uint32_t streamId = static_cast<uint32_t>(streamWithDqs->Id_());
+    InitFreeMbufTracePara(fcPara.freeMbufTracePara, fcPara.ctrlSpaceAddr, streamId);
+
+    return RT_ERROR_NONE;
+}
+
+void DqsMbufFreeTaskUnInit(TaskInfo* const taskInfo)
+{
+    (void)FreeDqsCommonTaskFuncCall(&(taskInfo->u.dqsMbufFreeTask), taskInfo);
+}
+
+void DqsBatchDequeTaskUnInit(TaskInfo* const taskInfo)
+{
+    (void)FreeDqsCommonTaskFuncCall(&(taskInfo->u.dqsBatchDequeueTask), taskInfo);
+}
+
+void PrintErrorInfoForDqsMbufFreeTask(TaskInfo* taskInfo, const uint32_t devId)
+{
+    StreamWithDqs* streamWithDqs = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    COND_RETURN_VOID(streamWithDqs == nullptr, "streamWithDqs is nullptr");
+
+    stars_dqs_ctrl_space_t* ctrlSpace = streamWithDqs->GetDqsCtrlSpace();
+    COND_RETURN_VOID(
+        ctrlSpace == nullptr, "dqs control space is nullptr, stream_id=%d, deviceId=%u", streamWithDqs->Id_(), devId);
+
+    return;
+}
+
+void PrintErrorInfoForDqsBatchDequeueTask(TaskInfo* taskInfo, const uint32_t devId)
+{
+    StreamWithDqs* streamWithDqs = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    COND_RETURN_VOID(streamWithDqs == nullptr, "streamWithDqs is nullptr");
+
+    stars_dqs_ctrl_space_t* ctrlSpace = streamWithDqs->GetDqsCtrlSpace();
+    COND_RETURN_VOID(
+        ctrlSpace == nullptr, "dqs control space is nullptr, stream_id=%d, deviceId=%u", streamWithDqs->Id_(), devId);
+
+    /* todo:如果写cqe_status，这个地方应该就不需要了吧 */
+    uint32_t dfx[2U];
+    const auto dev = taskInfo->stream->Device_();
+    (void)dev->Driver_()->MemCopySync(
+        dfx, sizeof(dfx), taskInfo->u.dqsBatchDequeueTask.dfxPtr, sizeof(dfx), RT_MEMCPY_DEVICE_TO_HOST);
+    RT_LOG(
+        RT_LOG_ERROR,
+        "dqs dqsBatchDequeueTask error, device_id=%u, stream_id=%d, task_id=%u, pop_result=%u, handle_value=%u", devId,
+        taskInfo->stream->Id_(), taskInfo->id, dfx[0U], dfx[1U]);
+
+    return;
+}
+
+static void InitDstProdAllocFuncCallPara(
+    CondMbufTraceParam& para, const uint64_t ctrlSpaceAddr, const uint32_t streamId)
+{
+    size_t offset = offsetof(stars_dqs_inter_chip_space_t, dst_prod_trace_blk_size);
+    para.traceBlockSizeAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_prod_trace_base_addr);
+    para.traceBaseAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_lp_sys_cnt_addr);
+    para.lpSysCntAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_prod_qid);
+    para.qidAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    para.updateTimeOffset = offsetof(dqs_mbuf_prod_trace, alloc_req_time);
+
+    offset = offsetof(dqs_mbuf_prod_trace, prod_owner_info);
+    offset = offset + offsetof(dqs_mbuf_owner_info, bits);
+    para.opTypeOffset = offset + offsetof(mbuf_owner_info_ext, op_type);
+    para.ownerIdOffset = offset + offsetof(mbuf_owner_info_ext, owner_id);
+    para.opQidOffset = offset + offsetof(mbuf_owner_info_ext, op_qid);
+    para.streamId = streamId;
+    para.opTypeVal = C_CORE_ALLOC;
+
+    return;
+}
+
+static rtError_t InitFuncCallParaForDqsInterChipPreProcTask(
+    TaskInfo* const taskInfo, RtStarsDqsInterChipPreProcPara& fcPara)
+{
+    StreamWithDqs* stm = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    NULL_PTR_RETURN_MSG(stm, RT_ERROR_STREAM_NULL);
+    stars_dqs_inter_chip_space_t* interChipSpaceBasePtr = stm->GetDqsInterChipSpace();
+    NULL_PTR_RETURN_MSG(interChipSpaceBasePtr, RT_ERRORCODE_BASE);
+
+    DqsInterChipProcTaskInfo* dqsTask = &(taskInfo->u.dqsInterChipPreProcTask);
+    const uint32_t groupIdx = dqsTask->groupIdx;
+    const uint64_t interChipSpaceAddr =
+        RtPtrToValue(interChipSpaceBasePtr) + static_cast<uint64_t>(groupIdx * sizeof(stars_dqs_inter_chip_space_t));
+    constexpr size_t dstAddrOffset = offsetof(stars_memcpy_ptr_sdma_sqe_t, dst_addr);
+
+    size_t offset = offsetof(stars_dqs_inter_chip_space_t, dst_mbuf_handle);
+    fcPara.dstMbufHandleAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_mbuf_alloc_addr);
+    fcPara.dstMbuffAllocAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_mbuf_head_pool_block_size);
+    fcPara.dstMbufHeadBlockSizeAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_mbuf_data_pool_block_size);
+    fcPara.dstMbufDataBlockSizeAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_mbuf_head_pool_base_addr);
+    fcPara.dstMbufHeadBaseAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_mbuf_data_pool_base_addr);
+    fcPara.dstMbufDataBaseAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, mbuf_data_memcpy_sqe);
+    fcPara.mbufDataSdmaSqeAddr = interChipSpaceAddr + static_cast<uint64_t>(offset + dstAddrOffset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, mbuf_head_memcpy_sqe);
+    fcPara.mbufHeadSdmaSqeAddr = interChipSpaceAddr + static_cast<uint64_t>(offset + dstAddrOffset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_alloc_empty_trace_addr);
+    fcPara.dstAllocEmptyTraceAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_alloc_fail_notify_addr);
+    fcPara.dstNotifyAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    const uint32_t streamId = static_cast<uint32_t>(stm->Id_());
+    InitDstProdAllocFuncCallPara(fcPara.allocMbufTracePara, interChipSpaceAddr, streamId);
+
+    RT_LOG(
+        RT_LOG_INFO,
+        "Init dqs inter-chip pre-proc params: groupIdx=%u, interChipSpaceAddr=%#llx, "
+        "dstMbufHandleAddr=%#llx, dstMbuffAllocAddr=%#llx, dstMbufHeadBlockSizeAddr=%#llx, "
+        "dstMbufDataBlockSizeAddr=%#llx, "
+        "dstMbufHeadBaseAddr=%#llx, dstMbufDataBaseAddr=%#llx, mbufDataSdmaSqeAddr=%#llx, mbufHeadSdmaSqeAddr=%#llx,"
+        "dstAllocEmptyTraceAddr=%#llx, dstNotifyAddr=%#llx, dstAddrOffset=%" PRIu64,
+        groupIdx, interChipSpaceAddr, fcPara.dstMbufHandleAddr, fcPara.dstMbuffAllocAddr,
+        fcPara.dstMbufHeadBlockSizeAddr, fcPara.dstMbufDataBlockSizeAddr, fcPara.dstMbufHeadBaseAddr,
+        fcPara.dstMbufDataBaseAddr, fcPara.mbufDataSdmaSqeAddr, fcPara.mbufHeadSdmaSqeAddr,
+        fcPara.dstAllocEmptyTraceAddr, fcPara.dstNotifyAddr, static_cast<uint64_t>(dstAddrOffset));
+    return RT_ERROR_NONE;
+}
+
+static rtError_t PrepareSqeInfoForDqsInterChipPreProcTask(TaskInfo* const taskInfo)
+{
+    RtStarsDqsInterChipPreProcPara fcPara = {};
+    rtError_t ret = InitFuncCallParaForDqsInterChipPreProcTask(taskInfo, fcPara);
+    ERROR_RETURN(ret, "Init func call para failed, retCode=%#x", static_cast<uint32_t>(ret));
+
+    DqsCommonTaskInfo* const commonTaskInfo = &(taskInfo->u.dqsInterChipPreProcTask.commonTaskInfo);
+    ret = AllocDqsCommonTaskFuncCall(commonTaskInfo, taskInfo);
+    ERROR_RETURN(ret, "Alloc func call svm failed, retCode=%#x", static_cast<uint32_t>(ret));
+
+    RtStarsDqsInterChipPreProcFc fc = {};
+    ConstructDqsInterChipPreProcFc(fc, fcPara);
+
+    const auto dev = taskInfo->stream->Device_();
+    ret = dev->Driver_()->MemCopySync(
+        commonTaskInfo->funcCallSvmMem, commonTaskInfo->funCallMemSize, &fc, commonTaskInfo->funCallMemSize,
+        RT_MEMCPY_DEVICE_TO_DEVICE);
+    if (ret != RT_ERROR_NONE) {
+        (void)FreeDqsCommonTaskFuncCall(commonTaskInfo, taskInfo);
+        RT_LOG(RT_LOG_ERROR, "MemCopySync for DqsInterChipPreProcTask failed, retCode=%#x", ret);
+    }
+
+    return ret;
+}
+
+static rtError_t PrepareSqeInfoForDqsInterChipMemcpyTask(
+    TaskInfo* const taskInfo, void*& memcpyAddrInfo, const uint32_t groupIdx, const DqsInterChipTaskType type)
+{
+    StreamWithDqs* stm = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    NULL_PTR_RETURN_MSG(stm, RT_ERROR_STREAM_NULL);
+    stars_dqs_inter_chip_space_t* interChipSpaceBasePtr = stm->GetDqsInterChipSpace();
+    NULL_PTR_RETURN_MSG(interChipSpaceBasePtr, RT_ERRORCODE_BASE);
+
+    uint64_t fieldOffset = 0ULL;
+    if (type == DqsInterChipTaskType::DQS_INTER_CHIP_TASK_MEMCPY_MBUF_HEAD) {
+        fieldOffset = offsetof(stars_dqs_inter_chip_space_t, mbuf_head_memcpy_sqe);
+    } else if (type == DqsInterChipTaskType::DQS_INTER_CHIP_TASK_MEMCPY_MBUF_DATA) {
+        fieldOffset = offsetof(stars_dqs_inter_chip_space_t, mbuf_data_memcpy_sqe);
+    } else {
+        RT_LOG(RT_LOG_ERROR, "Invalid type, streamId=%d, type=%d.", stm->Id_(), static_cast<int32_t>(type));
+        return RT_ERROR_INVALID_VALUE;
+    }
+
+    const uint64_t interChipSpaceAddr =
+        RtPtrToValue(interChipSpaceBasePtr) + static_cast<uint64_t>(groupIdx * sizeof(stars_dqs_inter_chip_space_t));
+    memcpyAddrInfo = RtValueToPtr<void*>(interChipSpaceAddr + fieldOffset);
+    RT_LOG(
+        RT_LOG_DEBUG, "Prepare dqs inter-chip memcopy task info, memcpyAddrInfo=%p, streamId=%d, groupIdx=%u, type=%d",
+        memcpyAddrInfo, stm->Id_(), groupIdx, static_cast<int32_t>(type));
+
+    return RT_ERROR_NONE;
+}
+
+static void InitDstProdEnqueMbufTracePara(
+    CondMbufTraceParam& para, const uint64_t ctrlSpaceAddr, const uint32_t streamId)
+{
+    size_t offset = offsetof(stars_dqs_inter_chip_space_t, dst_prod_trace_blk_size);
+    para.traceBlockSizeAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_prod_trace_base_addr);
+    para.traceBaseAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_lp_sys_cnt_addr);
+    para.lpSysCntAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_prod_qid);
+    para.qidAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    para.updateTimeOffset = offsetof(dqs_mbuf_prod_trace, prodq_enque_time);
+
+    offset = offsetof(dqs_mbuf_prod_trace, prod_owner_info);
+    offset = offset + offsetof(dqs_mbuf_owner_info, bits);
+    para.opTypeOffset = offset + offsetof(mbuf_owner_info_ext, op_type);
+    para.ownerIdOffset = offset + offsetof(mbuf_owner_info_ext, owner_id);
+    para.opQidOffset = offset + offsetof(mbuf_owner_info_ext, op_qid);
+    para.streamId = streamId;
+    para.opTypeVal = C_CORE_ENQUE_PRODQ;
+
+    return;
+}
+
+static void InitSrcConsFreeMbufTracePara(
+    CondMbufTraceParam& para, const uint64_t ctrlSpaceAddr, const uint32_t streamId)
+{
+    size_t offset = offsetof(stars_dqs_inter_chip_space_t, src_cons_trace_blk_size);
+    para.traceBlockSizeAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, src_cons_trace_base_addr);
+    para.traceBaseAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, src_lp_sys_cnt_addr);
+    para.lpSysCntAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, src_cons_qid);
+    para.qidAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    para.updateTimeOffset = offsetof(dqs_mbuf_cons_trace, cons_free_time);
+
+    offset = offsetof(dqs_mbuf_cons_trace, cons_owner_info);
+    offset = offset + offsetof(dqs_mbuf_owner_info, bits);
+    para.opTypeOffset = offset + offsetof(mbuf_owner_info_ext, op_type);
+    para.ownerIdOffset = offset + offsetof(mbuf_owner_info_ext, owner_id);
+    para.opQidOffset = offset + offsetof(mbuf_owner_info_ext, op_qid);
+    para.streamId = streamId;
+    para.opTypeVal = C_CORE_FREE;
+
+    return;
+}
+
+static void InitDstProdFreeMbufTracePara(
+    CondMbufTraceParam& para, const uint64_t ctrlSpaceAddr, const uint32_t streamId)
+{
+    size_t offset = offsetof(stars_dqs_inter_chip_space_t, dst_prod_trace_blk_size);
+    para.traceBlockSizeAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_prod_trace_base_addr);
+    para.traceBaseAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_lp_sys_cnt_addr);
+    para.lpSysCntAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_prod_qid);
+    para.qidAddr = ctrlSpaceAddr + static_cast<uint64_t>(offset);
+
+    para.updateTimeOffset = offsetof(dqs_mbuf_prod_trace, prod_free_time);
+
+    offset = offsetof(dqs_mbuf_prod_trace, prod_owner_info);
+    offset = offset + offsetof(dqs_mbuf_owner_info, bits);
+    para.opTypeOffset = offset + offsetof(mbuf_owner_info_ext, op_type);
+    para.ownerIdOffset = offset + offsetof(mbuf_owner_info_ext, owner_id);
+    para.opQidOffset = offset + offsetof(mbuf_owner_info_ext, op_qid);
+    para.streamId = streamId;
+    para.opTypeVal = C_CORE_FREE;
+
+    return;
+}
+
+static rtError_t InitFuncCallParaForDqsInterChipPostProcTask(
+    TaskInfo* const taskInfo, RtStarsDqsInterChipPostProcPara& fcPara)
+{
+    StreamWithDqs* stm = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    NULL_PTR_RETURN_MSG(stm, RT_ERROR_INSTANCE_NULL);
+    stars_dqs_inter_chip_space_t* interChipSpaceBasePtr = stm->GetDqsInterChipSpace();
+    NULL_PTR_RETURN_MSG(interChipSpaceBasePtr, RT_ERROR_INSTANCE_NULL);
+    DqsInterChipProcTaskInfo* dqsTask = &(taskInfo->u.dqsInterChipPostProcTask);
+    const uint32_t groupIdx = dqsTask->groupIdx;
+    const uint64_t interChipSpaceAddr =
+        RtPtrToValue(interChipSpaceBasePtr) + static_cast<uint64_t>(groupIdx * sizeof(stars_dqs_inter_chip_space_t));
+
+    size_t offset = offsetof(stars_dqs_inter_chip_space_t, src_mbuf_handle);
+    fcPara.srcMbufHandleAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_mbuf_handle);
+    fcPara.dstMbufHandleAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, src_mbuf_free_addr);
+    fcPara.srcMbufFreeAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_mbuf_free_addr);
+    fcPara.dstMbufFreeAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_qmngr_enqueue_addr);
+    fcPara.dstQueueAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_inter_chip_space_t, dst_qmngr_ow_addr);
+    fcPara.dstQmngrOwAddr = interChipSpaceAddr + static_cast<uint64_t>(offset);
+
+    const uint32_t streamId = static_cast<uint32_t>(stm->Id_());
+    InitDstProdEnqueMbufTracePara(fcPara.dstProdEnqueMbufTracePara, interChipSpaceAddr, streamId);
+    InitSrcConsFreeMbufTracePara(fcPara.srcConsFreeMbufTracePara, interChipSpaceAddr, streamId);
+    InitDstProdFreeMbufTracePara(fcPara.dstProdFreeMbufTracePara, interChipSpaceAddr, streamId);
+
+    RT_LOG(
+        RT_LOG_INFO,
+        "Init dqs inter-chip post-proc params: groupIdx=%u, interChipSpaceAddr=%#llx, "
+        "srcMbufHandle=%#llx, dstMbufHandle=%#llx, srcMbufFreeAddr=%#llx, dstMbufFreeAddr=%#llx, "
+        "dstQmngrEnQueueAddr=%#llx, "
+        "dstQmngrOwAddr=%#llx",
+        groupIdx, interChipSpaceAddr, fcPara.srcMbufHandleAddr, fcPara.dstMbufHandleAddr, fcPara.srcMbufFreeAddr,
+        fcPara.dstMbufFreeAddr, fcPara.dstQueueAddr, fcPara.dstQmngrOwAddr);
+    return RT_ERROR_NONE;
+}
+
+static rtError_t PrepareSqeInfoForDqsInterChipPostProcTask(TaskInfo* const taskInfo)
+{
+    RtStarsDqsInterChipPostProcPara fcPara = {};
+    rtError_t ret = InitFuncCallParaForDqsInterChipPostProcTask(taskInfo, fcPara);
+    ERROR_RETURN(ret, "Init func call para failed, retCode=%#x", static_cast<uint32_t>(ret));
+
+    DqsInterChipProcTaskInfo* dqsTask = &(taskInfo->u.dqsInterChipPostProcTask);
+    DqsCommonTaskInfo* const commonTaskInfo = &(dqsTask->commonTaskInfo);
+    ret = AllocDqsCommonTaskFuncCall(commonTaskInfo, taskInfo);
+    ERROR_RETURN(ret, "Alloc func call svm failed, retCode=%#x", static_cast<uint32_t>(ret));
+
+    RtStarsDqsInterChipPostProcFc fc = {};
+    ConstructDqsInterChipPostProcFc(fc, fcPara);
+
+    const auto dev = taskInfo->stream->Device_();
+    ret = dev->Driver_()->MemCopySync(
+        commonTaskInfo->funcCallSvmMem, commonTaskInfo->funCallMemSize, &fc, commonTaskInfo->funCallMemSize,
+        RT_MEMCPY_HOST_TO_DEVICE);
+    if (ret != RT_ERROR_NONE) {
+        (void)FreeDqsCommonTaskFuncCall(commonTaskInfo, taskInfo);
+        RT_LOG(RT_LOG_ERROR, "MemCopySync for DqsInterChipPreProcTask failed, retCode=%#x", ret);
+    }
+
+    return ret;
+}
+
+static rtError_t PrepareSqeInfoForDqsMbufFreeTask(TaskInfo* const taskInfo)
+{
+    DqsCommonTaskInfo* dqsMbufFreeTask = &(taskInfo->u.dqsMbufFreeTask);
+    rtError_t ret = AllocDqsCommonTaskFuncCall(dqsMbufFreeTask, taskInfo);
+    ERROR_RETURN(ret, "Alloc func call svm failed, retCode=%#x.", ret);
+
+    RtDqsMbufFreeFcPara fcPara = {};
+    ret = InitFuncCallParaForDqsMbufFreeTask(taskInfo, fcPara);
+    ERROR_RETURN(ret, "Init func call param failed, retCode=%#x.", ret);
+
+    RtStarsDqsMbufFreeFc fc = {};
+    ConstructMbufFreeInstrFc(fc, fcPara);
+    ret = taskInfo->stream->Device_()->Driver_()->MemCopySync(
+        dqsMbufFreeTask->funcCallSvmMem, dqsMbufFreeTask->funCallMemSize, &fc, dqsMbufFreeTask->funCallMemSize,
+        RT_MEMCPY_DEVICE_TO_DEVICE);
+    if (ret != RT_ERROR_NONE) {
+        (void)FreeDqsCommonTaskFuncCall(dqsMbufFreeTask, taskInfo);
+        RT_LOG(RT_LOG_ERROR, "MemCopySync for Dqs MbufFree func call failed,retCode=%#x.", ret);
+    }
+
+    return ret;
+}
+
+rtError_t DqsEnqueueTaskInit(TaskInfo* taskInfo, const Stream* const stream, const DqsTaskConfig* const cfg)
+{
+    UNUSED(cfg);
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_DQS_ENQUEUE;
+    taskInfo->typeName = "EnqueueTask";
+    DqsCommonTaskInfo* dqsEnqueueTask = &(taskInfo->u.dqsEnqueueTask);
+    InitDqsCommonTaskInfo(dqsEnqueueTask, sizeof(RtStarsDqsEnqueueFc), stream->GetSqId());
+
+    const rtError_t error = PrepareSqeInfoForDqsEnqueueTask(taskInfo);
+    ERROR_RETURN_MSG_INNER(error, "Failed to init DqsEnqueueTask, retCode=%#x.", static_cast<uint32_t>(error));
+    return RT_ERROR_NONE;
+}
+
+static rtError_t DqsSingleDequeueTaskInit(
+    TaskInfo* taskInfo, const Stream* const stream, const DqsTaskConfig* const cfg)
+{
+    UNUSED(cfg);
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_DQS_DEQUEUE;
+    taskInfo->typeName = "DequeueTask";
+    DqsCommonTaskInfo* const dqsDequeueTask = &(taskInfo->u.dqsDequeueTask);
+    InitDqsCommonTaskInfo(dqsDequeueTask, sizeof(RtStarsDqsDequeueFc), stream->GetSqId());
+
+    const rtError_t error = PrepareSqeInfoForDqsDequeueTask(taskInfo);
+    ERROR_RETURN_MSG_INNER(error, "Failed to init DqsDequeueTask, retCode=%#x.", static_cast<uint32_t>(error));
+    return RT_ERROR_NONE;
+}
+
+static rtError_t DqsBatchDequeueTaskInit(TaskInfo* taskInfo, const Stream* const stream, const DqsTaskConfig* const cfg)
+{
+    UNUSED(cfg);
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_DQS_BATCH_DEQUEUE;
+    taskInfo->typeName = "BatchDequeueTask";
+    DqsCommonTaskInfo* const dqsBatchDequeueTask = &(taskInfo->u.dqsBatchDequeueTask);
+    InitDqsCommonTaskInfo(dqsBatchDequeueTask, sizeof(RtStarsDqsBatchDequeueFc), stream->GetSqId());
+
+    const rtError_t error = PrepareSqeInfoForDqsBatchDequeueTask(taskInfo);
+    ERROR_RETURN_MSG_INNER(error, "Failed to init BatchDequeueTask, retCode=%#x.", static_cast<uint32_t>(error));
+    return RT_ERROR_NONE;
+}
+
+rtError_t DqsDequeueTaskInit(TaskInfo* taskInfo, const Stream* const stream, const DqsTaskConfig* const cfg)
+{
+    /* 总入口处已经做过入参校验，此处无需再做 */
+    StreamWithDqs* stm = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    NULL_PTR_RETURN_MSG(stm, RT_ERROR_STREAM_NULL);
+    stars_dqs_ctrl_space_t* ctrlSpacePtr = stm->GetDqsCtrlSpace();
+    COND_RETURN_ERROR((ctrlSpacePtr == nullptr), RT_ERROR_INVALID_VALUE, "ctrl space is nullptr.");
+    if (ctrlSpacePtr->input_queue_num == 1) {
+        return DqsSingleDequeueTaskInit(taskInfo, stream, cfg);
+    } else {
+        return DqsBatchDequeueTaskInit(taskInfo, stream, cfg);
+    }
+
+    return RT_ERROR_NONE;
+}
+
+rtError_t DqsZeroCopyTaskInit(TaskInfo* taskInfo, const Stream* const stream, const DqsTaskConfig* const cfg)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_DQS_ZERO_COPY;
+    taskInfo->typeName = "ZeroCopyTask";
+    DqsCommonTaskInfo* const commonTaskInfo = &(taskInfo->u.dqsZeroCopyTask.commonTaskInfo);
+    InitDqsCommonTaskInfo(commonTaskInfo, sizeof(RtStarsDqsZeroCopyFc), stream->GetSqId());
+    // 需要区分IN & OUT
+    taskInfo->u.dqsZeroCopyTask.copyType = cfg->zeroCopyCfg->copyType;
+    const rtError_t error = PrepareSqeInfoForDqsZeroCopyTask(taskInfo, cfg);
+    ERROR_RETURN_MSG_INNER(error, "Failed to init DqsZeroCopyTask, retCode=%#x.", static_cast<uint32_t>(error));
+    return RT_ERROR_NONE;
+}
+
+void DqsZeroCopyTaskUnInit(TaskInfo* const taskInfo) { (void)FreeSvmMemForDqsZeroCopyTask(taskInfo); }
+
+void PrintErrorInfoForDqsZeroCopyTask(TaskInfo* taskInfo, const uint32_t devId)
+{
+    StreamWithDqs* streamWithDqs = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    COND_RETURN_VOID(streamWithDqs == nullptr, "streamWithDqs is nullptr");
+
+    stars_dqs_ctrl_space_t* ctrlSpace = streamWithDqs->GetDqsCtrlSpace();
+    if (ctrlSpace == nullptr) {
+        RT_LOG_INNER_MSG(
+            RT_LOG_ERROR,
+            "PrintErrorInfoForDqsZeroCopyTask failed because ctrlSpacePtr cannot be a NULL pointer, device_id=%u, "
+            "stream_id=%d.",
+            devId, streamWithDqs->Id_());
+        return;
+    }
+}
+
+rtError_t DqsMbufFreeTaskInit(TaskInfo* taskInfo, const Stream* const stream, const DqsTaskConfig* const cfg)
+{
+    UNUSED(cfg);
+    rtError_t error = RT_ERROR_NONE;
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_DQS_MBUF_FREE;
+    taskInfo->typeName = "MbufFreeTask";
+    InitDqsCommonTaskInfo(&(taskInfo->u.dqsMbufFreeTask), sizeof(RtStarsDqsMbufFreeFc), stream->GetSqId());
+
+    error = PrepareSqeInfoForDqsMbufFreeTask(taskInfo);
+    ERROR_RETURN_MSG_INNER(error, "Failed to init DqsMbufFreeTask, retCode=%#x.", static_cast<uint32_t>(error));
+    return RT_ERROR_NONE;
+}
+
+rtError_t DqsSchedEndTaskInit(TaskInfo* taskInfo, const Stream* const stream, const DqsTaskConfig* const cfg)
+{
+    UNUSED(cfg);
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->typeName = "SchedEndTask";
+    taskInfo->type = TS_TASK_TYPE_DQS_SCHED_END;
+
+    DqsSchedEndTaskInfo* dqsSchedEndTask = &taskInfo->u.dqsSchedEndTask;
+    dqsSchedEndTask->stream = RtPtrToUnConstPtr<Stream*>(stream);
+    return RT_ERROR_NONE;
+}
+
+rtError_t DqsInterChipPreProcTaskInit(TaskInfo* taskInfo, const uint32_t groupIdx, const DqsInterChipTaskType type)
+{
+    UNUSED(type);
+    Stream* stm = taskInfo->stream;
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_DQS_INTER_CHIP_PREPROC;
+    taskInfo->typeName = "DqsInterChipPreProcTask";
+
+    DqsInterChipProcTaskInfo* dqsTask = &(taskInfo->u.dqsInterChipPreProcTask);
+    DqsCommonTaskInfo* const commonTaskInfo = &(dqsTask->commonTaskInfo);
+    dqsTask->groupIdx = groupIdx;
+    InitDqsCommonTaskInfo(commonTaskInfo, sizeof(RtStarsDqsInterChipPreProcFc), stm->GetSqId());
+
+    const rtError_t error = PrepareSqeInfoForDqsInterChipPreProcTask(taskInfo);
+    ERROR_RETURN(error, "Init for DqsInterChipPreProcTask failed, retCode=%#x", static_cast<uint32_t>(error));
+
+    return RT_ERROR_NONE;
+}
+
+void DqsInterChipPreProcTaskUnInit(TaskInfo* const taskInfo)
+{
+    (void)FreeDqsCommonTaskFuncCall(&(taskInfo->u.dqsInterChipPreProcTask.commonTaskInfo), taskInfo);
+}
+
+void PrintErrorInfoForDqsInterChipPreProcTask(TaskInfo* taskInfo, const uint32_t devId)
+{
+    StreamWithDqs* streamWithDqs = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    COND_RETURN_VOID(streamWithDqs == nullptr, "streamWithDqs is nullptr");
+
+    stars_dqs_inter_chip_space_t* interChipSpace = streamWithDqs->GetDqsInterChipSpace();
+    if (interChipSpace == nullptr) {
+        RT_LOG_INNER_MSG(
+            RT_LOG_ERROR,
+            "PrintErrorInfoForDqsInterChipPreProcTask failed because interChipSpace cannot be a NULL pointer, "
+            "device_id=%u, stream_id=%d.",
+            devId, streamWithDqs->Id_());
+        return;
+    }
+}
+
+rtError_t DqsInterChipMemcpyTaskInit(TaskInfo* taskInfo, const uint32_t groupIdx, const DqsInterChipTaskType type)
+{
+    void* memcpyAddrInfo = nullptr;
+    rtError_t error = PrepareSqeInfoForDqsInterChipMemcpyTask(taskInfo, memcpyAddrInfo, groupIdx, type);
+    ERROR_RETURN_MSG_INNER(
+        error,
+        "Failed to prepare the SQE information for the DQS inter-chip memory copy task, "
+        "groupIdx=%u, type=%u, retCode=%#x.",
+        groupIdx, static_cast<uint32_t>(type), static_cast<uint32_t>(error));
+
+    error = MemcpyAsyncTaskInitV1(taskInfo, memcpyAddrInfo, 0ULL);
+    ERROR_RETURN_MSG_INNER(
+        error, "Failed to initialize DQS inter-chip memory copy task, groupIdx=%u, type=%u, retCode=%#x.", groupIdx,
+        static_cast<uint32_t>(type), static_cast<uint32_t>(error));
+
+    return RT_ERROR_NONE;
+}
+
+rtError_t DqsInterChipPostProcTaskInit(TaskInfo* taskInfo, const uint32_t groupIdx, const DqsInterChipTaskType type)
+{
+    UNUSED(type);
+    Stream* stm = taskInfo->stream;
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_DQS_INTER_CHIP_POSTPROC;
+    taskInfo->typeName = "DqsInterChipPostProcTask";
+
+    DqsInterChipProcTaskInfo* dqsTask = &(taskInfo->u.dqsInterChipPostProcTask);
+    DqsCommonTaskInfo* const commonTaskInfo = &(dqsTask->commonTaskInfo);
+    dqsTask->groupIdx = groupIdx;
+    InitDqsCommonTaskInfo(commonTaskInfo, sizeof(RtStarsDqsInterChipPostProcFc), stm->GetSqId());
+
+    const rtError_t error = PrepareSqeInfoForDqsInterChipPostProcTask(taskInfo);
+    ERROR_RETURN(error, "Init failed, retCode=%#x", static_cast<uint32_t>(error));
+
+    return RT_ERROR_NONE;
+}
+
+void DqsInterChipPostProcTaskUnInit(TaskInfo* const taskInfo)
+{
+    (void)FreeDqsCommonTaskFuncCall(&(taskInfo->u.dqsInterChipPostProcTask.commonTaskInfo), taskInfo);
+}
+
+void PrintErrorInfoForDqsInterChipPostProcTask(TaskInfo* taskInfo, const uint32_t devId)
+{
+    StreamWithDqs* streamWithDqs = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    COND_RETURN_VOID(streamWithDqs == nullptr, "streamWithDqs is nullptr");
+
+    stars_dqs_inter_chip_space_t* interChipSpace = streamWithDqs->GetDqsInterChipSpace();
+    COND_RETURN_VOID(
+        interChipSpace == nullptr, "dqs inter-chip space is nullptr, stream_id=%d, deviceId=%u", streamWithDqs->Id_(),
+        devId);
+}
+
+rtError_t DqsInterChipNopTaskInit(TaskInfo* taskInfo, const uint32_t groupIdx, const DqsInterChipTaskType type)
+{
+    UNUSED(groupIdx);
+    UNUSED(type);
+    taskInfo->type = TS_TASK_TYPE_NOP;
+    taskInfo->typeName = "NOP";
+    return RT_ERROR_NONE;
+}
+
+void ConstructSqeForDqsMbufFreeTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    RtDavidStarsFunctionCallSqe& fnCallSqe = davidSqe->fuctionCallSqe;
+    DqsCommonTaskInfo* dqsTask = &(taskInfo->u.dqsMbufFreeTask);
+
+    const Stream* const stm = taskInfo->stream;
+    InitDqsFunctionCallSqe(fnCallSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, CONDS_SUB_TYPE_DQS_MBUF_FREE);
+
+    const uint64_t funcAddr = RtPtrToValue(dqsTask->funcCallSvmMem);
+    constexpr uint64_t funcCallSize = static_cast<uint64_t>(sizeof(RtStarsDqsMbufFreeFc));
+
+    // func call size is rs2[19:0]*4Byte
+    ConstructFunctionCallInstr(funcAddr, (funcCallSize / 4UL), fnCallSqe);
+
+    PrintDavidSqe(davidSqe, "DqsMbufFree");
+    RT_LOG(
+        RT_LOG_INFO, "DqsMbufFree, deviceId=%u, streamId=%d, taskId=%hu", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id);
+}
+
+void ConstructSqeForDqsEnqueueTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    RtDavidStarsFunctionCallSqe& fnCallSqe = davidSqe->fuctionCallSqe;
+    DqsCommonTaskInfo* dqsEnqueueTask = &(taskInfo->u.dqsEnqueueTask);
+
+    const Stream* const stm = taskInfo->stream;
+    InitDqsFunctionCallSqe(fnCallSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, CONDS_SUB_TYPE_DQS_ENQUEUE);
+
+    const uint64_t funcAddr = RtPtrToValue(dqsEnqueueTask->funcCallSvmMem);
+    constexpr uint64_t funcCallSize = static_cast<uint64_t>(sizeof(RtStarsDqsEnqueueFc));
+
+    // func call size is rs2[19:0]*4Byte
+    ConstructFunctionCallInstr(funcAddr, (funcCallSize / 4UL), fnCallSqe);
+
+    PrintDavidSqe(davidSqe, "DqsEnqueue");
+    RT_LOG(
+        RT_LOG_INFO, "DqsEnqueue, deviceId=%u, streamId=%d, taskId=%hu", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id);
+}
+
+void ConstructSqeForDqsDequeueTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    RtDavidStarsFunctionCallSqe& fnCallSqe = davidSqe->fuctionCallSqe;
+    DqsCommonTaskInfo* dqsDequeueTask = &(taskInfo->u.dqsDequeueTask);
+
+    const Stream* const stm = taskInfo->stream;
+    InitDqsFunctionCallSqe(fnCallSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, CONDS_SUB_TYPE_DQS_DEQUEUE);
+
+    const uint64_t funcAddr = RtPtrToValue(dqsDequeueTask->funcCallSvmMem);
+    constexpr uint64_t funcCallSize = static_cast<uint64_t>(sizeof(RtStarsDqsDequeueFc));
+
+    // func call size is rs2[19:0]*4Byte
+    ConstructFunctionCallInstr(funcAddr, (funcCallSize / 4UL), fnCallSqe);
+
+    PrintDavidSqe(davidSqe, "DqsDequeue");
+    RT_LOG(
+        RT_LOG_INFO, "DqsDequeue, deviceId=%u, streamId=%d, taskId=%hu", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id);
+}
+
+void ConstructSqeForDqsBatchDequeueTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    RtDavidStarsFunctionCallSqe& fnCallSqe = davidSqe->fuctionCallSqe;
+    DqsCommonTaskInfo* dqsBatchDequeueTask = &(taskInfo->u.dqsBatchDequeueTask);
+
+    const Stream* const stm = taskInfo->stream;
+    InitDqsFunctionCallSqe(fnCallSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, CONDS_SUB_TYPE_DQS_BATCH_DEQUEUE);
+
+    const uint64_t funcAddr = RtPtrToValue(dqsBatchDequeueTask->funcCallSvmMem);
+    constexpr uint64_t funcCallSize = static_cast<uint64_t>(sizeof(RtStarsDqsBatchDequeueFc));
+
+    // func call size is rs2[19:0]*4Byte
+    ConstructFunctionCallInstr(funcAddr, (funcCallSize / 4UL), fnCallSqe);
+    PrintDavidSqe(davidSqe, "DqsBatchDequeue");
+    RT_LOG(
+        RT_LOG_INFO, "DqsBatchDequeue, deviceId=%u, streamId=%d, taskId=%hu", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id);
+}
+
+void ConstructSqeForDqsFrameAlignTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    RtDavidStarsFunctionCallSqe& fnCallSqe = davidSqe->fuctionCallSqe;
+    DqsCommonTaskInfo* dqsFrameAlignTask = &(taskInfo->u.dqsFrameAlignTask);
+
+    const Stream* const stm = taskInfo->stream;
+    InitDqsFunctionCallSqe(fnCallSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, CONDS_SUB_TYPE_DQS_FRAME_ALIGN);
+
+    const uint64_t funcAddr = RtPtrToValue(dqsFrameAlignTask->funcCallSvmMem);
+    const uint64_t funcCallSize = dqsFrameAlignTask->funCallMemSize;
+
+    // func call size is rs2[19:0]*4Byte
+    ConstructFunctionCallInstr(funcAddr, (funcCallSize / 4UL), fnCallSqe);
+
+    PrintDavidSqe(davidSqe, "DqsFrameAlign");
+    RT_LOG(
+        RT_LOG_INFO, "DqsFrameAlignTask, deviceId=%u, streamId=%d, taskId=%hu", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id);
+}
+
+void ConstructSqeForDqsZeroCopyTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    RtDavidStarsFunctionCallSqe& fnCallSqe = davidSqe->fuctionCallSqe;
+    DqsZeroCopyTaskInfo* dqsZeroCopyTask = &(taskInfo->u.dqsZeroCopyTask);
+    const Stream* const stm = taskInfo->stream;
+    const RtCondsSubType zeroCopyType = (taskInfo->u.dqsZeroCopyTask.copyType == RT_DQS_ZERO_COPY_INPUT) ?
+                                            CONDS_SUB_TYPE_DQS_ZERO_COPY_IN :
+                                            CONDS_SUB_TYPE_DQS_ZERO_COPY_OUT;
+    InitDqsFunctionCallSqe(fnCallSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, zeroCopyType);
+
+    DqsCommonTaskInfo* const commonTaskInfo = &(dqsZeroCopyTask->commonTaskInfo);
+    const uint64_t funcAddr = RtPtrToValue(commonTaskInfo->funcCallSvmMem);
+    constexpr uint64_t funcCallSize = static_cast<uint64_t>(sizeof(RtStarsDqsZeroCopyFc));
+
+    // func call size is rs2[19:0]*4Byte
+    ConstructFunctionCallInstr(funcAddr, (funcCallSize / 4UL), fnCallSqe);
+
+    PrintDavidSqe(davidSqe, "DqsZeroCopy");
+    RT_LOG(
+        RT_LOG_INFO, "DqsZeroCopy, deviceId=%u, streamId=%d, taskId=%hu", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id);
+}
+
+void ConstructSqeForDqsConditionCopyTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    uint64_t funcCallSize = 0ULL;
+    RtDavidStarsFunctionCallSqe& fnCallSqe = davidSqe->fuctionCallSqe;
+    DqsCommonTaskInfo* commonTaskInfo = &(taskInfo->u.dqsCondCopyTask);
+    const Stream* const stm = taskInfo->stream;
+    InitDqsFunctionCallSqe(fnCallSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, CONDS_SUB_TYPE_DQS_CONDITION_COPY);
+
+    const uint64_t funcAddr = RtPtrToValue(commonTaskInfo->funcCallSvmMem);
+    funcCallSize = static_cast<uint64_t>(sizeof(RtStarsDqsConditionCopyFc));
+
+    // func call size is rs2[19:0]*4Byte
+    ConstructFunctionCallInstr(funcAddr, (funcCallSize / 4UL), fnCallSqe);
+
+    PrintDavidSqe(davidSqe, "DqsConditionCopy");
+    RT_LOG(
+        RT_LOG_INFO, "DqsConditionCopy, device_id=%u, stream_id=%d, task_id=%hu", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id);
+}
+
+static void ResetMbufListOpSnapshot(
+    const rtStarsCondIsaRegister_t dstReg, uint64_t mbufListOpSnapshotAddr, RtDavidStarsDqsSchedEndSqe& sqe)
+{
+    constexpr rtStarsCondIsaRegister_t r0 = RT_STARS_COND_ISA_REGISTER_R0;
+    constexpr rtStarsCondIsaRegister_t r3 = RT_STARS_COND_ISA_REGISTER_R3;
+
+    ConstructLLWI(dstReg, mbufListOpSnapshotAddr, sqe.llwiMbufOpSnapshotAddr);
+    ConstructLHWI(dstReg, mbufListOpSnapshotAddr, sqe.lhwiMbufOpSnapshotAddr);
+    // 前8个字节
+    ConstructStore(dstReg, r0, 0U, RT_STARS_COND_ISA_STORE_FUNC3_SD, sqe.resetSnapShot);
+    // 偏移8个字节，写4个字节初始化batch deque dot为全F
+    ConstructOpImmAndi(dstReg, dstReg, 8U, RT_STARS_COND_ISA_OP_IMM_FUNC3_ADDI, sqe.addiGetBatchDequeDotAddr);
+    ConstructLLWI(r3, UINT32_MAX, sqe.llwiLoadDeaultDotVal);
+    ConstructStore(dstReg, r3, 0U, RT_STARS_COND_ISA_STORE_FUNC3_SW, sqe.resetBatchDequeueDot);
+
+    return;
+}
+
+static void ConstructDqsSchedEndInstr(
+    const uint16_t sqId, const uint64_t mbufListOpSnapshotAddr, RtDavidStarsDqsSchedEndSqe& sqe)
+{
+    constexpr rtStarsCondIsaRegister_t r0 = RT_STARS_COND_ISA_REGISTER_R0;
+    constexpr rtStarsCondIsaRegister_t r1 = RT_STARS_COND_ISA_REGISTER_R1;
+    constexpr rtStarsCondIsaRegister_t r2 = RT_STARS_COND_ISA_REGISTER_R2;
+
+    // 调度完成，对快照统计信息做重置
+    ResetMbufListOpSnapshot(r1, mbufListOpSnapshotAddr, sqe);
+
+    ConstructLHWI(r2, sqId, sqe.lhwi);
+    ConstructLLWI(r2, sqId, sqe.llwi);
+    ConstructGotoR(r2, r0, sqe.gotor);
+
+    return;
+}
+
+void ConstructSqeForDqsSchedEndTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    RtDavidStarsDqsSchedEndSqe& dqsSchedEndSqe = davidSqe->dqsSchedEndSqe;
+    DqsSchedEndTaskInfo* const dqsSchedEndTask = &(taskInfo->u.dqsSchedEndTask);
+    Stream* stream = dqsSchedEndTask->stream;
+    const uint16_t sqId = stream->GetSqId();
+
+    StreamWithDqs* stm = dynamic_cast<StreamWithDqs*>(stream);
+    COND_RETURN_VOID(stm == nullptr, "stm is not stream with dqs.");
+    stars_dqs_ctrl_space_t* ctrlSpacePtr = stm->GetDqsCtrlSpace();
+    COND_RETURN_VOID(ctrlSpacePtr == nullptr, "ctrl space is nullptr.");
+
+    const uint64_t ctrlSpacePtrVal = RtPtrToValue(ctrlSpacePtr);
+    const uint64_t offset = offsetof(stars_dqs_ctrl_space_t, mbuf_list_op_snapshot);
+    const uint64_t mbufListOpSnapshotAddr = ctrlSpacePtrVal + offset;
+    ConstructDqsSchedEndInstr(sqId, mbufListOpSnapshotAddr, dqsSchedEndSqe);
+
+    InitDqsFunctionCallSqe(dqsSchedEndSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, CONDS_SUB_TYPE_DQS_SCHED_END);
+    PrintDavidSqe(davidSqe, "DqsSchedEnd");
+    RT_LOG(
+        RT_LOG_INFO, "DqsSchedEnd, deviceId=%u, streamId=%d, taskId=%hu, sqId=%u", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id, sqId);
+}
+
+void ConstructSqeForDqsInterChipPreProcTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    RtDavidStarsFunctionCallSqe& fnCallSqe = davidSqe->fuctionCallSqe;
+    DqsInterChipProcTaskInfo* dqsInterChipPreProcTask = &(taskInfo->u.dqsInterChipPreProcTask);
+    const Stream* const stm = taskInfo->stream;
+    InitDqsFunctionCallSqe(
+        fnCallSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, CONDS_SUB_TYPE_DQS_INTER_CHIP_PREPROC);
+    DqsCommonTaskInfo* const commonTaskInfo = &(dqsInterChipPreProcTask->commonTaskInfo);
+    const uint64_t funcAddr = RtPtrToValue(commonTaskInfo->funcCallSvmMem);
+    constexpr uint64_t funcCallSize = static_cast<uint64_t>(sizeof(RtStarsDqsInterChipPreProcFc));
+    // func call size is rs2[19:0]*4Byte
+    ConstructFunctionCallInstr(funcAddr, (funcCallSize / 4UL), fnCallSqe);
+
+    PrintDavidSqe(davidSqe, "DqsInterChipPreProc");
+    RT_LOG(
+        RT_LOG_INFO, "DqsInterChipPreProc, deviceId=%u, streamId=%d, taskId=%hu", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id);
+}
+
+void ConstructSqeForDqsInterChipPostProcTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    RtDavidStarsFunctionCallSqe& fnCallSqe = davidSqe->fuctionCallSqe;
+    DqsInterChipProcTaskInfo* dqsInterChipPostProcTask = &(taskInfo->u.dqsInterChipPostProcTask);
+    const Stream* const stm = taskInfo->stream;
+    InitDqsFunctionCallSqe(
+        fnCallSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, CONDS_SUB_TYPE_DQS_INTER_CHIP_POSTPROC);
+    DqsCommonTaskInfo* const commonTaskInfo = &(dqsInterChipPostProcTask->commonTaskInfo);
+    const uint64_t funcAddr = RtPtrToValue(commonTaskInfo->funcCallSvmMem);
+    constexpr uint64_t funcCallSize = static_cast<uint64_t>(sizeof(RtStarsDqsInterChipPostProcFc));
+    // func call size is rs2[19:0]*4Byte
+    ConstructFunctionCallInstr(funcAddr, (funcCallSize / 4UL), fnCallSqe);
+
+    PrintDavidSqe(davidSqe, "DqsInterChipPostProc");
+    RT_LOG(
+        RT_LOG_INFO, "DqsInterChipPostProc, deviceId=%u, streamId=%d, taskId=%hu", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id);
+}
+
+void ConstructSqeForDqsAdspcTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    RtDavidStarsFunctionCallSqe& fnCallSqe = davidSqe->fuctionCallSqe;
+    DqsAdspcTaskInfo* dqsAdspcTask = &(taskInfo->u.dqsAdspcTaskInfo);
+    const Stream* const stm = taskInfo->stream;
+    InitDqsFunctionCallSqe(fnCallSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, CONDS_SUB_TYPE_DQS_ADSPC);
+    DqsCommonTaskInfo* const commonTaskInfo = &(dqsAdspcTask->commonTaskInfo);
+    const uint64_t funcAddr = RtPtrToValue(commonTaskInfo->funcCallSvmMem);
+    constexpr uint64_t funcCallSize = static_cast<uint64_t>(sizeof(RtStarsDqsAdspcFc));
+    // func call size is rs2[19:0]*4Byte
+    ConstructFunctionCallInstr(funcAddr, (funcCallSize / 4UL), fnCallSqe);
+
+    PrintDavidSqe(davidSqe, "DqsAdspcTask");
+    RT_LOG(
+        RT_LOG_INFO, "DqsAdspcTask, deviceId=%u, streamId=%d, taskId=%hu", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id);
+}
+
+static void InitPrepareAllocMbufTracePara(
+    CondMbufTraceParam& para, const uint64_t ctrlSpaceAddr, const uint32_t streamId)
+{
+    InitOutputCommonMbufTracePara(para, ctrlSpaceAddr, streamId);
+    para.updateTimeOffset = offsetof(dqs_mbuf_prod_trace, alloc_req_time);
+    para.opTypeVal = C_CORE_ALLOC;
+
+    return;
+}
+
+static rtError_t InitFuncCallParaForDqsPrepareTask(TaskInfo* taskInfo, RtStarsDqsPrepareFcPara& fcPara)
+{
+    StreamWithDqs* stm = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    NULL_PTR_RETURN_MSG(stm, RT_ERROR_STREAM_NULL);
+    stars_dqs_ctrl_space_t* ctrlSpacePtr = stm->GetDqsCtrlSpace();
+    COND_RETURN_ERROR((ctrlSpacePtr == nullptr), RT_ERROR_INVALID_VALUE, "ctrl space is nullptr.");
+
+    fcPara.outputQueueNum = ctrlSpacePtr->output_queue_num;
+    fcPara.dfxMbufAllocPoolIdx = RtPtrToValue(taskInfo->u.dqsPrepareTask.dfxPtr);
+    fcPara.dfxMbufAllocResult = fcPara.dfxMbufAllocPoolIdx + sizeof(uint32_t);
+    fcPara.ctrlSpacePtr = RtPtrToValue(ctrlSpacePtr);
+
+    size_t offset = offsetof(stars_dqs_ctrl_space_t, input_mbuf_list);
+    fcPara.csPtrInputMbufHandleAddr = fcPara.ctrlSpacePtr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, input_head_pool_base_addrs);
+    fcPara.csPtrInputHeadPoolBaseAddr = fcPara.ctrlSpacePtr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, input_head_pool_block_size_list);
+    fcPara.csPtrInputHeadPoolBlockSize = fcPara.ctrlSpacePtr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, output_mbuf_alloc_addrs);
+    fcPara.csPtrOutputMbufAllocAddr = fcPara.ctrlSpacePtr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, output_mbuf_list);
+    fcPara.csPtrOutputMbufHandleAddr = fcPara.ctrlSpacePtr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, output_head_pool_base_addrs);
+    fcPara.csPtrOutputHeadPoolBaseAddr = fcPara.ctrlSpacePtr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, output_head_pool_block_size_list);
+    fcPara.csPtrOutputHeadPoolBlockSize = fcPara.ctrlSpacePtr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, mbuf_list_op_snapshot);
+    offset += offsetof(mbuf_list_op_snapshot_info, alloc_post_dot);
+    fcPara.allocPostDotAddr = fcPara.ctrlSpacePtr + static_cast<uint64_t>(offset);
+
+    offset = offsetof(stars_dqs_ctrl_space_t, task_error_code);
+    offset += offsetof(dqs_task_error_code_t, prepare_task_error_code);
+    fcPara.prepareErrorCodeAddr = fcPara.ctrlSpacePtr + static_cast<uint64_t>(offset);
+
+    const uint32_t streamId = static_cast<uint32_t>(stm->Id_());
+    InitPrepareAllocMbufTracePara(fcPara.allocMbufTracePara, fcPara.ctrlSpacePtr, streamId);
+
+    RT_LOG(
+        RT_LOG_INFO,
+        "init dqs prepare function call params, dfxPoolIdx=%#llx, dfxMbufAllocRes=%#llx, "
+        "ctrlSpace=%#llx, inputMbufHandle=%#llx, inputHeadPoolBase=%#llx, inputHeadPoolBlkSize=%#llx, "
+        "outputMbufAlloc=%#llx, outputMbufHandle=%#llx, outputHeadPoolBase=%#llx, outputHeadPoolBlkSize=%#llx",
+        fcPara.dfxMbufAllocPoolIdx, fcPara.dfxMbufAllocResult, fcPara.ctrlSpacePtr, fcPara.csPtrInputMbufHandleAddr,
+        fcPara.csPtrInputHeadPoolBaseAddr, fcPara.csPtrInputHeadPoolBlockSize, fcPara.csPtrOutputMbufAllocAddr,
+        fcPara.csPtrOutputMbufHandleAddr, fcPara.csPtrOutputHeadPoolBaseAddr, fcPara.csPtrOutputHeadPoolBlockSize);
+
+    return RT_ERROR_NONE;
+}
+
+static rtError_t PrepareSqeInfoForDqsPrepareTask(TaskInfo* taskInfo)
+{
+    DqsCommonTaskInfo* dqsPrepareTask = &(taskInfo->u.dqsPrepareTask);
+    rtError_t ret = AllocDqsCommonTaskFuncCall(dqsPrepareTask, taskInfo);
+    ERROR_RETURN(ret, "Alloc func call svm failed, retCode=%#x.", static_cast<uint32_t>(ret));
+
+    RtStarsDqsPrepareFcPara fcPara = {};
+    ret = InitFuncCallParaForDqsPrepareTask(taskInfo, fcPara);
+    ERROR_RETURN(ret, "Init func call param failed, retCode=%#x.", static_cast<uint32_t>(ret));
+
+    RtStarsDqsPrepareOutFc fc = {};
+    ConstructDqsPrepareFc(fc, fcPara);
+    const auto dev = taskInfo->stream->Device_();
+    ret = dev->Driver_()->MemCopySync(
+        dqsPrepareTask->funcCallSvmMem, dqsPrepareTask->funCallMemSize, &fc, dqsPrepareTask->funCallMemSize,
+        RT_MEMCPY_DEVICE_TO_DEVICE);
+    if (ret != RT_ERROR_NONE) {
+        (void)FreeDqsCommonTaskFuncCall(dqsPrepareTask, taskInfo);
+        RT_LOG(RT_LOG_ERROR, "MemCopySync for Dqs prepare func call failed,retCode=%#x.", ret);
+    }
+
+    return ret;
+}
+
+void PrintErrorInfoForDqsPrepareTask(TaskInfo* taskInfo, const uint32_t devId)
+{
+    StreamWithDqs* streamWithDqs = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    COND_RETURN_VOID(streamWithDqs == nullptr, "streamWithDqs is nullptr");
+
+    stars_dqs_ctrl_space_t* ctrlSpace = streamWithDqs->GetDqsCtrlSpace();
+    COND_RETURN_VOID(
+        ctrlSpace == nullptr, "dqs ctrl space is nullptr, stream_id=%d, deviceId=%u", streamWithDqs->Id_(), devId);
+
+    DqsCommonTaskInfo* dqsPrepareTask = &(taskInfo->u.dqsPrepareTask);
+    uint32_t dfx[2U] = {0U}; // 0: pool_idx, 1: alloc result
+    const auto dev = taskInfo->stream->Device_();
+    (void)dev->Driver_()->MemCopySync(
+        dfx, sizeof(dfx), dqsPrepareTask->dfxPtr, sizeof(dfx), RT_MEMCPY_DEVICE_TO_DEVICE);
+    const uint32_t failPoolIdx = dfx[0U];
+    RT_LOG(
+        RT_LOG_ERROR,
+        "dqs prepare error, alloc output mbuf handle failed, device_id=%u, stream_id=%d, task_id=%u, "
+        "alloc error_result=%#x, idx=%u, pool_id=%u",
+        devId, taskInfo->stream->Id_(), taskInfo->id, dfx[1U], failPoolIdx,
+        ctrlSpace->output_mbuf_pool_ids[failPoolIdx]);
+
+    return;
+}
+
+rtError_t DqsPrepareTaskInit(TaskInfo* taskInfo, const Stream* const stream, const DqsTaskConfig* const cfg)
+{
+    UNUSED(cfg);
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_DQS_PREPARE;
+    taskInfo->typeName = "DqsPrepareTask";
+    DqsCommonTaskInfo* dqsPrepareTask = &(taskInfo->u.dqsPrepareTask);
+    InitDqsCommonTaskInfo(dqsPrepareTask, sizeof(RtStarsDqsPrepareOutFc), stream->GetSqId());
+
+    const rtError_t error = PrepareSqeInfoForDqsPrepareTask(taskInfo);
+    ERROR_RETURN(error, "init for DqsPrepareTask failed, retCode=%#x.", static_cast<uint32_t>(error));
+    return RT_ERROR_NONE;
+}
+
+static rtError_t InitFuncCallParaForDqsFrameAlignTask(
+    TaskInfo* taskInfo, stars_dqs_ctrl_space_t* ctrlSpacePtr, RtStarsDqsFrameAlignFcPara& fcPara)
+{
+    fcPara.inputMbufListAddr = RtPtrToValue(ctrlSpacePtr->input_mbuf_list);
+    fcPara.inputMbufCacheListAddr = RtPtrToValue(ctrlSpacePtr->input_mbuf_cache_list);
+    fcPara.sqId = taskInfo->u.dqsFrameAlignTask.sqId;
+    fcPara.inputQueueNum = ctrlSpacePtr->input_queue_num;
+    fcPara.cntOffset = static_cast<uint8_t>(offsetof(input_mbuf_cache_t, cnt));
+    fcPara.sizeofHandleCache = static_cast<uint8_t>(sizeof(input_mbuf_cache_t));
+    return RT_ERROR_NONE;
+}
+
+static rtError_t PrepareSqeInfoForDqsFrameAlignTask(TaskInfo* taskInfo)
+{
+    DqsCommonTaskInfo* dqsFrameAlignTask = &(taskInfo->u.dqsFrameAlignTask);
+    StreamWithDqs* stm = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    NULL_PTR_RETURN_MSG(stm, RT_ERROR_INSTANCE_NULL);
+    stars_dqs_ctrl_space_t* ctrlSpacePtr = stm->GetDqsCtrlSpace();
+    COND_RETURN_ERROR((ctrlSpacePtr == nullptr), RT_ERROR_INVALID_VALUE, "ctrl space is nullptr.");
+
+    const bool isDss = (ctrlSpacePtr->type == static_cast<uint8_t>(RT_DQS_SCHED_TYPE_DSS));
+    dqsFrameAlignTask->funCallMemSize = isDss ? sizeof(RtStarsDqsFrameAlignForDssFc) : sizeof(RtStarsDqsFrameAlignFc);
+
+    rtError_t ret = AllocDqsCommonTaskFuncCall(dqsFrameAlignTask, taskInfo);
+    ERROR_RETURN(ret, "Alloc func call svm failed, retCode=%#x.", static_cast<uint32_t>(ret));
+
+    RtStarsDqsFrameAlignFcPara fcPara = {};
+    ret = InitFuncCallParaForDqsFrameAlignTask(taskInfo, ctrlSpacePtr, fcPara);
+
+    const auto dev = taskInfo->stream->Device_();
+    if ((ret == RT_ERROR_NONE) && isDss) {
+        RtStarsDqsFrameAlignForDssFc fc = {};
+        ConstructDqsFrameAlignForDssFc(fc, fcPara);
+        ret = dev->Driver_()->MemCopySync(
+            dqsFrameAlignTask->funcCallSvmMem, dqsFrameAlignTask->funCallMemSize, &fc,
+            dqsFrameAlignTask->funCallMemSize, RT_MEMCPY_DEVICE_TO_DEVICE);
+    } else if (ret == RT_ERROR_NONE) {
+        RtStarsDqsFrameAlignFc fc = {};
+        ConstructDqsFrameAlignFc(fc, fcPara);
+        ret = dev->Driver_()->MemCopySync(
+            dqsFrameAlignTask->funcCallSvmMem, dqsFrameAlignTask->funCallMemSize, &fc,
+            dqsFrameAlignTask->funCallMemSize, RT_MEMCPY_DEVICE_TO_DEVICE);
+    }
+
+    if (ret != RT_ERROR_NONE) {
+        (void)FreeDqsCommonTaskFuncCall(dqsFrameAlignTask, taskInfo);
+        RT_LOG(RT_LOG_ERROR, "MemCopySync for Dqs frame align func call failed,retCode=%#x.", ret);
+    }
+
+    return ret;
+}
+
+rtError_t DqsFrameAlignTaskInit(TaskInfo* taskInfo, const Stream* const stream, const DqsTaskConfig* const cfg)
+{
+    UNUSED(cfg);
+    taskInfo->type = TS_TASK_TYPE_DQS_FRAME_ALIGN;
+    taskInfo->typeName = "FrameAlignTask";
+
+    DqsCommonTaskInfo* const dqsFrameAlignTask = &(taskInfo->u.dqsFrameAlignTask);
+    InitDqsCommonTaskInfo(dqsFrameAlignTask, sizeof(RtStarsDqsFrameAlignFc), stream->GetSqId());
+
+    const rtError_t error = PrepareSqeInfoForDqsFrameAlignTask(taskInfo);
+    ERROR_RETURN_MSG_INNER(error, "Failed to init for FrameAlignTask, retCode=%#x.", static_cast<uint32_t>(error));
+
+    return RT_ERROR_NONE;
+}
+
+void DqsFrameAlignTaskUnInit(TaskInfo* const taskInfo)
+{
+    (void)FreeDqsCommonTaskFuncCall(&(taskInfo->u.dqsFrameAlignTask), taskInfo);
+}
+
+static rtError_t InitFuncCallParaForDqsConditionCopyTask(
+    RtStarsDqsConditionCopyPara& fcPara, const DqsTaskConfig* const cfg)
+{
+    const rtDqsConditionCopyCfg_t* const dqsCondCopyCfg = cfg->condCopyCfg;
+
+    fcPara.conditionAddr = RtPtrToValue(dqsCondCopyCfg->condition);
+    fcPara.dstAddr = RtPtrToValue(dqsCondCopyCfg->dst);
+    fcPara.srcAddr = RtPtrToValue(dqsCondCopyCfg->src);
+    fcPara.count = dqsCondCopyCfg->cnt / sizeof(uint64_t);
+
+    RT_LOG(
+        RT_LOG_INFO,
+        "Init ConditionCopy function call params, conditionAddr=%#llx, dstAddr=%#llx, srcAddr=%#llx, "
+        "copyCount=%" PRIu64,
+        fcPara.conditionAddr, fcPara.dstAddr, fcPara.srcAddr, fcPara.count);
+    return RT_ERROR_NONE;
+}
+
+static rtError_t PrepareSqeInfoForDqsConditionCopyTask(TaskInfo* taskInfo, const DqsTaskConfig* const cfg)
+{
+    DqsCommonTaskInfo* commonTaskInfo = &(taskInfo->u.dqsCondCopyTask);
+    rtError_t ret = AllocDqsCommonTaskFuncCall(commonTaskInfo, taskInfo);
+    ERROR_RETURN(ret, "Alloc func call svm failed, retCode=%#x.", static_cast<uint32_t>(ret));
+
+    RtStarsDqsConditionCopyPara fcPara = {};
+    ret = InitFuncCallParaForDqsConditionCopyTask(fcPara, cfg);
+    ERROR_RETURN(ret, "Init func call param failed, retCode=%#x.", static_cast<uint32_t>(ret));
+
+    RtStarsDqsConditionCopyFc fc = {};
+    ConstructConditionCopyFc(fc, fcPara);
+    const auto dev = taskInfo->stream->Device_();
+    ret = dev->Driver_()->MemCopySync(
+        commonTaskInfo->funcCallSvmMem, commonTaskInfo->funCallMemSize, &fc, commonTaskInfo->funCallMemSize,
+        RT_MEMCPY_DEVICE_TO_DEVICE);
+    if (ret != RT_ERROR_NONE) {
+        (void)FreeDqsCommonTaskFuncCall(commonTaskInfo, taskInfo);
+        RT_LOG(RT_LOG_ERROR, "MemCopySync for Dqs prepare func call failed, retCode=%#x.", ret);
+    }
+
+    return ret;
+}
+
+void DqsConditionCopyTaskUnInit(TaskInfo* const taskInfo)
+{
+    (void)FreeDqsCommonTaskFuncCall(&(taskInfo->u.dqsPrepareTask), taskInfo);
+}
+
+void PrintErrorInfoForDqsConditionCopyTask(TaskInfo* taskInfo, const uint32_t devId)
+{
+    StreamWithDqs* streamWithDqs = dynamic_cast<StreamWithDqs*>(taskInfo->stream);
+    COND_RETURN_VOID(streamWithDqs == nullptr, "streamWithDqs is nullptr");
+
+    stars_dqs_ctrl_space_t* ctrlSpace = streamWithDqs->GetDqsCtrlSpace();
+    COND_RETURN_VOID(
+        ctrlSpace == nullptr, "dqs control space is nullptr, stream_id=%d, device_id=%u", streamWithDqs->Id_(), devId);
+}
+
+rtError_t DqsConditionCopyTaskInit(TaskInfo* taskInfo, const Stream* const stream, const DqsTaskConfig* const cfg)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_DQS_CONDITION_COPY;
+    taskInfo->typeName = "DqsConditionCopyTask";
+    DqsCommonTaskInfo* dqsCommonTaskInfo = &(taskInfo->u.dqsCondCopyTask);
+    InitDqsCommonTaskInfo(dqsCommonTaskInfo, sizeof(RtStarsDqsConditionCopyFc), stream->GetSqId());
+
+    const rtError_t error = PrepareSqeInfoForDqsConditionCopyTask(taskInfo, cfg);
+    ERROR_RETURN(error, "init for DqsConditionCopyTask failed, retCode=%#x.", static_cast<uint32_t>(error));
+    return RT_ERROR_NONE;
+}
+
+void DqsPrepareTaskUnInit(TaskInfo* const taskInfo)
+{
+    (void)FreeDqsCommonTaskFuncCall(&(taskInfo->u.dqsPrepareTask), taskInfo);
+}
+
+void ConstructSqeForDqsPrepareTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    UNUSED(sqeInfo);
+    RtDavidStarsFunctionCallSqe& fnCallSqe = davidSqe->fuctionCallSqe;
+    const Stream* const stm = taskInfo->stream;
+    InitDqsFunctionCallSqe(fnCallSqe, stm->GetStarsWrCqeFlag(), taskInfo->taskSn, CONDS_SUB_TYPE_DQS_PREPARE);
+
+    DqsCommonTaskInfo* dqsTask = &(taskInfo->u.dqsPrepareTask);
+    const uint64_t funcAddr = RtPtrToValue(dqsTask->funcCallSvmMem);
+    constexpr uint64_t funcCallSize = static_cast<uint64_t>(sizeof(RtStarsDqsPrepareOutFc));
+
+    // func call size is rs2[19:0]*4Byte
+    ConstructFunctionCallInstr(funcAddr, (funcCallSize / 4UL), fnCallSqe);
+
+    PrintDavidSqe(davidSqe, "DqsPrepare");
+    RT_LOG(
+        RT_LOG_INFO, "DqsPrepare, deviceId=%u, streamId=%d, taskId=%hu", stm->Device_()->Id_(), stm->Id_(),
+        taskInfo->id);
+}
+
+static void InitFuncCallParaForDqsAdspcTask(
+    DqsAdspcTaskInfo* dqsAdspcTaskInfo, RtStarsDqsAdspcFcPara& fcPara, rtDqsAdspcTaskCfg_t* param)
+{
+    fcPara.qmngrEnqRegAddr = dqsAdspcTaskInfo->qmngrEnqRegAddr;
+    fcPara.qmngrOwRegAddr = dqsAdspcTaskInfo->qmngrOwRegAddr;
+    fcPara.mbufFreeRegAddr = dqsAdspcTaskInfo->mbufFreeRegAddr;
+    fcPara.cqeHeadTailMask = dqsAdspcTaskInfo->cqeHeadTailMask;
+
+    fcPara.cqeSize = param->cqeSize;
+    fcPara.cqDepth = param->cqDepth;
+    fcPara.mbufHandle = param->mbufHandle;
+    fcPara.cqeBaseAddr = param->cqeBaseAddr;
+    fcPara.cqeCopyAddr = param->cqeCopyAddr;
+    fcPara.cqHeadRegAddr = param->cqHeadRegAddr;
+    fcPara.cqTailRegAddr = param->cqTailRegAddr;
+
+    fcPara.dfxAddr = RtPtrToValue(dqsAdspcTaskInfo->commonTaskInfo.dfxPtr);
+
+    RT_LOG(
+        RT_LOG_DEBUG,
+        "dqs adspc task function call param: qmngrEnqRegAddr=%#llx, qmngrOwRegAddr=%#llx, "
+        "mbufFreeRegAddr=%#llx, cqeHeadTailMask=%#x, cqeSize=%#x, cqDepth=%#x, mbufHandle=%#x, cqeBaseAddr=%#llx, "
+        "cqeCopyAddr=%#llx, cqHeadRegAddr=%#llx, cqTailRegAddr=%#llx, dfxAddr=%#llx",
+        fcPara.qmngrEnqRegAddr, fcPara.qmngrOwRegAddr, fcPara.mbufFreeRegAddr, fcPara.cqeHeadTailMask, fcPara.cqDepth,
+        fcPara.cqeSize, fcPara.mbufHandle, fcPara.cqeBaseAddr, fcPara.cqeCopyAddr, fcPara.cqHeadRegAddr,
+        fcPara.cqTailRegAddr, fcPara.dfxAddr);
+}
+
+static rtError_t PrepareSqeInfoForDqsAdspcTask(
+    TaskInfo* taskInfo, const Stream* const stream, rtDqsAdspcTaskCfg_t* param)
+{
+    DqsAdspcTaskInfo* dqsAdspcTaskInfo = &(taskInfo->u.dqsAdspcTaskInfo);
+    DqsCommonTaskInfo* commonTaskInfo = &(dqsAdspcTaskInfo->commonTaskInfo);
+    rtError_t ret = AllocDqsCommonTaskFuncCall(commonTaskInfo, taskInfo);
+    ERROR_RETURN(ret, "Alloc func call svm failed, retCode=%#x.", static_cast<uint32_t>(ret));
+
+    RtStarsDqsAdspcFcPara fcPara = {};
+    InitFuncCallParaForDqsAdspcTask(dqsAdspcTaskInfo, fcPara, param);
+    RtStarsDqsAdspcFc fc = {};
+    ConstructDqsAdspcFc(fc, fcPara);
+
+    const auto dev = stream->Device_();
+    ret = dev->Driver_()->MemCopySync(
+        commonTaskInfo->funcCallSvmMem, commonTaskInfo->funCallMemSize, &fc, commonTaskInfo->funCallMemSize,
+        RT_MEMCPY_HOST_TO_DEVICE);
+    if (ret != RT_ERROR_NONE) {
+        (void)FreeDqsCommonTaskFuncCall(commonTaskInfo, taskInfo);
+        RT_LOG(RT_LOG_ERROR, "MemCopySync for Dqs Dequeue func call failed,retCode=%#x.", ret);
+    }
+    return ret;
+}
+
+rtError_t DqsAdspcTaskInit(TaskInfo* taskInfo, const Stream* const stream, const DqsTaskConfig* const cfg)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_DQS_ADSPC;
+    taskInfo->typeName = "DqsAdspcTask";
+    DqsAdspcTaskInfo* dqsAdspcTaskInfo = &(taskInfo->u.dqsAdspcTaskInfo);
+    DqsCommonTaskInfo* dqsCommonTask = &(dqsAdspcTaskInfo->commonTaskInfo);
+    InitDqsCommonTaskInfo(dqsCommonTask, sizeof(RtStarsDqsAdspcFc), stream->GetSqId());
+
+    // get qmngr op reg virtual addr
+    rtDqsAdspcTaskCfg_t* param = cfg->adspcCfg;
+    const auto dev = stream->Device_();
+    DqsQueueInfo queInfo = {};
+    rtError_t ret = dev->Driver_()->GetDqsQueInfo(dev->Id_(), static_cast<uint32_t>(param->queueId), &queInfo);
+    ERROR_RETURN(ret, "query dqs queue info failed, retCode=%#x.", static_cast<uint32_t>(ret));
+    if ((queInfo.queType != QMNGR_ENTITY_TYPE) || (queInfo.prodqOwAddr == 0ULL) || (queInfo.enqueOpAddr == 0ULL)) {
+        RT_LOG(RT_LOG_ERROR, "enqueue and overwrite op reg addr is invalid, qid=%u", param->queueId);
+        return RT_ERROR_INVALID_VALUE;
+    }
+    dqsAdspcTaskInfo->qmngrEnqRegAddr = queInfo.enqueOpAddr;
+    dqsAdspcTaskInfo->qmngrOwRegAddr = queInfo.prodqOwAddr;
+
+    // get mbuf pool free reg virtual addr
+    DqsPoolInfo dqsPoolInfo = {};
+    const uint32_t poolId = param->mbufHandle & dqsPoolIdMask; // pool_id
+    ret = dev->Driver_()->GetDqsMbufPoolInfo(poolId, &dqsPoolInfo);
+    ERROR_RETURN(ret, "query dqs mbuf pool info failed, retCode=%#x.", static_cast<uint32_t>(ret));
+    dqsAdspcTaskInfo->mbufFreeRegAddr = dqsPoolInfo.freeOpAddr;
+
+    // Adspc的cqe为2的n次方（当前硬件下为8，这里参数化是为了后续硬件形态拓展）
+    const uint8_t cqDepth = param->cqDepth;
+    if ((cqDepth & (cqDepth - 1U)) != 0U) {
+        RT_LOG(RT_LOG_ERROR, "cqe depth=%u is illegal, should be 2^n", cqDepth);
+        return RT_ERROR_INVALID_VALUE;
+    }
+    // 对应的cqHead和tail的有效位Mask为 depth - 1
+    dqsAdspcTaskInfo->cqeHeadTailMask = cqDepth - 1U;
+
+    ret = PrepareSqeInfoForDqsAdspcTask(taskInfo, stream, param);
+    ERROR_RETURN(ret, "init for DqsAdspcTask failed, retCode=%#x.", static_cast<uint32_t>(ret));
+    return RT_ERROR_NONE;
+}
+
+void DqsAdspcTaskUnInit(TaskInfo* const taskInfo)
+{
+    (void)FreeDqsCommonTaskFuncCall(&(taskInfo->u.dqsAdspcTaskInfo.commonTaskInfo), taskInfo);
+}
+
+void PrintErrorInfoForDqsAdspcTask(TaskInfo* taskInfo, const uint32_t devId)
+{
+    uint32_t dfx[3U]; // 0: cqHead, 1: cqTail, 2: qmngr ow value
+    const auto dev = taskInfo->stream->Device_();
+    (void)dev->Driver_()->MemCopySync(
+        dfx, sizeof(dfx), taskInfo->u.dqsAdspcTaskInfo.commonTaskInfo.dfxPtr, sizeof(dfx), RT_MEMCPY_DEVICE_TO_HOST);
+    RT_LOG(
+        RT_LOG_ERROR,
+        "dqs adspc task error, device_id=%u, stream_id=%d, task_id=%u, cqHead=%u, cqTail=%u, "
+        "qmngr ow reg val=%#x",
+        devId, taskInfo->stream->Id_(), taskInfo->id, dfx[0U], dfx[1U], dfx[2U]);
+}
+
+static bool DqsTaskRegister()
+{
+    TaskFuncSingle dqsEnqueueFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = nullptr,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoCommon,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle dqsDequeueFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = nullptr,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoCommon,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle dqsPrepareFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = &DqsPrepareTaskUnInit,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoForDqsPrepareTask,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle dqsZeroCopyFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = &DqsZeroCopyTaskUnInit,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoForDqsZeroCopyTask,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle dqsSchedEndFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = nullptr,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoCommon,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle dqsMbufFreeFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = &DqsMbufFreeTaskUnInit,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoForDqsMbufFreeTask,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle dqsInterChipPreProcFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = &DqsInterChipPreProcTaskUnInit,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoForDqsInterChipPreProcTask,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle dqsInterChipPostProcFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = &DqsInterChipPostProcTaskUnInit,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoForDqsInterChipPostProcTask,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle dqsAdspcFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = &DqsAdspcTaskUnInit,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoForDqsAdspcTask,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle dqsBatchDequeueFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = &DqsBatchDequeTaskUnInit,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoForDqsBatchDequeueTask,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle dqsConditionCopyFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = &DqsConditionCopyTaskUnInit,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoForDqsConditionCopyTask,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle dqsFrameAlignFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = &DqsFrameAlignTaskUnInit,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoCommon,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle modelSerialSchedPreProcTaskFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = nullptr,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoForModelSerialSchedPreProcTask,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &StarsSetResultForModelSerialSchedTask,
+    };
+    TaskFuncSingle modelSerialSchedNotifyWaitTaskFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = nullptr,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoForModelSerialSchedNotifyWaitTask,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &SetStarsResultCommonForDavid,
+    };
+    TaskFuncSingle modelSerialSchedPostProcTaskFuncs = {
+        .toCommandFunc = nullptr,
+        .toSqeFunc = nullptr,
+        .doCompleteSuccFunc = &DoCompleteSuccess,
+        .taskUnInitFunc = nullptr,
+        .waitAsyncCpCompleteFunc = nullptr,
+        .printErrorInfoFunc = &PrintErrorInfoForModelSerialSchedPostProcTask,
+        .setResultFunc = nullptr,
+        .setStarsResultFunc = &StarsSetResultForModelSerialSchedTask,
+    };
+
+    const auto& chips = GetV201Chips();
+    for (const auto chip : chips) {
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_ENQUEUE, dqsEnqueueFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_DEQUEUE, dqsDequeueFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_PREPARE, dqsPrepareFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_ZERO_COPY, dqsZeroCopyFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_SCHED_END, dqsSchedEndFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_MBUF_FREE, dqsMbufFreeFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_INTER_CHIP_PREPROC, dqsInterChipPreProcFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_INTER_CHIP_POSTPROC, dqsInterChipPostProcFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_ADSPC, dqsAdspcFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_BATCH_DEQUEUE, dqsBatchDequeueFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_CONDITION_COPY, dqsConditionCopyFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_DQS_FRAME_ALIGN, dqsFrameAlignFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_MODEL_SERIAL_SCHED_PREPROC, modelSerialSchedPreProcTaskFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_MODEL_SERIAL_SCHED_NOTIFY_WAIT, modelSerialSchedNotifyWaitTaskFuncs);
+        RegTaskFunc(chip, TS_TASK_TYPE_MODEL_SERIAL_SCHED_POSTPROC, modelSerialSchedPostProcTaskFuncs);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_MBUF_FREE, &ConstructSqeForDqsMbufFreeTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_ENQUEUE, &ConstructSqeForDqsEnqueueTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_DEQUEUE, &ConstructSqeForDqsDequeueTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_ZERO_COPY, &ConstructSqeForDqsZeroCopyTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_SCHED_END, &ConstructSqeForDqsSchedEndTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_PREPARE, &ConstructSqeForDqsPrepareTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_INTER_CHIP_PREPROC, &ConstructSqeForDqsInterChipPreProcTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_INTER_CHIP_POSTPROC, &ConstructSqeForDqsInterChipPostProcTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_ADSPC, &ConstructSqeForDqsAdspcTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_BATCH_DEQUEUE, &ConstructSqeForDqsBatchDequeueTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_CONDITION_COPY, &ConstructSqeForDqsConditionCopyTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_DQS_FRAME_ALIGN, &ConstructSqeForDqsFrameAlignTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_MODEL_SERIAL_SCHED_PREPROC, &ConstructSqeForModelSerialSchedPreProcTask);
+        RegDavidSqeFunc(
+            chip, TS_TASK_TYPE_MODEL_SERIAL_SCHED_NOTIFY_WAIT, &ConstructSqeForModelSerialSchedNotifyWaitTask);
+        RegDavidSqeFunc(chip, TS_TASK_TYPE_MODEL_SERIAL_SCHED_POSTPROC, &ConstructSqeForModelSerialSchedPostProcTask);
+    }
+
+    return true;
+}
+
+static bool g_dqsTaskRegister = DqsTaskRegister();
+
+} // namespace runtime
+} // namespace cce

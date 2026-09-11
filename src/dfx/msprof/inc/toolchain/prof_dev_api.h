@@ -31,7 +31,7 @@ extern "C" {
  * @ingroup libascend_devprof
  * @name  AdprofReportData
  * @brief aicpu report profiling data func
- * @param [in] data: profiling data of additional infomation
+ * @param [in] data: profiling data of additional information
  * @param [in] length: length of profiling data
  * @return 0:SUCCESS, !0:FAILED
  */
@@ -62,9 +62,9 @@ MSVP_PROF_API int32_t AdprofCheckFeatureIsOn(uint64_t feature);
  * @param [in] argv: argument value
  * @return 0:SUCCESS, !0:FAILED
  */
-MSVP_PROF_API int32_t AdprofStart(int32_t argc, const char *argv[]);
-MSVP_PROF_API bool GetDeviceId(const std::map<std::string, std::string> &kvPairs, uint32_t &devId);
-MSVP_PROF_API bool GetHostPid(const std::map<std::string, std::string> &kvPairs, int32_t &hostPid);
+MSVP_PROF_API int32_t AdprofStart(int32_t argc, const char* argv[]);
+MSVP_PROF_API bool GetDeviceId(const std::map<std::string, std::string>& kvPairs, uint32_t& devId);
+MSVP_PROF_API bool GetHostPid(const std::map<std::string, std::string>& kvPairs, int32_t& hostPid);
 
 /**
  * @ingroup libascend_devprof
@@ -78,11 +78,11 @@ MSVP_PROF_API int32_t AdprofStop();
  * @ingroup libascend_devprof
  * @name  AdprofGetHashId
  * @brief return hash id of hash info
- * @param [in] hashInfo: infomation to be hashed
- * @param [in] length: the length of infomation to be hashed
+ * @param [in] hashInfo: information to be hashed
+ * @param [in] length: the length of information to be hashed
  * @return hash id
  */
-MSVP_PROF_API uint64_t AdprofGetHashId(const char *hashInfo, size_t length);
+MSVP_PROF_API uint64_t AdprofGetHashId(const char* hashInfo, size_t length);
 
 /**
  * @ingroup libprofimpl

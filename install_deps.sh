@@ -55,15 +55,15 @@ detect_os() {
             else
                 PKG_MANAGER="yum"
             fi
-        elif [[ -f /etc/euleros-release ]]; then
-            OS="rhel"
+        elif grep -qE '^NAME="openEuler"$|^NAME="EulerOS"$' /etc/os-release 2>/dev/null; then
+            OS="euler"
             if command -v dnf &> /dev/null; then
                 PKG_MANAGER="dnf"
             else
                 PKG_MANAGER="yum"
             fi
         else
-            echo "自动安装脚本不支持该Linux发行版本，请手动安装依赖"
+            echo "自动安装脚本不支持该Linux发行版本，请查看/etc/os-release的信息，使用匹配的包管理器手动安装依赖"
             exit 1
         fi
     elif [[ "$(uname -s)" == "Darwin" ]]; then
@@ -93,7 +93,7 @@ install_python() {
             return
         fi
     fi
-    echo "安装pyton..."
+    echo "安装python..."
     case "$OS" in
         debian)
             run_command sudo $PKG_MANAGER update
@@ -113,6 +113,9 @@ install_python() {
             run_command brew install python@3.11
             echo 'export PATH="/usr/local/opt/python@3.11/bin:$PATH"' >> ~/.zshrc
             run_command source ~/.zshrc
+            ;;
+        euler)
+            run_command sudo $PKG_MANAGER install -y python3 python3-pip python3-devel
             ;;
     esac
 
@@ -137,9 +140,9 @@ install_gcc() {
     local curr_ver=""
 
     if command -v gcc &> /dev/null; then
-        curr_ver=$(gcc --version | awk '/^gcc/ {print $4}')
+        curr_ver=$(gcc --version | awk '/^gcc/ {print $NF}')
     elif command -v g++ &> /dev/null; then
-        curr_ver=$(g++ --version | awk '/^g\+\+/ {print $4}')
+        curr_ver=$(g++ --version | awk '/^g\+\+/ {print $NF}')
     else
         curr_ver="0.0.0"
     fi
@@ -176,10 +179,13 @@ install_gcc() {
             echo 'export CXX=/usr/local/bin/g++-11' >> ~/.zshrc
             run_command source ~/.zshrc
             ;;
+        euler)
+         	  run_command sudo $PKG_MANAGER install -y gcc gcc-c++
+         	  ;;
     esac
 
     if command -v gcc &> /dev/null; then
-        curr_ver=$(gcc --version | awk '/^gcc/ {print $4}')
+        curr_ver=$(gcc --version | awk '/^gcc/ {print $NF}')
         if version_ge "$curr_ver" "$req_ver"; then
             echo "GCC安装成功（$curr_ver）"
         else
@@ -232,6 +238,9 @@ install_cmake() {
         macos)
             run_command brew install cmake
             ;;
+        euler)
+            run_command sudo $PKG_MANAGER install -y cmake make
+            ;;
     esac
 
     if command -v cmake &> /dev/null; then
@@ -262,7 +271,7 @@ install_ccache() {
             run_command sudo $PKG_MANAGER update
             run_command sudo $PKG_MANAGER install -y ccache
             ;;
-        rhel)
+        rhel|euler)
             run_command sudo $PKG_MANAGER install -y ccache
             ;;
         macos)
@@ -292,7 +301,7 @@ install_autoconf() {
             run_command sudo $PKG_MANAGER update
             run_command sudo $PKG_MANAGER install -y autoconf
             ;;
-        rhel)
+        rhel|euler)
             run_command sudo $PKG_MANAGER install -y autoconf
             ;;
         macos)
@@ -322,7 +331,7 @@ install_gperf() {
             run_command sudo $PKG_MANAGER update
             run_command sudo $PKG_MANAGER install -y gperf
             ;;
-        rhel)
+        rhel|euler)
             run_command sudo $PKG_MANAGER install -y gperf
             ;;
         macos)
@@ -353,13 +362,11 @@ install_libtool() {
             run_command sudo $PKG_MANAGER install -y libtool
             run_command sudo $PKG_MANAGER install -y libtool-bin
             ;;
-        rhel)
+        rhel|euler)
             run_command sudo $PKG_MANAGER install -y libtool
-            run_command sudo $PKG_MANAGER install -y libtool-bin
             ;;
         macos)
             run_command brew install libtool
-            run_command brew install libtool-bin
             ;;
     esac
 
@@ -371,6 +378,70 @@ install_libtool() {
     fi
 }
 
+install_pip3() {
+    echo -e "\n==== 检查pip3 ===="
+
+    if command -v pip3 &> /dev/null; then
+        echo "pip3已安装"
+        return
+    fi
+
+    echo "安装pip3..."
+    case "$OS" in
+        debian)
+            run_command sudo $PKG_MANAGER update
+            run_command sudo $PKG_MANAGER install -y python3-pip
+            ;;
+        rhel|euler)
+            run_command sudo $PKG_MANAGER install -y python3-pip
+            ;;
+        macos)
+            # macOS 下 pip3 通常随 Python3 一起安装
+            if ! command -v pip3 &> /dev/null; then
+                run_command python3 -m ensurepip --upgrade
+                run_command python3 -m pip install --upgrade pip
+            fi
+            ;;
+    esac
+
+    if command -v pip3 &> /dev/null; then
+        echo "pip3安装成功"
+    else
+        echo "pip3安装失败"
+        exit 1
+    fi
+}
+
+install_make() {
+    echo -e "\n==== 检查make ===="
+
+    if command -v make &> /dev/null; then
+        echo "make已安装"
+        return
+    fi
+
+    echo "安装make..."
+    case "$OS" in
+        debian)
+            run_command sudo $PKG_MANAGER update
+            run_command sudo $PKG_MANAGER install -y make
+            ;;
+        rhel|euler)
+            run_command sudo $PKG_MANAGER install -y make
+            ;;
+        macos)
+            run_command brew install make
+            ;;
+    esac
+
+    if command -v make &> /dev/null; then
+        echo "make安装成功"
+    else
+        echo "make安装失败"
+        exit 1
+    fi
+}
+
 main() {
     echo "===================================================="
     echo "开始安装项目依赖"
@@ -378,12 +449,14 @@ main() {
 
     detect_os
     install_python
+    install_pip3
     install_gcc
     install_cmake
     install_ccache
     install_autoconf
     install_gperf
     install_libtool
+    install_make
 
     echo -e "===================================================="
     echo "所有依赖安装完成！"

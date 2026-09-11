@@ -15,18 +15,21 @@
 #include "adx_log.h"
 #include "memory_utils.h"
 #include "utils/utils.h"
+#include "msprof_drv_api.h"
 
-#define IDE_FREE_HDC_MSG_AND_SET_NULL(ptr) do {                        \
-    if ((ptr) != nullptr) {                                            \
-        (void)drvHdcFreeMsg(ptr);                                            \
-        ptr = nullptr;                                                 \
-    }                                                                  \
-} while (0)
+#define IDE_FREE_HDC_MSG_AND_SET_NULL(ptr)                                              \
+    do {                                                                                \
+        if ((ptr) != nullptr) {                                                         \
+            (void)analysis::dvvp::driver::MsprofDrvApi::instance()->drvHdcFreeMsg(ptr); \
+            ptr = nullptr;                                                              \
+        }                                                                               \
+    } while (0)
 
 namespace Analysis {
 namespace Dvvp {
 namespace Adx {
 using namespace IdeDaemon::Common::Config;
+using analysis::dvvp::driver::MsprofDrvApi;
 
 struct DataSendMsg {
     IdeSendBuffT buf;
@@ -42,14 +45,14 @@ struct DataSendMsg {
  *      IDE_DAEMON_OK:    init succ
  *      IDE_DAEMON_ERROR: init failed
  */
-int32_t HdcClientInit(HDC_CLIENT *client)
+int32_t HdcClientInit(HDC_CLIENT* client)
 {
     hdcError_t error;
     const int32_t flag = 0;
     IDE_CTRL_VALUE_FAILED(client != nullptr, return IDE_DAEMON_ERROR, "client is nullptr");
 
     // create HDC client
-    error = drvHdcClientCreate(client, MAX_SESSION_NUM, HDC_SERVICE_TYPE_IDE1, flag);
+    error = MsprofDrvApi::instance()->drvHdcClientCreate(client, MAX_SESSION_NUM, HDC_SERVICE_TYPE_IDE1, flag);
     if (error != DRV_ERROR_NONE || *client == nullptr) {
         MSPROF_LOGE("Hdc Client Create Failed, error: %d", error);
         return IDE_DAEMON_ERROR;
@@ -73,7 +76,7 @@ HDC_CLIENT HdcClientCreate(drvHdcServiceType type)
     HDC_CLIENT client = nullptr;
 
     // create HDC client
-    error = drvHdcClientCreate(&client, MAX_SESSION_NUM, type, flag);
+    error = MsprofDrvApi::instance()->drvHdcClientCreate(&client, MAX_SESSION_NUM, type, flag);
     if (error != DRV_ERROR_NONE || client == nullptr) {
         MSPROF_LOGE("Hdc Client Create Failed, error: %d", error);
         return nullptr;
@@ -84,7 +87,7 @@ HDC_CLIENT HdcClientCreate(drvHdcServiceType type)
 int32_t HdcClientDestroy(HDC_CLIENT client)
 {
     if (client != nullptr) {
-        hdcError_t error = drvHdcClientDestroy(client);
+        hdcError_t error = MsprofDrvApi::instance()->drvHdcClientDestroy(client);
         if (error != DRV_ERROR_NONE) {
             MSPROF_LOGE("Hdc Client Destroy error: %d", error);
             return IDE_DAEMON_ERROR;
@@ -97,7 +100,7 @@ HDC_SERVER HdcServerCreate(int32_t logDevId, drvHdcServiceType type)
 {
     MSPROF_LOGD("HdcServerCreate begin");
     HDC_SERVER server = nullptr;
-    const hdcError_t error = drvHdcServerCreate (logDevId, type, &server);
+    const hdcError_t error = MsprofDrvApi::instance()->drvHdcServerCreate(logDevId, type, &server);
     if (error == DRV_ERROR_DEVICE_NOT_READY) {
         MSPROF_LOGW("[HdcServerCreate]logDevId %u HDC not ready", logDevId);
         return nullptr;
@@ -119,7 +122,7 @@ void HdcServerDestroy(HDC_SERVER server)
     }
     int32_t times = 0;
     do {
-        error = drvHdcServerDestroy(server);
+        error = MsprofDrvApi::instance()->drvHdcServerDestroy(server);
         if (error != DRV_ERROR_NONE) {
             MSPROF_LOGE("[HdcServerDestroy]hdc server destroy error : %d, times %d", error, times);
             times++;
@@ -132,13 +135,13 @@ HDC_SESSION HdcServerAccept(HDC_SERVER server)
 {
     MSPROF_LOGD("HdcServerAccept begin");
     HDC_SESSION session = nullptr;
-    hdcError_t error = drvHdcSessionAccept(server, &session);
+    hdcError_t error = MsprofDrvApi::instance()->drvHdcSessionAccept(server, &session);
     if (error != DRV_ERROR_NONE || session == nullptr) {
         MSPROF_LOGW("[HdcServerAccept]hdc accept unsuccessfully.");
         return nullptr;
     }
 
-    if (drvHdcSetSessionReference(session) != DRV_ERROR_NONE) {
+    if (MsprofDrvApi::instance()->drvHdcSetSessionReference(session) != DRV_ERROR_NONE) {
         MSPROF_LOGE("[HdcServerAccept]set reference error");
         (void)HdcSessionClose(session);
         return nullptr;
@@ -146,7 +149,7 @@ HDC_SESSION HdcServerAccept(HDC_SERVER server)
     return session;
 }
 
-static void IoVecAddToList(struct IoVec &base, std::list<struct IoVec> &ioList)
+static void IoVecAddToList(struct IoVec& base, std::list<struct IoVec>& ioList)
 {
     MSPROF_LOGD("iovec list add begin");
     if (base.base != nullptr && base.len > 0) {
@@ -156,7 +159,7 @@ static void IoVecAddToList(struct IoVec &base, std::list<struct IoVec> &ioList)
     }
 }
 
-static int32_t IoVecListToMem(std::list<struct IoVec> &ioList, struct IoVec &base)
+static int32_t IoVecListToMem(std::list<struct IoVec>& ioList, struct IoVec& base)
 {
     uint32_t offset = 0;
     for (auto it = ioList.begin(); it != ioList.end();) {
@@ -176,7 +179,7 @@ static int32_t IoVecListToMem(std::list<struct IoVec> &ioList, struct IoVec &bas
     return IDE_DAEMON_OK;
 }
 
-static void IoVecListFree(std::list<struct IoVec> &ioList)
+static void IoVecListFree(std::list<struct IoVec>& ioList)
 {
     MSPROF_LOGD("iovec list free begin");
     for (auto it = ioList.begin(); it != ioList.end();) {
@@ -197,7 +200,7 @@ static void IoVecListFree(std::list<struct IoVec> &ioList)
  *      IDE_DAEMON_OK:    store data succ
  *      IDE_DAEMON_ERROR: store data failed
  */
-int32_t HdcStorePackage(const IdeHdcPacket &packet, struct IoVec &ioVec)
+int32_t HdcStorePackage(const IdeHdcPacket& packet, struct IoVec& ioVec)
 {
     errno_t ret = EOK;
     IdeStringBuffer newBuf = nullptr;
@@ -232,13 +235,13 @@ int32_t HdcStorePackage(const IdeHdcPacket &packet, struct IoVec &ioVec)
     return IDE_DAEMON_ERROR;
 }
 
-static int32_t HdcReadPackage(struct drvHdcMsg &pmsg, IdeLastPacket &isLast, int32_t recvBufCount, struct IoVec &ioVec)
+static int32_t HdcReadPackage(struct drvHdcMsg& pmsg, IdeLastPacket& isLast, int32_t recvBufCount, struct IoVec& ioVec)
 {
     IdeStringBuffer pBuf = nullptr;
     int32_t pBufLen = 0;
     // Traverse the descriptor and fetch the read buf
     for (int32_t i = 0; i < recvBufCount; i++) {
-        hdcError_t error = drvHdcGetMsgBuffer(&pmsg, i, &pBuf, &pBufLen);
+        hdcError_t error = MsprofDrvApi::instance()->drvHdcGetMsgBuffer(&pmsg, i, &pBuf, &pBufLen);
         IDE_CTRL_VALUE_FAILED(error == DRV_ERROR_NONE, return IDE_DAEMON_ERROR, "Hdc Get Msg Buffer, error %d", error);
         if (pBuf != nullptr && pBufLen > 0) {
             IdeHdcPacket* packet = (struct IdeHdcPacket*)pBuf;
@@ -254,7 +257,7 @@ static int32_t HdcReadPackage(struct drvHdcMsg &pmsg, IdeLastPacket &isLast, int
     return IDE_DAEMON_OK;
 }
 
-int32_t HdcReadIovecToMem(std::list <struct IoVec> &hdcIoList, uint32_t bufLen, IdeRecvBuffT recvBuf, IdeI32Pt recvLen)
+int32_t HdcReadIovecToMem(std::list<struct IoVec>& hdcIoList, uint32_t bufLen, IdeRecvBuffT recvBuf, IdeI32Pt recvLen)
 {
     IDE_CTRL_VALUE_FAILED(recvLen != nullptr, return IDE_DAEMON_ERROR, "recvLen is nullptr");
     IDE_CTRL_VALUE_FAILED(bufLen > 0, return IDE_DAEMON_ERROR, "bufLen is nullptr");
@@ -278,7 +281,7 @@ int32_t HdcReadIovecToMem(std::list <struct IoVec> &hdcIoList, uint32_t bufLen, 
     return IDE_DAEMON_OK;
 }
 
-static void ModifyTimeInfo(int32_t &nbFlag, uint32_t &timeout)
+static void ModifyTimeInfo(int32_t& nbFlag, uint32_t& timeout)
 {
     if (timeout != 0) {
         timeout += IDE_RESPONSE_WAIT_TIME;
@@ -288,8 +291,8 @@ static void ModifyTimeInfo(int32_t &nbFlag, uint32_t &timeout)
     }
 }
 
-static int32_t HdcSessionRead(HDC_SESSION session, IdeRecvBuffT recvBuf, IdeI32Pt recvLen,
-    int32_t nbFlag, uint32_t timeout)
+static int32_t HdcSessionRead(
+    HDC_SESSION session, IdeRecvBuffT recvBuf, IdeI32Pt recvLen, int32_t nbFlag, uint32_t timeout)
 {
     int32_t count = 1;
     int32_t recvBufCount = 0;
@@ -305,14 +308,15 @@ static int32_t HdcSessionRead(HDC_SESSION session, IdeRecvBuffT recvBuf, IdeI32P
     IDE_CTRL_VALUE_FAILED(recvLen != nullptr, return IDE_DAEMON_ERROR, "recv_len is nullptr");
 
     // request alloc hdc message, count is 1
-    struct drvHdcMsg *pmsg = nullptr;
-    hdcError_t hdcError = drvHdcAllocMsg(session, &pmsg, count);
-    IDE_CTRL_VALUE_FAILED((hdcError == DRV_ERROR_NONE) && (pmsg != nullptr),
-        return IDE_DAEMON_ERROR, "Hdc Alloc Msg, error %d", hdcError);
+    struct drvHdcMsg* pmsg = nullptr;
+    hdcError_t hdcError = MsprofDrvApi::instance()->drvHdcAllocMsg(session, &pmsg, count);
+    IDE_CTRL_VALUE_FAILED(
+        (hdcError == DRV_ERROR_NONE) && (pmsg != nullptr), return IDE_DAEMON_ERROR, "Hdc Alloc Msg, error %d",
+        hdcError);
     while (1) {
         // Receive data, since the count is 1 when applying the descriptor, read up to 1 buf at a time.
         // len no use just for parameter
-        hdcError = halHdcRecv(session, pmsg, len, nbFlag, &recvBufCount, timeout);
+        hdcError = MsprofDrvApi::instance()->halHdcRecv(session, pmsg, len, nbFlag, &recvBufCount, timeout);
         if (hdcError == DRV_ERROR_NON_BLOCK) {
             IDE_FREE_HDC_MSG_AND_SET_NULL(pmsg);
             IoVecListFree(hdcIoList);
@@ -325,8 +329,8 @@ static int32_t HdcSessionRead(HDC_SESSION session, IdeRecvBuffT recvBuf, IdeI32P
             MSPROF_LOGI("[HdcSessionRead]Session is closed.");
             return IDE_DAEMON_SOCK_CLOSE;
         }
-        IDE_CTRL_VALUE_WARN_EX(hdcError == DRV_ERROR_WAIT_TIMEOUT, goto ERROR_BRANCH,
-            "Hdc Receive a timeout warning %d", hdcError);
+        IDE_CTRL_VALUE_WARN_EX(
+            hdcError == DRV_ERROR_WAIT_TIMEOUT, goto ERROR_BRANCH, "Hdc Receive a timeout warning %d", hdcError);
         IDE_CTRL_VALUE_FAILED(hdcError == DRV_ERROR_NONE, goto ERROR_BRANCH, "Hdc Receive, error %d", hdcError);
         int32_t err = HdcReadPackage(*pmsg, isLast, recvBufCount, ioBase);
         bufLen += ioBase.len;
@@ -337,12 +341,12 @@ static int32_t HdcSessionRead(HDC_SESSION session, IdeRecvBuffT recvBuf, IdeI32P
             break;
         }
         // reuse hdc message
-        hdcError = drvHdcReuseMsg(pmsg);
+        hdcError = MsprofDrvApi::instance()->drvHdcReuseMsg(pmsg);
         IDE_CTRL_VALUE_FAILED(hdcError == DRV_ERROR_NONE, goto ERROR_BRANCH, "Hdc Reuse Msg, error: %d", hdcError);
     }
 
     // free hdc message
-    hdcError = drvHdcFreeMsg(pmsg);
+    hdcError = MsprofDrvApi::instance()->drvHdcFreeMsg(pmsg);
     pmsg = nullptr;
     IDE_CTRL_VALUE_FAILED(hdcError == DRV_ERROR_NONE, goto ERROR_BRANCH, "Hdc Free Msg, error: %d", hdcError);
     return Analysis::Dvvp::Adx::HdcReadIovecToMem(hdcIoList, bufLen, recvBuf, recvLen);
@@ -401,8 +405,9 @@ int32_t HdcReadNb(HDC_SESSION session, IdeRecvBuffT recvBuf, IdeI32Pt recvLen)
  *      DRV_ERROR_NONE: send succ
  *      others:         send failed
  */
-static hdcError_t HdcWritePackage(HDC_SESSION session, const DataSendMsg dataSendMsg,
-    DRV_HDC_MSG_T_PTR pmsg, IDE_HDC_PACKET_T_PTR packet, int32_t flag)
+static hdcError_t HdcWritePackage(
+    HDC_SESSION session, const DataSendMsg dataSendMsg, DRV_HDC_MSG_T_PTR pmsg, IDE_HDC_PACKET_T_PTR packet,
+    int32_t flag)
 {
     hdcError_t hdcError = DRV_ERROR_NONE;
     uint32_t totalLen = dataSendMsg.bufLen;
@@ -427,21 +432,23 @@ static hdcError_t HdcWritePackage(HDC_SESSION session, const DataSendMsg dataSen
         packet->len = sendLen;
         packet->type = IDE_DAEMON_LITTLE_PACKAGE;
 
-        const errno_t ret = memcpy_s(packet->value, dataSendMsg.maxSendLen,
-                               static_cast<IdeU8Pt>(const_cast<IdeBuffT>(buf)) + (totalLen - reservedLen), sendLen);
+        const errno_t ret = memcpy_s(
+            packet->value, dataSendMsg.maxSendLen,
+            static_cast<IdeU8Pt>(const_cast<IdeBuffT>(buf)) + (totalLen - reservedLen), sendLen);
         IDE_CTRL_VALUE_FAILED(ret == EOK, return DRV_ERROR_INVALID_VALUE, "memory copy failed");
 
         // add buffer to hdc message
-        hdcError = drvHdcAddMsgBuffer(pmsg, reinterpret_cast<IdeStringBuffer>(packet),
+        hdcError = MsprofDrvApi::instance()->drvHdcAddMsgBuffer(
+            pmsg, reinterpret_cast<IdeStringBuffer>(packet),
             static_cast<int32_t>(sizeof(struct IdeHdcPacket)) + static_cast<int32_t>(packet->len));
         IDE_CTRL_VALUE_FAILED(hdcError == DRV_ERROR_NONE, return hdcError, "Hdc Add Msg Buffer, error: %d", hdcError);
 
         // send hdc message to rpc
-        hdcError = halHdcSend(session, pmsg, flag, timeout);
+        hdcError = MsprofDrvApi::instance()->halHdcSend(session, pmsg, flag, timeout);
         IDE_CTRL_VALUE_FAILED(hdcError == DRV_ERROR_NONE, return hdcError, "Hdc Send, error: %d", hdcError);
 
         // reuse hdc message
-        hdcError = drvHdcReuseMsg(pmsg);
+        hdcError = MsprofDrvApi::instance()->drvHdcReuseMsg(pmsg);
         IDE_CTRL_VALUE_FAILED(hdcError == DRV_ERROR_NONE, return hdcError, "Hdc Reuse Msg, error: %d", hdcError);
         reservedLen = reservedLen - sendLen;
     } while (reservedLen > 0 && hdcError == DRV_ERROR_NONE);
@@ -452,20 +459,21 @@ static hdcError_t HdcWritePackage(HDC_SESSION session, const DataSendMsg dataSen
 int32_t HdcSessionWrite(HDC_SESSION session, IdeSendBuffT buf, int32_t len, int32_t flag)
 {
     hdcError_t hdcError;
-    struct drvHdcMsg *pmsg = nullptr;
+    struct drvHdcMsg* pmsg = nullptr;
     int32_t count = 1;
     struct IdeHdcPacket* packet = nullptr;
 
-    IDE_CTRL_VALUE_FAILED((session != nullptr && buf != nullptr && len > 0),
-                          return IDE_DAEMON_ERROR, "Invalid Parameter");
+    IDE_CTRL_VALUE_FAILED(
+        (session != nullptr && buf != nullptr && len > 0), return IDE_DAEMON_ERROR, "Invalid Parameter");
     uint32_t capacity = 0;
     int32_t err = HdcCapacity(&capacity);
     IDE_CTRL_VALUE_FAILED(err == IDE_DAEMON_OK, return IDE_DAEMON_ERROR, "Hdc Capacity Failed, err: %d", err);
 
     // request alloc hdc message, count is 1
-    hdcError = drvHdcAllocMsg(session, &pmsg, count);
-    IDE_CTRL_VALUE_FAILED((hdcError == DRV_ERROR_NONE) && (pmsg != nullptr),
-        return IDE_DAEMON_ERROR, "Hdc Alloc Msg, error: %d", hdcError);
+    hdcError = MsprofDrvApi::instance()->drvHdcAllocMsg(session, &pmsg, count);
+    IDE_CTRL_VALUE_FAILED(
+        (hdcError == DRV_ERROR_NONE) && (pmsg != nullptr), return IDE_DAEMON_ERROR, "Hdc Alloc Msg, error: %d",
+        hdcError);
 
     const uint32_t maxDatalen = capacity - sizeof(struct IdeHdcPacket);
     packet = (struct IdeHdcPacket*)IdeXmalloc(sizeof(struct IdeHdcPacket) + maxDatalen);
@@ -475,13 +483,13 @@ int32_t HdcSessionWrite(HDC_SESSION session, IdeSendBuffT buf, int32_t len, int3
         return IDE_DAEMON_ERROR;
     }
 
-    struct DataSendMsg dataSendMsg = { buf, len, maxDatalen };
+    struct DataSendMsg dataSendMsg = {buf, len, maxDatalen};
     hdcError = Analysis::Dvvp::Adx::HdcWritePackage(session, dataSendMsg, pmsg, packet, flag);
 
     // free packet
     IDE_XFREE_AND_SET_NULL(packet);
     // free hdc message
-    hdcError_t ret = drvHdcFreeMsg(pmsg);
+    hdcError_t ret = MsprofDrvApi::instance()->drvHdcFreeMsg(pmsg);
     IDE_CTRL_VALUE_FAILED(ret == DRV_ERROR_NONE, return IDE_DAEMON_ERROR, "Hdc Free Msg, error: %d", ret);
     pmsg = nullptr;
     return hdcError != DRV_ERROR_NONE ? IDE_DAEMON_ERROR : IDE_DAEMON_OK;
@@ -526,6 +534,22 @@ int32_t HdcWriteNb(HDC_SESSION session, IdeSendBuffT buf, int32_t len)
  *      IDE_DAEMON_OK:    connect succ
  *      IDE_DAEMON_ERROR: connect failed
  */
+static int32_t FinalizeHdcSessionConnect(hdcError_t error, HDC_SESSION_PTR session)
+{
+    if (error != DRV_ERROR_NONE || *session == nullptr) {
+        MSPROF_LOGI("Hdc Session Connect, ret: %d", error);
+        return IDE_DAEMON_ERROR;
+    }
+
+    if (MsprofDrvApi::instance()->drvHdcSetSessionReference(*session) != DRV_ERROR_NONE) {
+        MSPROF_LOGE("session reference set failed");
+        (void)HdcSessionClose(session);
+        session = nullptr;
+        return IDE_DAEMON_ERROR;
+    }
+    return IDE_DAEMON_OK;
+}
+
 int32_t HdcSessionConnect(int32_t peerNode, int32_t peerDevid, HDC_CLIENT client, HDC_SESSION_PTR session)
 {
     IDE_CTRL_VALUE_FAILED(peerNode >= 0, return IDE_DAEMON_ERROR, "peer_node is invalid");
@@ -534,16 +558,8 @@ int32_t HdcSessionConnect(int32_t peerNode, int32_t peerDevid, HDC_CLIENT client
     IDE_CTRL_VALUE_FAILED(session != nullptr, return IDE_DAEMON_ERROR, "session is nullptr");
 
     // hdc connect
-    hdcError_t error = drvHdcSessionConnect(peerNode, peerDevid, client, session);
-    if (error != DRV_ERROR_NONE || *session == nullptr) {
-        MSPROF_LOGI("Hdc Session Connect, ret: %d", error);
-        return IDE_DAEMON_ERROR;
-    }
-
-    if (drvHdcSetSessionReference(*session) != DRV_ERROR_NONE) {
-        MSPROF_LOGE("session reference set failed");
-        (void)HdcSessionClose(session);
-        session = nullptr;
+    hdcError_t error = MsprofDrvApi::instance()->drvHdcSessionConnect(peerNode, peerDevid, client, session);
+    if (FinalizeHdcSessionConnect(error, session) != IDE_DAEMON_OK) {
         return IDE_DAEMON_ERROR;
     }
 
@@ -563,8 +579,8 @@ int32_t HdcSessionConnect(int32_t peerNode, int32_t peerDevid, HDC_CLIENT client
  *      IDE_DAEMON_OK:    connect succ
  *      IDE_DAEMON_ERROR: connect failed
  */
-int32_t HalHdcSessionConnect(int32_t peerNode, int32_t peerDevid,
-    int32_t hostPid, HDC_CLIENT client, HDC_SESSION_PTR session)
+int32_t HalHdcSessionConnect(
+    int32_t peerNode, int32_t peerDevid, int32_t hostPid, HDC_CLIENT client, HDC_SESSION_PTR session)
 {
     IDE_CTRL_VALUE_FAILED(peerNode >= 0, return IDE_DAEMON_ERROR, "peer_node is invalid");
     IDE_CTRL_VALUE_FAILED(peerDevid >= 0, return IDE_DAEMON_ERROR, "peer_devid is invalid");
@@ -573,16 +589,8 @@ int32_t HalHdcSessionConnect(int32_t peerNode, int32_t peerDevid,
     IDE_CTRL_VALUE_FAILED(session != nullptr, return IDE_DAEMON_ERROR, "session is nullptr");
 
     // hdc connect
-    hdcError_t error = halHdcSessionConnectEx(peerNode, peerDevid, hostPid, client, session);
-    if (error != DRV_ERROR_NONE || *session == nullptr) {
-        MSPROF_LOGI("Hdc Session Connect, ret: %d", error);
-        return IDE_DAEMON_ERROR;
-    }
-
-    if (drvHdcSetSessionReference(*session) != DRV_ERROR_NONE) {
-        MSPROF_LOGE("session reference set failed");
-        (void)HdcSessionClose(session);
-        session = nullptr;
+    hdcError_t error = MsprofDrvApi::instance()->halHdcSessionConnectEx(peerNode, peerDevid, hostPid, client, session);
+    if (FinalizeHdcSessionConnect(error, session) != IDE_DAEMON_OK) {
         return IDE_DAEMON_ERROR;
     }
 
@@ -603,7 +611,7 @@ int32_t HdcSessionClose(HDC_SESSION session)
     IDE_CTRL_VALUE_FAILED(session != nullptr, return IDE_DAEMON_ERROR, "session is nullptr");
 
     // close hdc session, use for hdc_accept session
-    const hdcError_t error = drvHdcSessionClose(session);
+    const hdcError_t error = MsprofDrvApi::instance()->drvHdcSessionClose(session);
     if (error != DRV_ERROR_NONE) {
         MSPROF_LOGE("Hdc Session Close Failed, error: %d", error);
         return IDE_DAEMON_ERROR;
@@ -640,7 +648,7 @@ int32_t HdcCapacity(IdeU32Pt segment)
     hdcError_t error;
     struct drvHdcCapacity capacity = {HDC_CHAN_TYPE_MAX, 0};
 
-    error = drvHdcGetCapacity(&capacity);
+    error = MsprofDrvApi::instance()->drvHdcGetCapacity(&capacity);
     if (error != DRV_ERROR_NONE) {
         MSPROF_LOGE("Get Hdc Capacity Failed,error: %d", error);
         return IDE_DAEMON_ERROR;
@@ -663,7 +671,7 @@ int32_t IdeGetDevIdBySession(HDC_SESSION session, IdeI32Pt devId)
     IDE_CTRL_VALUE_FAILED(devId != nullptr, return IDE_DAEMON_ERROR, "devId is nullptr");
 
 #if (defined(linux) || defined(__linux__))
-    const hdcError_t err = halHdcGetSessionAttr(session, HDC_SESSION_ATTR_DEV_ID, devId);
+    const hdcError_t err = MsprofDrvApi::instance()->halHdcGetSessionAttr(session, HDC_SESSION_ATTR_DEV_ID, devId);
     if (err != DRV_ERROR_NONE) {
         MSPROF_LOGE("Hdc Get Session DevId Failed, err: %d", err);
         return IDE_DAEMON_ERROR;
@@ -684,11 +692,11 @@ int32_t IdeGetDevIdBySession(HDC_SESSION session, IdeI32Pt devId)
  *      IDE_DAEMON_OK:    get hdc session succ
  *      IDE_DAEMON_ERROR: get hdc session failed
  */
-int32_t IdeGetVfIdBySession(HDC_SESSION session, int32_t &vfId)
+int32_t IdeGetVfIdBySession(HDC_SESSION session, int32_t& vfId)
 {
     IDE_CTRL_VALUE_FAILED(session != nullptr, return IDE_DAEMON_ERROR, "session is nullptr");
 #if (defined(linux) || defined(__linux__))
-    const hdcError_t err = halHdcGetSessionAttr(session, HDC_SESSION_ATTR_VFID, &vfId);
+    const hdcError_t err = MsprofDrvApi::instance()->halHdcGetSessionAttr(session, HDC_SESSION_ATTR_VFID, &vfId);
     if (err != DRV_ERROR_NONE) {
         MSPROF_LOGE("Hdc get session vfid failed, err: %d", err);
         return IDE_DAEMON_ERROR;
@@ -719,8 +727,7 @@ int32_t IdeCreatePacket(CmdClassT type, IdeString value, uint32_t valueLen, IdeR
         return IDE_DAEMON_ERROR;
     }
     if ((uint64_t)valueLen + sizeof(struct tlv_req) + 1 > UINT32_MAX) {
-        MSPROF_LOGE("[IdeCreatePacket]value_len: %u bytes, tlv_len: %lu bytes", valueLen,
-            sizeof(struct tlv_req));
+        MSPROF_LOGE("[IdeCreatePacket]value_len: %u bytes, tlv_len: %lu bytes", valueLen, sizeof(struct tlv_req));
         return IDE_DAEMON_ERROR;
     }
     uint32_t mallocValueLen = valueLen + 1;
@@ -748,10 +755,7 @@ int32_t IdeCreatePacket(CmdClassT type, IdeString value, uint32_t valueLen, IdeR
  *
  * @return
  */
-void IdeFreePacket(IdeBuffT buf)
-{
-    IdeXfree(buf);
-}
-}   // namespace Adx
-}   // namespace Dvvp
-}   // namespace Analysis
+void IdeFreePacket(IdeBuffT buf) { IdeXfree(buf); }
+} // namespace Adx
+} // namespace Dvvp
+} // namespace Analysis

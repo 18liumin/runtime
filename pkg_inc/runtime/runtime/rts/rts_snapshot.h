@@ -16,26 +16,39 @@
 extern "C" {
 #endif
 
-typedef enum { 
-    RT_PROCESS_STATE_RUNNING = 0, 
-    RT_PROCESS_STATE_LOCKED, 
+RT_RUNTIME_DEPRECATED_DECLS_BEGIN
+
+typedef enum {
+    RT_PROCESS_STATE_RUNNING = 0,
+    RT_PROCESS_STATE_LOCKED,
     RT_PROCESS_STATE_BACKED_UP,
-    RT_PROCESS_STATE_MAX 
+    RT_PROCESS_STATE_MAX
 } rtProcessState;
+
+typedef enum {
+    RT_SNAPSHOT_LOCK_PRE = 0,
+    RT_SNAPSHOT_BACKUP_PRE,
+    RT_SNAPSHOT_BACKUP_POST,
+    RT_SNAPSHOT_RESTORE_PRE,
+    RT_SNAPSHOT_RESTORE_POST,
+    RT_SNAPSHOT_UNLOCK_POST,
+} rtSnapShotStage;
+
+typedef uint32_t (*rtSnapShotCallBack)(int32_t devId, void* args) RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE);
 
 /**
  * @ingroup rts_snapshot
  * @brief lock the NPU process which will block further rts API calls
  * @return ACL_RT_SUCCESS for ok, others failed
  */
-RTS_API rtError_t rtSnapShotProcessLock();
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtSnapShotProcessLock();
 
 /**
  * @ingroup rts_snapshot
  * @brief unlock the NPU process and allow it to continue making RTS API calls
  * @return ACL_RT_SUCCESS for ok, others failed
  */
-RTS_API rtError_t rtSnapShotProcessUnlock();
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtSnapShotProcessUnlock();
 
 /**
  * @ingroup rts_snapshot
@@ -45,22 +58,71 @@ RTS_API rtError_t rtSnapShotProcessUnlock();
  *   RT_PROCESS_STATE_LOCKED : RTS API locks are taken so further RTS API calls will block
  * @return ACL_RT_SUCCESS for ok, others failed
  */
-RTS_API rtError_t rtSnapShotProcessGetState(rtProcessState *state);
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtSnapShotProcessGetState(rtProcessState* state);
 
 /**
  * @ingroup rts_snapshot
  * @brief backup the NPU process
  * @return ACL_RT_SUCCESS for ok, others failed
  */
-RTS_API rtError_t rtSnapShotProcessBackup();
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtSnapShotProcessBackup();
 
 /**
  * @ingroup rts_snapshot
  * @brief restore the NPU process from the last backup point
  * @return ACL_RT_SUCCESS for ok, others failed
  */
-RTS_API rtError_t rtSnapShotProcessRestore();
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t rtSnapShotProcessRestore();
 
+/**
+ * @ingroup rts_snapshot
+ * @brief registers a callback function for snapshot operation stages
+ * @param [in] stage the snapshot stage at which the callback should be triggered
+ *   The available stages are:
+ *   @li RT_SNAPSHOT_LOCK_PRE         - Called before process lock for snapshot
+ *   @li RT_SNAPSHOT_BACKUP_PRE       - Called before backup operation starts
+ *   @li RT_SNAPSHOT_BACKUP_POST      - Called after backup operation completes
+ *   @li RT_SNAPSHOT_RESTORE_PRE      - Called before restore operation starts
+ *   @li RT_SNAPSHOT_RESTORE_POST     - Called after restore operation completes
+ *   @li RT_SNAPSHOT_UNLOCK_POST      - Called after process unlock
+ * @param [in] callback Pointer to the callback function with signature:
+ *        @code
+ *        uint32_t rtSnapShotCallBack(int32_t devId, void* args);
+ *        @endcode
+ *        The system will invoke this function when the specified stage is reached.
+ *        The callback should return 0 on success, non-zero error code on failure.
+ *        Must not be NULL.
+ * @param [in] args User-defined argument pointer passed unchanged to the callback.
+ *        This can be NULL if no additional data is needed.
+ * @return ACL_RT_SUCCESS for ok, others failed
+ */
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtSnapShotCallbackRegister(rtSnapShotStage stage, rtSnapShotCallBack callback, void* args);
+
+/**
+ * @ingroup rts_snapshot
+ * @brief unregisters a previously registered callback function for a snapshot stage
+ * @param [in] stage the snapshot stage at which the callback should be triggered
+ *   The available stages are:
+ *   @li RT_SNAPSHOT_LOCK_PRE         - Called before process lock for snapshot
+ *   @li RT_SNAPSHOT_BACKUP_PRE       - Called before backup operation starts
+ *   @li RT_SNAPSHOT_BACKUP_POST      - Called after backup operation completes
+ *   @li RT_SNAPSHOT_RESTORE_PRE      - Called before restore operation starts
+ *   @li RT_SNAPSHOT_RESTORE_POST     - Called after restore operation completes
+ *   @li RT_SNAPSHOT_UNLOCK_POST      - Called after process unlock
+ * @param [in] callback Pointer to the callback function with signature:
+ *        @code
+ *        uint32_t rtSnapShotCallBack(int32_t devId, void* args);
+ *        @endcode
+ *        The system will invoke this function when the specified stage is reached.
+ *        The callback should return 0 on success, non-zero error code on failure.
+ *        Must not be NULL.
+ * @return ACL_RT_SUCCESS for ok, others failed
+ */
+RTS_API RT_DEPRECATED_MESSAGE(RT_RUNTIME_DEPRECATED_MESSAGE) rtError_t
+    rtSnapShotCallbackUnregister(rtSnapShotStage stage, rtSnapShotCallBack callback);
+
+RT_RUNTIME_DEPRECATED_DECLS_END
 #if defined(__cplusplus)
 }
 #endif

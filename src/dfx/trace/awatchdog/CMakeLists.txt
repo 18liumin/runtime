@@ -16,10 +16,8 @@ set(libawatchdogSrcFiles
 set(libawatchdogHeaderDir
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${ATRACE_DIR}/common
-    ${LIBC_SEC_HEADER}
-    ${ATRACE_DIR}/../../../include/driver
-    ${ATRACE_DIR}/inc/toolchain
-    ${ATRACE_DIR}/../../mmpa/inc/mmpa
+    ${RUNTIME_DIR}/pkg_inc/driver
+    ${ATRACE_DIR}/../../../pkg_inc/mmpa
 )
 
 add_library(awatchdog_share
@@ -29,8 +27,7 @@ add_library(awatchdog_share
 
 target_include_directories(awatchdog_share
     PRIVATE
-        ${LIBC_SEC_HEADER}
-        ${ATRACE_DIR}/../../../include/driver
+        ${RUNTIME_DIR}/pkg_inc/driver
         ${libawatchdogHeaderDir})
 
 target_compile_definitions(awatchdog_share
@@ -55,11 +52,13 @@ target_link_options(awatchdog_share
     PRIVATE
         -Wl,-z,relro,-z,now,-z,noexecstack
         -Wl,--gc-sections
+        $<$<CONFIG:Release>:-s>
 )
 
 target_link_libraries(awatchdog_share
     PRIVATE
         $<BUILD_INTERFACE:intf_pub>
+        $<BUILD_INTERFACE:c_sec_headers>
         $<BUILD_INTERFACE:slog_headers>
         mmpa
         unified_dlog
@@ -79,13 +78,13 @@ set_target_properties(awatchdog_share
     OUTPUT_NAME ascend_watchdog
 )
 
-# install_package(
-#     PACKAGE awatchdog
-#     TARGETS awatchdog_share awatchdog_headers
-#     FILES   ${ATRACE_DIR}/../../include/awatchdog/awatchdog_types.h
-#             ${ATRACE_DIR}/../../include/awatchdog/awatchdog.h
-#     DESTINATION ${INSTALL_INCLUDE_DIR}/awatchdog
-# )
+install_package(
+    PACKAGE awatchdog
+    TARGETS awatchdog_share awatchdog_headers
+    FILES   ${RUNTIME_DIR}/pkg_inc/watchdog/awatchdog_types.h
+            ${RUNTIME_DIR}/pkg_inc/watchdog/awatchdog.h
+    DESTINATION ${INSTALL_INCLUDE_DIR}/awatchdog
+)
 
 ############################# libascend_watchdog_stub.so(linux)   #############################
 
@@ -96,7 +95,6 @@ add_library(awatchdog_stub_share
 
 target_include_directories(awatchdog_stub_share
     PRIVATE
-        ${LIBC_SEC_HEADER}
         ${libawatchdogHeaderDir})
 
 target_compile_definitions(awatchdog_stub_share
@@ -121,11 +119,12 @@ target_link_options(awatchdog_stub_share
     PRIVATE
         -Wl,-z,relro,-z,now,-z,noexecstack
         -Wl,--gc-sections
+        $<$<CONFIG:Release>:-s>
 )
 
 target_link_libraries(awatchdog_stub_share
     PRIVATE
-        # $<BUILD_INTERFACE:intf_pub>
+        $<BUILD_INTERFACE:intf_pub>
     PUBLIC
         $<BUILD_INTERFACE:awatchdog_headers>
 )

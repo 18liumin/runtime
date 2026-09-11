@@ -34,7 +34,9 @@
 #include "runtime/config.h"
 #include "utils/file_utils.h"
 #include "acl_stub.h"
+#include "slog/inc/slog_stub_log_capture.h"
 #include "utils/hash_utils.h"
+#include "utils/data_type_utils.h"
 
 #include "base/err_mgr.h"
 
@@ -56,40 +58,41 @@ using namespace acl;
 
 extern "C" int AdxDataDumpServerInit();
 extern "C" int AdxDataDumpServerUnInit();
-extern aclError MemcpyKindTranslate(aclrtMemcpyKind kind, rtMemcpyKind_t &rtKind);
+extern aclError MemcpyKindTranslate(aclrtMemcpyKind kind, rtMemcpyKind_t& rtKind);
 namespace acl {
-    extern "C" void aclAppLogWithArgs(aclLogLevel logLevel, const char *func, const char *file, uint32_t line, const char *fmt, va_list args);
-    extern void aclGetMsgCallback(const char_t *msg, uint32_t len);
-    extern void GetAllPackageVersion();
-    extern aclError HandleDefaultDeviceAndStackSize(const char_t *const configPath);
-    extern aclError GetAlignedAndPaddingSize(const size_t size, const bool isPadding, size_t &alignedSize);
-    extern int32_t UpdateOpSystemRunCfg(void *cfgAddr, uint32_t cfgLen);
-    extern bool GetAclInitFlag();
-    extern void resetAclJsonHash();
-    extern uint64_t &GetAclInitRefCount();
-    extern aclError HandleEventModeConfig(const char_t *const configPath);
-}
+extern "C" void aclAppLogWithArgs(
+    aclLogLevel logLevel, const char* func, const char* file, uint32_t line, const char* fmt, va_list args);
+extern void aclGetMsgCallback(const char_t* msg, uint32_t len);
+extern void GetAllPackageVersion();
+extern aclError HandleDefaultDeviceAndStackSize(const char_t* const configPath);
+extern aclError GetAlignedAndPaddingSize(const size_t size, const bool isPadding, size_t& alignedSize);
+extern void GetPaddingSize(size_t* paddingSize);
+extern int32_t UpdateOpSystemRunCfg(void* cfgAddr, uint32_t cfgLen);
+extern bool GetAclInitFlag();
+extern void resetAclJsonHash();
+extern uint64_t& GetAclInitRefCount();
+extern aclError HandleEventModeConfig(const char_t* const configPath);
+} // namespace acl
 
 namespace {
-    void TestAclAppLogWithArgs(aclLogLevel level, const char* func, const char* file,
-                           uint32_t line, const char* fmt, ...) {
-        va_list args;
-        va_start(args, fmt);
-        aclAppLogWithArgs(level, func, file, line, fmt, args);
-        va_end(args);
-    }
+void TestAclAppLogWithArgs(aclLogLevel level, const char* func, const char* file, uint32_t line, const char* fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    aclAppLogWithArgs(level, func, file, line, fmt, args);
+    va_end(args);
 }
+} // namespace
 
 const std::string utTestBasePath = ACL_BASE_DIR "/build_ut/tests/ut";
-extern bool GetDriverPath(const std::string &ascendInstallPath, std::string &driverPath);
-extern aclError GetCANNVersionInternal(const aclCANNPackageName name, aclCANNPackageVersion &version,
-    const std::string &installPath);
-extern bool GetPkgPath(const std::string &ascendInstallPath, std::string &pkgPath,
-    const std::string &pkgPathKey);
-extern aclError GetVersionStringInternal(const std::string &fullPath, const char_t *pkgName,
-    std::string &versionOut, bool isSilent = false);
+extern bool GetDriverPath(const std::string& ascendInstallPath, std::string& driverPath);
+extern aclError GetCANNVersionInternal(
+    const aclCANNPackageName name, aclCANNPackageVersion& version, const std::string& installPath);
+extern bool GetPkgPath(const std::string& ascendInstallPath, std::string& pkgPath, const std::string& pkgPathKey);
+extern aclError GetVersionStringInternal(
+    const std::string& fullPath, const char_t* pkgName, std::string& versionOut, bool isSilent = false);
 
-static void writeToFile(const std::string &fileName, const std::string &text)
+static void writeToFile(const std::string& fileName, const std::string& text)
 {
     system(("mkdir -p $(dirname " + fileName + ")").c_str());
     std::ofstream out(fileName);
@@ -97,55 +100,112 @@ static void writeToFile(const std::string &fileName, const std::string &text)
     out.close();
 }
 
-static aclError InitCallback_Fail(const char *configStr, size_t len, void *userData) {
+static aclError InitCallback_Fail(const char* configStr, size_t len, void* userData)
+{
     (void)configStr;
     (void)len;
     (void)userData;
     return ACL_ERROR_RT_PARAM_INVALID;
 }
 
-static aclError FinalizeCallback_Fail(void *userData) {
-    (void)userData;
-    return ACL_ERROR_RT_PARAM_INVALID;
-}
-
-static aclError FinalizeCallback_Success(void *userData) {
+static aclError InitCallback_Success(const char* configStr, size_t len, void* userData)
+{
+    (void)configStr;
+    (void)len;
     (void)userData;
     return ACL_SUCCESS;
 }
 
-class UTEST_ACL_Common : public testing::Test
+static aclError FinalizeCallback_Fail(void* userData)
 {
-    public:
-        UTEST_ACL_Common(){}
-    protected:
-        virtual void SetUp()
-        {
-            MockFunctionTest::aclStubInstance().ResetToDefaultMock();
-            ON_CALL(MockFunctionTest::aclStubInstance(), GetPlatformResWithLock(_, _))
-                .WillByDefault(Return(true));
-        }
-        virtual void TearDown()
-        {
-            Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
-        }
-        static void TearDownTestCase()
-        {
-            (void)aclFinalize();
-        }
-    protected:
+    (void)userData;
+    return ACL_ERROR_RT_PARAM_INVALID;
+}
 
+static aclError FinalizeCallback_Success(void* userData)
+{
+    (void)userData;
+    return ACL_SUCCESS;
+}
+
+rtError_t rtGetSocSpec_Success(const char* label, const char* key, char* value, uint32_t valueLen)
+{
+    (void)label;
+    (void)key;
+    (void)valueLen;
+    if (strcmp(key, "padding_size") == 0) {
+        strcpy_s(value, valueLen, "32");
+    }
+    return RT_ERROR_NONE;
+}
+
+rtError_t rtGetSocSpec_Fail(const char* label, const char* key, char* value, uint32_t valueLen)
+{
+    (void)label;
+    (void)key;
+    (void)value;
+    (void)valueLen;
+    return ACL_ERROR_RT_PARAM_INVALID;
+}
+
+rtError_t rtGetSocSpec_Invalid(const char* label, const char* key, char* value, uint32_t valueLen)
+{
+    (void)label;
+    (void)key;
+    (void)valueLen;
+    if (strcmp(key, "padding_size") == 0) {
+        strcpy_s(value, valueLen, "123invalid123");
+    }
+    return RT_ERROR_NONE;
+}
+
+rtError_t rtGetSocSpec_Empty(const char* label, const char* key, char* value, uint32_t valueLen)
+{
+    (void)label;
+    (void)key;
+    (void)valueLen;
+    if (strcmp(key, "padding_size") == 0) {
+        strcpy_s(value, valueLen, "");
+    }
+    return RT_ERROR_NONE;
+}
+
+rtError_t rtGetSocSpec_OutOfRange(const char* label, const char* key, char* value, uint32_t valueLen)
+{
+    (void)label;
+    (void)key;
+    (void)valueLen;
+    if (strcmp(key, "padding_size") == 0) {
+        strcpy_s(value, valueLen, "999999999999999999999999");
+    }
+    return RT_ERROR_NONE;
+}
+
+class UTEST_ACL_Common : public testing::Test {
+public:
+    UTEST_ACL_Common() {}
+
+protected:
+    virtual void SetUp()
+    {
+        MockFunctionTest::aclStubInstance().ResetToDefaultMock();
+        ON_CALL(MockFunctionTest::aclStubInstance(), GetPlatformResWithLock(_, _)).WillByDefault(Return(true));
+    }
+    virtual void TearDown() { Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance())); }
+    static void TearDownTestCase() { (void)aclFinalize(); }
+
+protected:
 };
 
-rtError_t rtGetRunMode_invoke(rtRunMode *mode)
+rtError_t rtGetRunMode_invoke(rtRunMode* mode)
 {
     *mode = RT_RUN_MODE_OFFLINE;
     return RT_ERROR_NONE;
 }
 
-static void ExceptionInfoCallback(aclrtExceptionInfo *exceptionInfo)
+static void ExceptionInfoCallback(aclrtExceptionInfo* exceptionInfo)
 {
-    (void) exceptionInfo;
+    (void)exceptionInfo;
     uint32_t task_id = aclrtGetTaskIdFromExceptionInfo(nullptr);
     uint32_t stream_id = aclrtGetStreamIdFromExceptionInfo(nullptr);
     uint32_t thread_id = aclrtGetThreadIdFromExceptionInfo(nullptr);
@@ -159,7 +219,7 @@ TEST_F(UTEST_ACL_Common, aclrtGetSocName)
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetSocVersion(_, _))
         .WillOnce(Return(1))
         .WillRepeatedly(Return(0));
-    const char *socName = aclrtGetSocName();
+    const char* socName = aclrtGetSocName();
     EXPECT_EQ(socName, nullptr);
 }
 
@@ -182,14 +242,13 @@ TEST_F(UTEST_ACL_Common, HandleErrorManagerConfigTest)
 
 TEST_F(UTEST_ACL_Common, SetDefaultDeviceTest)
 {
-    auto &cbMgrInstance = InitCallbackManager::GetInstance();
+    auto& cbMgrInstance = InitCallbackManager::GetInstance();
     auto bakInitCbMap = cbMgrInstance.initCallbackMap_;
     cbMgrInstance.initCallbackMap_.clear();
     auto ret = aclInitCallbackRegister(ACL_REG_TYPE_OTHER, InitCallback_Fail, nullptr);
     EXPECT_EQ(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDefaultDeviceId(_))
-        .WillRepeatedly(Return(ACL_ERROR_FAILURE));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDefaultDeviceId(_)).WillRepeatedly(Return(ACL_ERROR_FAILURE));
 
     ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testDefaultDevice/testDefaultDevice_01.json");
     EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
@@ -206,14 +265,14 @@ TEST_F(UTEST_ACL_Common, SetDefaultDeviceTest)
     ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testDefaultDevice/testDefaultDevice_05.json");
     EXPECT_EQ(ret, ACL_ERROR_FAILURE);
 
-    ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR "/tests/ut/acl/json/testDefaultDevice/testDefaultDevice_06_invalid.json");
+    ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR
+                                          "/tests/ut/acl/json/testDefaultDevice/testDefaultDevice_06_invalid.json");
     EXPECT_EQ(ret, ACL_ERROR_FAILURE);
 
     ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testDefaultDevice/testDefaultDevice_02.json");
     EXPECT_EQ(ret, ACL_ERROR_FAILURE);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDefaultDeviceId(_))
-        .WillRepeatedly(Return(ACL_SUCCESS));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDefaultDeviceId(_)).WillRepeatedly(Return(ACL_SUCCESS));
     ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testDefaultDevice/testDefaultDevice_02.json");
     EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
 
@@ -222,10 +281,38 @@ TEST_F(UTEST_ACL_Common, SetDefaultDeviceTest)
     cbMgrInstance.initCallbackMap_ = bakInitCbMap;
 }
 
+TEST_F(UTEST_ACL_Common, SetFifoSizeTest)
+{
+    auto& cbMgrInstance = InitCallbackManager::GetInstance();
+    auto bakInitCbMap = cbMgrInstance.initCallbackMap_;
+    cbMgrInstance.initCallbackMap_.clear();
+    auto ret = aclInitCallbackRegister(ACL_REG_TYPE_OTHER, InitCallback_Success, nullptr);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+
+    ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testFifoSize/testFifoSize_01.json");
+    EXPECT_EQ(ret, ACL_ERROR_FAILURE);
+
+    ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testFifoSize/testFifoSize_02.json");
+    EXPECT_EQ(ret, ACL_ERROR_FAILURE);
+
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceSetLimit(_, _, _))
+        .WillOnce(Return(ACL_ERROR_RT_PARAM_INVALID))
+        .WillRepeatedly(Return(0));
+    ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testFifoSize/testFifoSize_03.json");
+    EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
+
+    ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testFifoSize/testFifoSize_03.json");
+    EXPECT_EQ(ret, ACL_SUCCESS);
+
+    resetAclJsonHash();
+    ret = aclFinalize();
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    cbMgrInstance.initCallbackMap_ = bakInitCbMap;
+}
+
 TEST_F(UTEST_ACL_Common, SetEventModeTest)
 {
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDefaultDeviceId(_))
-        .WillRepeatedly(Return(ACL_SUCCESS));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDefaultDeviceId(_)).WillRepeatedly(Return(ACL_SUCCESS));
     aclError ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testEventMode/testEventMode_01.json");
     EXPECT_EQ(ret, ACL_SUCCESS);
     ret = aclFinalize();
@@ -241,19 +328,19 @@ TEST_F(UTEST_ACL_Common, SetEventModeTest)
     ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testEventMode/testEventMode_03.json"); // 格式错误
     EXPECT_EQ(ret, ACL_ERROR_PARSE_FILE);
 
-    ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testEventMode/testEventMode_04.json");  // 不包含acl_graph
+    ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testEventMode/testEventMode_04.json"); // 不包含acl_graph
     EXPECT_EQ(ret, ACL_SUCCESS);
     ret = aclFinalize();
     EXPECT_EQ(ret, ACL_SUCCESS);
     resetAclJsonHash();
 
-    ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testEventMode/testEventMode_05.json");  // 不包含event_mode
+    ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testEventMode/testEventMode_05.json"); // 不包含event_mode
     EXPECT_EQ(ret, ACL_SUCCESS);
     ret = aclFinalize();
     EXPECT_EQ(ret, ACL_SUCCESS);
     resetAclJsonHash();
 
-    ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testEventMode/testEventMode_06.json");  // event_mode参数非法
+    ret = aclInit(ACL_BASE_DIR "/tests/ut/acl/json/testEventMode/testEventMode_06.json"); // event_mode参数非法
     EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
     resetAclJsonHash();
 
@@ -264,27 +351,63 @@ TEST_F(UTEST_ACL_Common, SetEventModeTest)
 TEST_F(UTEST_ACL_Common, SetStackSize)
 {
     // stack size 32k
-    aclError ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR "/tests/ut/acl/json/testStackSize/testStackSize_normal_32768.json");
+    aclError ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR
+                                                   "/tests/ut/acl/json/testStackSize/testStackSize_normal_32768.json");
     EXPECT_EQ(ret, ACL_SUCCESS);
 
-    ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR "/tests/ut/acl/json/testStackSize/testStackSize_normal_no_field.json");
+    ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR
+                                          "/tests/ut/acl/json/testStackSize/testStackSize_normal_no_field.json");
     EXPECT_EQ(ret, ACL_SUCCESS);
 
-    ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR "/tests/ut/acl/json/testStackSize/testStackSize_abnormal_abc.json");
+    ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR
+                                          "/tests/ut/acl/json/testStackSize/testStackSize_abnormal_abc.json");
     EXPECT_EQ(ret, ACL_ERROR_FAILURE);
 
-    ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR "/tests/ut/acl/json/testStackSize/testStackSize_abnormal_-1.json");
+    ret =
+        HandleDefaultDeviceAndStackSize(ACL_BASE_DIR "/tests/ut/acl/json/testStackSize/testStackSize_abnormal_-1.json");
+    EXPECT_EQ(ret, ACL_SUCCESS);
+
+    ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR
+                                          "/tests/ut/acl/json/testStackSize/testStackSize_abnormal_aligned.json");
     EXPECT_EQ(ret, ACL_SUCCESS);
 
     // not exist file
     ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR "/tests/ut/acl/json/testStackSize/xxxxxxxxxxxxx.json");
     EXPECT_EQ(ret, ACL_ERROR_FAILURE);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceSetLimit(_,_,_))
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceSetLimit(_, _, _))
         .WillOnce(Return(ACL_ERROR_RT_PARAM_INVALID))
         .WillRepeatedly(Return(0));
-    ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR "/tests/ut/acl/json/testStackSize/testStackSize_normal_32768.json");
-    EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
+    ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR
+                                          "/tests/ut/acl/json/testStackSize/testStackSize_normal_32768.json");
+    EXPECT_EQ(ret, ACL_SUCCESS);
+}
+
+TEST_F(UTEST_ACL_Common, SetStackSize_SimtStackFail)
+{
+    // 测试SIMT栈设置失败的情况
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceSetLimit(_, _, _))
+        .WillOnce(Return(0))                          // 第一次调用成功（aicore_stack_size）
+        .WillOnce(Return(ACL_ERROR_RT_PARAM_INVALID)) // 第二次调用失败（simt_stack_size）
+        .WillRepeatedly(Return(0));
+
+    aclError ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR
+                                                   "/tests/ut/acl/json/testStackSize/testStackSize_normal_32768.json");
+    EXPECT_EQ(ret, ACL_SUCCESS);
+}
+
+TEST_F(UTEST_ACL_Common, SetStackSize_SimtDivergenceStackFail)
+{
+    // 测试SIMT分支栈设置失败的情况
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceSetLimit(_, _, _))
+        .WillOnce(Return(0))                          // 第一次调用成功（aicore_stack_size）
+        .WillOnce(Return(0))                          // 第二次调用成功（simt_stack_size）
+        .WillOnce(Return(ACL_ERROR_RT_PARAM_INVALID)) // 第三次调用失败（simt_divergence_stack_size）
+        .WillRepeatedly(Return(0));
+
+    aclError ret = HandleDefaultDeviceAndStackSize(ACL_BASE_DIR
+                                                   "/tests/ut/acl/json/testStackSize/testStackSize_normal_32768.json");
+    EXPECT_EQ(ret, ACL_SUCCESS);
 }
 
 TEST_F(UTEST_ACL_Common, ErrorManagerTest)
@@ -310,9 +433,7 @@ TEST_F(UTEST_ACL_Common, ErrorManagerTest)
     ret = aclFinalize();
     EXPECT_EQ(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), Init())
-        .WillOnce(Return(1))
-        .WillRepeatedly(Return(0));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), Init()).WillOnce(Return(1)).WillRepeatedly(Return(0));
 
     const char* configPath2 = ACL_BASE_DIR "/tests/ut/acl/json/testDump1.json";
     ret = aclInit(configPath2);
@@ -374,8 +495,7 @@ TEST_F(UTEST_ACL_Common, finalize2)
     acl::AclDump::GetInstance().adxInitFromAclInitFlag_ = true;
     auto ret = aclFinalizeCallbackRegister(ACL_REG_TYPE_ACL_MODEL, FinalizeCallback_Success, nullptr);
     EXPECT_EQ(ret, ACL_SUCCESS);
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), AdxDataDumpServerInit())
-        .WillRepeatedly(Return(0));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), AdxDataDumpServerInit()).WillRepeatedly(Return(0));
 
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), AdxDataDumpServerUnInit())
         .WillOnce(Return(ACL_ERROR_INTERNAL_ERROR));
@@ -404,6 +524,23 @@ TEST_F(UTEST_ACL_Common, finalize_failed_with_rts_fail)
     EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
 }
 
+#if 0
+TEST_F(UTEST_ACL_Common, finalize_failed_with_rts_callback_fail)
+{
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtRegStreamStateCallback(_,_))
+        .WillOnce(Return(ACL_ERROR_RT_PARAM_INVALID))
+        .WillRepeatedly(Return(0));
+    aclError ret = aclFinalize();
+    EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
+
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtRegDeviceStateCallbackEx(_,_,_))
+        .WillOnce(Return(ACL_ERROR_RT_PARAM_INVALID))
+        .WillRepeatedly(Return(0));
+    ret = aclFinalize();
+    EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
+}
+#endif
+
 TEST_F(UTEST_ACL_Common, aclInitFlag_true)
 {
     bool ret = GetAclInitFlag();
@@ -423,14 +560,12 @@ TEST_F(UTEST_ACL_Common, finalize3)
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtUnRegKernelLaunchFillFunc(_))
         .WillOnce(Return(ACL_ERROR_RT_FEATURE_NOT_SUPPORT))
         .WillRepeatedly(Return(0));
-    
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDefaultDeviceId(_))
-        .WillOnce(Return(ACL_ERROR_RT_FAILURE));
+
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDefaultDeviceId(_)).WillOnce(Return(ACL_ERROR_RT_FAILURE));
 
     ret = aclFinalize();
     EXPECT_EQ(ret, ACL_ERROR_RT_FAILURE);
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDefaultDeviceId(_))
-        .WillOnce(Return(ACL_SUCCESS));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDefaultDeviceId(_)).WillOnce(Return(ACL_SUCCESS));
     ret = aclFinalize();
     EXPECT_EQ(ret, ACL_SUCCESS);
 }
@@ -460,7 +595,6 @@ TEST_F(UTEST_ACL_Common, init_with_different_config)
     ret = aclFinalize();
     EXPECT_EQ(ret, ACL_SUCCESS);
 }
-
 
 TEST_F(UTEST_ACL_Common, getVersion)
 {
@@ -518,11 +652,10 @@ TEST_F(UTEST_ACL_Common, getCANNVersion_cann_failed_no_file02)
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, envPath.c_str(), 1, mmRet);
     (void)mmRet;
 
-    writeToFile(envPath + "share/info/runtime/version.new.info",
-        "Version=7.6.T9.0.B057\n"
-        "version_dir=CANN-7.6\n"
-        "timestamp=00000000_000000000\n"
-    );
+    writeToFile(
+        envPath + "share/info/runtime/version.new.info", "Version=7.6.T9.0.B057\n"
+                                                         "version_dir=CANN-7.6\n"
+                                                         "timestamp=00000000_000000000\n");
 
     aclCANNPackageName name = ACL_PKG_NAME_CANN;
     aclCANNPackageVersion version;
@@ -540,9 +673,7 @@ TEST_F(UTEST_ACL_Common, getCANNVersion_cann_failed_invalid_file01)
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, envPath.c_str(), 1, mmRet);
     (void)mmRet;
 
-    writeToFile(envPath + "/share/info/runtime/version.info",
-        "timestamp=00000000_000000000\n"
-    );
+    writeToFile(envPath + "/share/info/runtime/version.info", "timestamp=00000000_000000000\n");
 
     aclCANNPackageName name = ACL_PKG_NAME_CANN;
     aclCANNPackageVersion version;
@@ -560,10 +691,9 @@ TEST_F(UTEST_ACL_Common, getCANNVersion_cann_failed_invalid_file03)
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, envPath.c_str(), 1, mmRet);
     (void)mmRet;
 
-    writeToFile(envPath + "/share/info/runtime/version.info",
-        "Version=7\n"
-        "timestamp=00000000_000000000\n"
-    );
+    writeToFile(
+        envPath + "/share/info/runtime/version.info", "Version=7\n"
+                                                      "timestamp=00000000_000000000\n");
 
     aclCANNPackageName name = ACL_PKG_NAME_CANN;
     aclCANNPackageVersion version;
@@ -582,18 +712,38 @@ TEST_F(UTEST_ACL_Common, getCANNVersion_cann_invalid_name)
     EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
 }
 
+TEST_F(UTEST_ACL_Common, GetCANNVersionInternalOps_success)
+{
+    std::string opsPath = utTestBasePath + "/getCANNVersion_cann/usr/local/Ascend";
+    writeToFile(
+        opsPath + "/ops_legacy/version.info", "Version=7.6.T9.0.B057\n"
+                                              "timestamp=00000000_000000000\n");
+
+    std::string ascendInstallPath = utTestBasePath + "/getCANNVersion_cann/etc/ascend_install.info";
+    writeToFile(ascendInstallPath, "Driver_Install_Path_Param=" + opsPath + "\n");
+
+    aclCANNPackageName name = ACL_PKG_NAME_OPP;
+    aclCANNPackageVersion version;
+    aclError ret = GetCANNVersionInternal(name, version, opsPath);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    EXPECT_EQ(std::string(version.version), "7.6.T9.0.B057");
+    EXPECT_EQ(std::string(version.majorVersion), "7");
+    EXPECT_EQ(std::string(version.minorVersion), "6");
+    EXPECT_EQ(std::string(version.releaseVersion), "T9");
+    EXPECT_EQ(std::string(version.patchVersion), "0");
+
+    system(("rm -rf " + utTestBasePath + "/getCANNVersion_cann").c_str());
+}
+
 TEST_F(UTEST_ACL_Common, GetCANNVersionInternalDriver_success01)
 {
     std::string driverPath = utTestBasePath + "/getCANNVersion_cann/usr/local/Ascend";
-    writeToFile(driverPath + "/driver/version.info",
-        "Version=7.6.T9.0.B057\n"
-        "timestamp=00000000_000000000\n"
-    );
+    writeToFile(
+        driverPath + "/driver/version.info", "Version=7.6.T9.0.B057\n"
+                                             "timestamp=00000000_000000000\n");
 
     std::string ascendInstallPath = utTestBasePath + "/getCANNVersion_cann/etc/ascend_install.info";
-    writeToFile(ascendInstallPath,
-        "Driver_Install_Path_Param=" + driverPath + "\n"
-    );
+    writeToFile(ascendInstallPath, "Driver_Install_Path_Param=" + driverPath + "\n");
 
     aclCANNPackageName name = ACL_PKG_NAME_DRIVER;
     aclCANNPackageVersion version;
@@ -613,15 +763,12 @@ TEST_F(UTEST_ACL_Common, GetCANNVersionInternalDriver_success01)
 TEST_F(UTEST_ACL_Common, GetCANNVersionInternalDriver_success02)
 {
     std::string driverPath = utTestBasePath + "/getCANNVersion_cann/usr/local/Ascend";
-    writeToFile(driverPath + "/driver/version.info",
-        "Version=8.5.0-beta.1\n"
-        "timestamp=00000000_000000000\n"
-    );
+    writeToFile(
+        driverPath + "/driver/version.info", "Version=8.5.0-beta.1\n"
+                                             "timestamp=00000000_000000000\n");
 
     std::string ascendInstallPath = utTestBasePath + "/getCANNVersion_cann/etc/ascend_install.info";
-    writeToFile(ascendInstallPath,
-        "Driver_Install_Path_Param=" + driverPath + "\n"
-    );
+    writeToFile(ascendInstallPath, "Driver_Install_Path_Param=" + driverPath + "\n");
 
     aclCANNPackageName name = ACL_PKG_NAME_DRIVER;
     aclCANNPackageVersion version;
@@ -649,9 +796,7 @@ TEST_F(UTEST_ACL_Common, GetCANNVersionInternalDriver_failed02)
 {
     std::string driverPath = utTestBasePath + "/getCANNVersion_cann/usr/local/Ascend";
     std::string ascendInstallPath = utTestBasePath + "/getCANNVersion_cann/etc/ascend_install.info";
-    writeToFile(ascendInstallPath,
-        "Driver_Install_Path_Param=" + driverPath + "\n"
-    );
+    writeToFile(ascendInstallPath, "Driver_Install_Path_Param=" + driverPath + "\n");
 
     aclCANNPackageName name = ACL_PKG_NAME_DRIVER;
     aclCANNPackageVersion version;
@@ -667,9 +812,7 @@ TEST_F(UTEST_ACL_Common, GetCANNVersionInternalDriver_failed03)
 {
     std::string driverPath = utTestBasePath + "/getCANNVersion_cann/usr/local/Ascend";
     std::string ascendInstallPath = utTestBasePath + "/getCANNVersion_cann/etc/ascend_install.info";
-    writeToFile(ascendInstallPath,
-        driverPath + "\n"
-    );
+    writeToFile(ascendInstallPath, driverPath + "\n");
 
     std::string driverInstallPath;
     EXPECT_FALSE(GetDriverPath(ascendInstallPath, driverInstallPath));
@@ -679,15 +822,12 @@ TEST_F(UTEST_ACL_Common, GetCANNVersionInternalDriver_failed03)
 TEST_F(UTEST_ACL_Common, GetCANNVersionInternalDriver_failed04)
 {
     std::string driverPath = utTestBasePath + "/getCANNVersion_cann/usr/local/Ascend";
-    writeToFile(driverPath + "/driver/version.info",
-        "VersionXXX=7.6.T9.0.B057\n"
-        "timestamp=00000000_000000000\n"
-    );
+    writeToFile(
+        driverPath + "/driver/version.info", "VersionXXX=7.6.T9.0.B057\n"
+                                             "timestamp=00000000_000000000\n");
 
     std::string ascendInstallPath = utTestBasePath + "/getCANNVersion_cann/etc/ascend_install.info";
-    writeToFile(ascendInstallPath,
-        "Driver_Install_Path_Param=" + driverPath + "\n"
-    );
+    writeToFile(ascendInstallPath, "Driver_Install_Path_Param=" + driverPath + "\n");
 
     aclCANNPackageName name = ACL_PKG_NAME_DRIVER;
     aclCANNPackageVersion version;
@@ -702,14 +842,10 @@ TEST_F(UTEST_ACL_Common, GetCANNVersionInternalDriver_failed04)
 TEST_F(UTEST_ACL_Common, GetCANNVersionInternalDriver_failed05)
 {
     std::string driverPath = utTestBasePath + "/getCANNVersion_cann/usr/local/Ascend";
-    writeToFile(driverPath + "/driver/version.info",
-        "timestamp=00000000_000000000\n"
-    );
+    writeToFile(driverPath + "/driver/version.info", "timestamp=00000000_000000000\n");
 
     std::string ascendInstallPath = utTestBasePath + "/getCANNVersion_cann/etc/ascend_install.info";
-    writeToFile(ascendInstallPath,
-        "Driver_Install_Path_Param=" + driverPath + "\n"
-    );
+    writeToFile(ascendInstallPath, "Driver_Install_Path_Param=" + driverPath + "\n");
 
     aclCANNPackageName name = ACL_PKG_NAME_DRIVER;
     aclCANNPackageVersion version;
@@ -724,15 +860,12 @@ TEST_F(UTEST_ACL_Common, GetCANNVersionInternalDriver_failed05)
 TEST_F(UTEST_ACL_Common, GetCANNVersionInternalDriver_failed06)
 {
     std::string driverPath = utTestBasePath + "/getCANNVersion_cann/usr/local/Ascend";
-    writeToFile(driverPath + "/driver/version.info",
-        "Version=7\n"
-        "timestamp=00000000_000000000\n"
-    );
+    writeToFile(
+        driverPath + "/driver/version.info", "Version=7\n"
+                                             "timestamp=00000000_000000000\n");
 
     std::string ascendInstallPath = utTestBasePath + "/getCANNVersion_cann/etc/ascend_install.info";
-    writeToFile(ascendInstallPath,
-        "Driver_Install_Path_Param=" + driverPath + "\n"
-    );
+    writeToFile(ascendInstallPath, "Driver_Install_Path_Param=" + driverPath + "\n");
 
     aclCANNPackageName name = ACL_PKG_NAME_DRIVER;
     aclCANNPackageVersion version;
@@ -748,7 +881,7 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionStr_CANN_Success)
 {
     std::string mockAscendHome = utTestBasePath + "/Ascend";
     std::string infoPath = mockAscendHome + "/share/info/compiler/version.info";
-    
+
     writeToFile(infoPath, "Version=8.5.0.alpha001 \n");
 
     int32_t mmRet = 0;
@@ -757,7 +890,7 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionStr_CANN_Success)
 
     char pkgName[] = "compiler";
     char verStr[ACL_PKG_VERSION_MAX_SIZE] = {0};
-    
+
     aclError ret = aclsysGetVersionStr(pkgName, verStr);
 
     EXPECT_EQ(ret, ACL_SUCCESS);
@@ -770,14 +903,14 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionStr_CANN_Success)
 TEST_F(UTEST_ACL_Common, aclsysGetVersionStr_Retry_AlternativeName_Success)
 {
     std::string mockAscendHome = utTestBasePath + "/Ascend";
-    
+
     std::string infoPath = mockAscendHome + "/share/info/ops_math/version.info";
     writeToFile(infoPath, "Version=1.0.0");
 
     int32_t mmRet = 0;
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
 
-    char pkgName[] = "ops-math"; 
+    char pkgName[] = "ops-math";
     char verStr[ACL_PKG_VERSION_MAX_SIZE] = {0};
 
     aclError ret = aclsysGetVersionStr(pkgName, verStr);
@@ -792,14 +925,14 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionStr_Retry_AlternativeName_Success)
 TEST_F(UTEST_ACL_Common, aclsysGetVersionStr_Retry_AlternativeName_Success_01)
 {
     std::string mockAscendHome = utTestBasePath + "/Ascend";
-    
+
     std::string infoPath = mockAscendHome + "/share/info/ops-base/version.info";
     writeToFile(infoPath, "Version=1.0.0");
 
     int32_t mmRet = 0;
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
 
-    char pkgName[] = "ops_base"; 
+    char pkgName[] = "ops_base";
     char verStr[ACL_PKG_VERSION_MAX_SIZE] = {0};
 
     aclError ret = aclsysGetVersionStr(pkgName, verStr);
@@ -825,7 +958,7 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionStr_Driver_Success)
     std::string driverInstallPath;
 
     EXPECT_TRUE(GetPkgPath(installConfPath, driverInstallPath, "Driver_Install_Path_Param="));
-    
+
     aclError ret = GetVersionStringInternal(driverInfoPath, pkgName, verInfo, false);
     EXPECT_EQ(ret, ACL_SUCCESS);
     EXPECT_EQ(verInfo, "23.0.rc1");
@@ -837,13 +970,13 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionNum_ComplexSemVer_Success)
 {
     std::string mockAscendHome = utTestBasePath + "/Ascend";
     std::string infoPath = mockAscendHome + "/share/info/runtime/version.info";
-    
+
     writeToFile(infoPath, "Version=8.5.0.beta.1");
 
     int32_t mmRet = 0;
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
 
-    char pkgName[] = "runtime"; 
+    char pkgName[] = "runtime";
     int32_t verNum = 0;
 
     aclError ret = aclsysGetVersionNum(pkgName, &verNum);
@@ -893,7 +1026,7 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionNum_NoFile_Fail)
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
     (void)mmRet;
 
-    char pkgName[] = "runtime"; 
+    char pkgName[] = "runtime";
     char verStr[ACL_PKG_VERSION_MAX_SIZE] = {0};
 
     aclError ret = aclsysGetVersionStr(pkgName, verStr);
@@ -908,14 +1041,14 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionStr_InvalidFormat_Fail)
 {
     std::string mockAscendHome = utTestBasePath + "/Ascend";
     std::string infoPath = mockAscendHome + "/share/info/runtime/version.info";
-    
-    writeToFile(infoPath, "runtime=8.5"); 
+
+    writeToFile(infoPath, "runtime=8.5");
 
     int32_t mmRet = 0;
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
     (void)mmRet;
 
-    char pkgName[] = "runtime"; 
+    char pkgName[] = "runtime";
     char verStr[ACL_PKG_VERSION_MAX_SIZE] = {0};
 
     aclError ret = aclsysGetVersionStr(pkgName, verStr);
@@ -926,17 +1059,41 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionStr_InvalidFormat_Fail)
     MM_SYS_UNSET_ENV(MM_ENV_ASCEND_HOME_PATH, mmRet);
 }
 
+TEST_F(UTEST_ACL_Common, aclsysGetVersionStr_CopyVersionFailed)
+{
+    std::string mockAscendHome = utTestBasePath + "/Ascend";
+    std::string infoPath = mockAscendHome + "/share/info/runtime/version.info";
+    std::string longVersion(ACL_PKG_VERSION_MAX_SIZE, '1');
+
+    writeToFile(infoPath, "Version=" + longVersion);
+
+    int32_t mmRet = 0;
+    MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
+    (void)mmRet;
+
+    char pkgName[] = "runtime";
+    char verStr[ACL_PKG_VERSION_MAX_SIZE] = {0};
+
+    aclError ret = aclsysGetVersionStr(pkgName, verStr);
+
+    EXPECT_EQ(ret, ACL_ERROR_INTERNAL_ERROR);
+    EXPECT_EQ(verStr[0], '\0');
+
+    system(("rm -rf " + mockAscendHome).c_str());
+    MM_SYS_UNSET_ENV(MM_ENV_ASCEND_HOME_PATH, mmRet);
+}
+
 TEST_F(UTEST_ACL_Common, aclsysGetVersionNum_InvalidFormat_Fail)
 {
     std::string mockAscendHome = utTestBasePath + "/Ascend";
     std::string infoPath = mockAscendHome + "/share/info/runtime/version.info";
-    
-    writeToFile(infoPath, "Version=8.5"); 
+
+    writeToFile(infoPath, "Version=8.5");
 
     int32_t mmRet = 0;
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
 
-    char pkgName[] = "runtime"; 
+    char pkgName[] = "runtime";
     int32_t verNum = 0;
 
     aclError ret = aclsysGetVersionNum(pkgName, &verNum);
@@ -951,13 +1108,13 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionNum_InvalidFormat_Fail_02)
 {
     std::string mockAscendHome = utTestBasePath + "/Ascend";
     std::string infoPath = mockAscendHome + "/share/info/runtime/version.info";
-    
-    writeToFile(infoPath, "Version=8.5.0-gamma"); 
+
+    writeToFile(infoPath, "Version=8.5.0-gamma");
 
     int32_t mmRet = 0;
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
 
-    char pkgName[] = "runtime"; 
+    char pkgName[] = "runtime";
     int32_t verNum = 0;
 
     aclError ret = aclsysGetVersionNum(pkgName, &verNum);
@@ -972,14 +1129,14 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionNum_InvalidFormat_Fail_03)
 {
     std::string mockAscendHome = utTestBasePath + "/Ascend";
     std::string infoPath = mockAscendHome + "/share/info/ops/version.info";
-    
-    writeToFile(infoPath, "Version=8"); 
+
+    writeToFile(infoPath, "Version=8");
 
     int32_t mmRet = 0;
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
     (void)mmRet;
 
-    char pkgName[] = "ops"; 
+    char pkgName[] = "ops";
     int32_t verNum = 0;
 
     aclError ret = aclsysGetVersionNum(pkgName, &verNum);
@@ -994,14 +1151,14 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionNum_InvalidFormat_Fail_04)
 {
     std::string mockAscendHome = utTestBasePath + "/Ascend";
     std::string infoPath = mockAscendHome + "/share/info/compile/version.info";
-    
-    writeToFile(infoPath, "Version=A"); 
+
+    writeToFile(infoPath, "Version=A");
 
     int32_t mmRet = 0;
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
     (void)mmRet;
 
-    char pkgName[] = "compile"; 
+    char pkgName[] = "compile";
     int32_t verNum = 0;
 
     aclError ret = aclsysGetVersionNum(pkgName, &verNum);
@@ -1016,14 +1173,14 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionNum_InvalidFormat_Fail_05)
 {
     std::string mockAscendHome = utTestBasePath + "/Ascend";
     std::string infoPath = mockAscendHome + "/share/info/runtime/version.info";
-    
-    writeToFile(infoPath, "Version=8.5.0..alpha"); 
+
+    writeToFile(infoPath, "Version=8.5.0..alpha");
 
     int32_t mmRet = 0;
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
     (void)mmRet;
 
-    char pkgName[] = "runtime"; 
+    char pkgName[] = "runtime";
     int32_t verNum = 0;
 
     aclError ret = aclsysGetVersionNum(pkgName, &verNum);
@@ -1038,14 +1195,14 @@ TEST_F(UTEST_ACL_Common, aclsysGetVersionNum_InvalidFormat_Fail_06)
 {
     std::string mockAscendHome = utTestBasePath + "/Ascend";
     std::string infoPath = mockAscendHome + "/share/info/compile/version.info";
-    
-    writeToFile(infoPath, "Version=8.5.0-rc.1a"); 
+
+    writeToFile(infoPath, "Version=8.5.0-rc.1a");
 
     int32_t mmRet = 0;
     MM_SYS_SET_ENV(MM_ENV_ASCEND_HOME_PATH, mockAscendHome.c_str(), 1, mmRet);
     (void)mmRet;
 
-    char pkgName[] = "compile"; 
+    char pkgName[] = "compile";
     int32_t verNum = 0;
 
     aclError ret = aclsysGetVersionNum(pkgName, &verNum);
@@ -1062,7 +1219,8 @@ TEST_F(UTEST_ACL_Common, aclInitFlag_false)
     EXPECT_EQ(ret, false);
 }
 
-TEST(AclInitTest, MultiThreadConcurrentAclInit) {
+TEST(AclInitTest, MultiThreadConcurrentAclInit)
+{
     const int numThreads = 10;
     std::vector<std::thread> threads;
     std::atomic<int> successCount(0);
@@ -1071,26 +1229,27 @@ TEST(AclInitTest, MultiThreadConcurrentAclInit) {
 
     for (int i = 0; i < numThreads; ++i) {
         threads.emplace_back([&]() {
-          ret = aclInit("");
-          if (ret == ACL_SUCCESS) {
-              successCount++;
-          } else if (ret == ACL_ERROR_REPEAT_INITIALIZE) {
-              repeatInitCount++;
-          }
+            ret = aclInit("");
+            if (ret == ACL_SUCCESS) {
+                successCount++;
+            } else if (ret == ACL_ERROR_REPEAT_INITIALIZE) {
+                repeatInitCount++;
+            }
         });
     }
 
     for (auto& thread : threads) {
         thread.join();
     }
-    EXPECT_EQ(successCount, 1);  // 只有一个线程能够成功初始化
+    EXPECT_EQ(successCount, 1);                  // 只有一个线程能够成功初始化
     EXPECT_EQ(repeatInitCount, numThreads - 1);  // 其他线程返回 ACL_ERROR_REPEAT_INITIALIZE
-    EXPECT_EQ(GetAclInitRefCount(), numThreads);  // 引用计数增加1
-//    ret = aclFinalize();
-//    EXPECT_EQ(ret, ACL_SUCCESS);
+    EXPECT_EQ(GetAclInitRefCount(), numThreads); // 引用计数增加1
+    //    ret = aclFinalize();
+    //    EXPECT_EQ(ret, ACL_SUCCESS);
 }
 
-TEST(AclInitTest, MultiThreadConcurrentAclFinalizeReference) {
+TEST(AclInitTest, MultiThreadConcurrentAclFinalizeReference)
+{
     const int numThreads = 10;
     std::vector<std::thread> threads;
     std::atomic<int> successCount(0);
@@ -1098,11 +1257,11 @@ TEST(AclInitTest, MultiThreadConcurrentAclFinalizeReference) {
 
     for (int i = 0; i < numThreads; ++i) {
         threads.emplace_back([&]() {
-          uint64_t refCount = 0;
-          ret = aclFinalizeReference(&refCount);
-          if (ret == ACL_SUCCESS) {
-              successCount++;
-          }
+            uint64_t refCount = 0;
+            ret = aclFinalizeReference(&refCount);
+            if (ret == ACL_SUCCESS) {
+                successCount++;
+            }
         });
     }
 
@@ -1121,8 +1280,7 @@ TEST_F(UTEST_ACL_Common, device)
     aclError ret = aclrtSetDevice(deviceId);
     EXPECT_EQ(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDevice(_))
-        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetDevice(_)).WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
 
     ret = aclrtSetDevice(deviceId);
     EXPECT_NE(ret, ACL_SUCCESS);
@@ -1130,8 +1288,7 @@ TEST_F(UTEST_ACL_Common, device)
     ret = aclrtResetDevice(deviceId);
     EXPECT_EQ(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceReset(_))
-        .WillOnce(Return(ACL_ERROR_RT_PARAM_INVALID));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceReset(_)).WillOnce(Return(ACL_ERROR_RT_PARAM_INVALID));
     ret = aclrtResetDevice(deviceId);
     EXPECT_NE(ret, ACL_SUCCESS);
 
@@ -1171,16 +1328,15 @@ TEST_F(UTEST_ACL_Common, device)
     ret = aclrtGetDevice(&deviceId);
     EXPECT_NE(ret, ACL_SUCCESS);
 
-    ret =  aclrtSynchronizeDevice();
+    ret = aclrtSynchronizeDevice();
     EXPECT_EQ(ret, ACL_SUCCESS);
 
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceSynchronize())
         .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
-    ret =  aclrtSynchronizeDevice();
+    ret = aclrtSynchronizeDevice();
     EXPECT_NE(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetRunMode(_))
-        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetRunMode(_)).WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     aclrtRunMode runMode;
     ret = aclrtGetRunMode(&runMode);
     EXPECT_NE(ret, ACL_SUCCESS);
@@ -1193,8 +1349,7 @@ TEST_F(UTEST_ACL_Common, device)
     ret = aclrtSetTsDevice(tsId);
     EXPECT_EQ(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetTSDevice(_))
-        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetTSDevice(_)).WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtSetTsDevice(tsId);
     EXPECT_NE(ret, ACL_SUCCESS);
 
@@ -1209,7 +1364,6 @@ TEST_F(UTEST_ACL_Common, device)
         .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtGetDeviceCount(&count);
     EXPECT_NE(ret, ACL_SUCCESS);
-
 }
 
 TEST_F(UTEST_ACL_Common, context)
@@ -1236,8 +1390,7 @@ TEST_F(UTEST_ACL_Common, context)
     ret = aclrtDestroyContext(nullptr);
     EXPECT_NE(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtCtxDestroyEx(_))
-        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtCtxDestroyEx(_)).WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtDestroyContext(context);
     EXPECT_NE(ret, ACL_SUCCESS);
 
@@ -1249,8 +1402,7 @@ TEST_F(UTEST_ACL_Common, context)
     ret = aclrtSetCurrentContext(nullptr);
     EXPECT_NE(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtCtxSetCurrent(_))
-        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtCtxSetCurrent(_)).WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtSetCurrentContext(context);
     EXPECT_NE(ret, ACL_SUCCESS);
 
@@ -1262,8 +1414,7 @@ TEST_F(UTEST_ACL_Common, context)
     ret = aclrtGetCurrentContext(nullptr);
     EXPECT_NE(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtCtxGetCurrent(_))
-        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtCtxGetCurrent(_)).WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtGetCurrentContext(&context);
     EXPECT_NE(ret, ACL_SUCCESS);
 }
@@ -1291,8 +1442,7 @@ TEST_F(UTEST_ACL_Common, stream)
     ret = aclrtDestroyStream(nullptr);
     EXPECT_NE(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtStreamDestroy(_))
-        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtStreamDestroy(_)).WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtDestroyStream(stream);
     EXPECT_NE(ret, ACL_SUCCESS);
 
@@ -1363,11 +1513,10 @@ TEST_F(UTEST_ACL_Common, event)
     ret = aclrtCreateEvent(nullptr);
     EXPECT_NE(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtEventCreate(_))
-        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtEventCreate(_)).WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtCreateEvent(&event);
     EXPECT_NE(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
     // aclrtDestroyEvent
     event = (aclrtEvent)0x01;
@@ -1377,8 +1526,7 @@ TEST_F(UTEST_ACL_Common, event)
     ret = aclrtDestroyEvent(nullptr);
     EXPECT_NE(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtEventDestroy(_))
-        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtEventDestroy(_)).WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtDestroyEvent(event);
     EXPECT_NE(ret, ACL_SUCCESS);
 
@@ -1395,7 +1543,7 @@ TEST_F(UTEST_ACL_Common, event)
         .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtRecordEvent(event, stream);
     EXPECT_NE(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
     // aclrtResetEvent
     event = (aclrtEvent)0x01;
@@ -1489,7 +1637,6 @@ TEST_F(UTEST_ACL_Common, elapsedTime)
         .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtEventElapsedTime(&time, start, end);
     EXPECT_NE(ret, ACL_SUCCESS);
-
 }
 
 TEST_F(UTEST_ACL_Common, setOpWaitTimeOut)
@@ -1499,14 +1646,13 @@ TEST_F(UTEST_ACL_Common, setOpWaitTimeOut)
         .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     aclError ret = aclrtSetOpWaitTimeout(timeout);
     EXPECT_NE(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
     timeout = 3;
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetOpWaitTimeOut(_))
-        .WillOnce(Return((RT_ERROR_NONE)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetOpWaitTimeOut(_)).WillOnce(Return((RT_ERROR_NONE)));
     ret = aclrtSetOpWaitTimeout(timeout);
     EXPECT_EQ(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 }
 
 TEST_F(UTEST_ACL_Common, setOpExecuteimeOut)
@@ -1516,14 +1662,13 @@ TEST_F(UTEST_ACL_Common, setOpExecuteimeOut)
         .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     aclError ret = aclrtSetOpExecuteTimeOut(timeout);
     EXPECT_NE(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
     timeout = 3;
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetOpExecuteTimeOut(_))
-        .WillOnce(Return((RT_ERROR_NONE)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetOpExecuteTimeOut(_)).WillOnce(Return((RT_ERROR_NONE)));
     ret = aclrtSetOpExecuteTimeOut(timeout);
     EXPECT_EQ(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 }
 
 TEST_F(UTEST_ACL_Common, setOpExecuteimeOutWithMs)
@@ -1533,57 +1678,49 @@ TEST_F(UTEST_ACL_Common, setOpExecuteimeOutWithMs)
         .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     aclError ret = aclrtSetOpExecuteTimeOutWithMs(timeout);
     EXPECT_NE(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
     timeout = 3;
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetOpExecuteTimeOutWithMs(_))
-        .WillOnce(Return((RT_ERROR_NONE)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetOpExecuteTimeOutWithMs(_)).WillOnce(Return((RT_ERROR_NONE)));
     ret = aclrtSetOpExecuteTimeOutWithMs(timeout);
     EXPECT_EQ(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 }
 
 TEST_F(UTEST_ACL_Common, setOpExecuteTimeOutV2)
 {
     uint64_t timeout = 3;
     uint64_t actualTimeout;
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetOpExecuteTimeOutV2(_,_))
-    .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetOpExecuteTimeOutV2(_, _))
+        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     aclError ret = aclrtSetOpExecuteTimeOutV2(timeout, &actualTimeout);
     EXPECT_NE(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
     timeout = 3;
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetOpExecuteTimeOutV2(_,_))
-    .WillOnce(Return((RT_ERROR_NONE)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSetOpExecuteTimeOutV2(_, _)).WillOnce(Return((RT_ERROR_NONE)));
     ret = aclrtSetOpExecuteTimeOutV2(timeout, &actualTimeout);
     EXPECT_EQ(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 }
 
 TEST_F(UTEST_ACL_Common, getOpTimeOutInterval)
 {
     uint64_t interval;
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetOpTimeOutInterval(_))
-    .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     aclError ret = aclrtGetOpTimeOutInterval(&interval);
     EXPECT_NE(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
     interval = 3;
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetOpTimeOutInterval(_))
-    .WillOnce(Return((RT_ERROR_NONE)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetOpTimeOutInterval(_)).WillOnce(Return((RT_ERROR_NONE)));
     ret = aclrtGetOpTimeOutInterval(&interval);
     EXPECT_EQ(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 }
 
-void CallBackFunc(void *arg)
-{
-    (void) arg;
-    int a = 1;
-    a++;
-}
+void CallBackFunc(void* arg) { (void)arg; }
 
 TEST_F(UTEST_ACL_Common, callback)
 {
@@ -1592,7 +1729,7 @@ TEST_F(UTEST_ACL_Common, callback)
     ret = aclrtSubscribeReport(1, stream);
     EXPECT_EQ(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSubscribeReport(_,_))
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtSubscribeReport(_, _))
         .WillOnce(Return(ACL_ERROR_RT_PARAM_INVALID));
     ret = aclrtSubscribeReport(1, stream);
     EXPECT_NE(ret, ACL_SUCCESS);
@@ -1600,7 +1737,7 @@ TEST_F(UTEST_ACL_Common, callback)
     ret = aclrtUnSubscribeReport(1, stream);
     EXPECT_EQ(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtUnSubscribeReport(_,_))
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtUnSubscribeReport(_, _))
         .WillOnce(Return(ACL_ERROR_RT_PARAM_INVALID));
     ret = aclrtUnSubscribeReport(1, stream);
     EXPECT_NE(ret, ACL_SUCCESS);
@@ -1621,17 +1758,16 @@ TEST_F(UTEST_ACL_Common, callback)
     ret = aclrtProcessReport(1);
     EXPECT_EQ(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtProcessReport(_))
-        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtProcessReport(_)).WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtProcessReport(-1);
     EXPECT_NE(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtProcessReport(_))
         .WillOnce(Return((ACL_ERROR_RT_THREAD_SUBSCRIBE)));
     ret = aclrtProcessReport(-1);
     EXPECT_NE(ret, ACL_SUCCESS);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtProcessReport(_))
         .WillOnce(Return((ACL_ERROR_RT_REPORT_TIMEOUT)));
@@ -1641,9 +1777,9 @@ TEST_F(UTEST_ACL_Common, callback)
 
 TEST_F(UTEST_ACL_Common, memory_malloc_device)
 {
-    void *devPtr = nullptr;
+    void* devPtr = nullptr;
     size_t size = 1;
-
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetSocSpec(_, _, _, _)).WillOnce(Invoke(rtGetSocSpec_Success));
     aclError ret = aclrtMalloc(&devPtr, size, ACL_MEM_MALLOC_HUGE_FIRST);
     EXPECT_EQ(ret, ACL_SUCCESS);
     EXPECT_NE(devPtr, nullptr);
@@ -1687,7 +1823,7 @@ TEST_F(UTEST_ACL_Common, memory_malloc_device)
 
 TEST_F(UTEST_ACL_Common, memory_malloc_aligned32_device)
 {
-    void *devPtr = nullptr;
+    void* devPtr = nullptr;
     size_t size = 1;
 
     aclError ret = aclrtMallocAlign32(&devPtr, size, ACL_MEM_MALLOC_HUGE_FIRST);
@@ -1733,7 +1869,7 @@ TEST_F(UTEST_ACL_Common, memory_malloc_aligned32_device)
 
 TEST_F(UTEST_ACL_Common, memory_malloc_cache_device)
 {
-    void *devPtr = nullptr;
+    void* devPtr = nullptr;
     size_t size = 1;
 
     aclError ret = aclrtMallocCached(&devPtr, size, ACL_MEM_MALLOC_HUGE_FIRST);
@@ -1744,8 +1880,7 @@ TEST_F(UTEST_ACL_Common, memory_malloc_cache_device)
     ret = aclrtMemFlush(devPtr, size);
     EXPECT_EQ(ret, ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtFlushCache(_, _))
-        .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtFlushCache(_, _)).WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtMemFlush(devPtr, size);
     EXPECT_NE(ret, ACL_SUCCESS);
 
@@ -1787,7 +1922,7 @@ TEST_F(UTEST_ACL_Common, memory_malloc_cache_device)
 
 TEST_F(UTEST_ACL_Common, memory_malloc_host)
 {
-    void *hostPtr = nullptr;
+    void* hostPtr = nullptr;
     size_t size = 0;
 
     aclError ret = aclrtMallocHost(&hostPtr, size);
@@ -1815,8 +1950,8 @@ TEST_F(UTEST_ACL_Common, memory_memcpyAsync)
         .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)))
         .WillRepeatedly(Return((RT_ERROR_NONE)));
 
-    void *dst = (void *)0x01;
-    void *src = (void *)0x02;
+    void* dst = (void*)0x01;
+    void* src = (void*)0x02;
     aclrtStream stream = (aclrtStream)0x10;
     aclError ret = aclrtMemcpyAsync(dst, 1, src, 1, ACL_MEMCPY_HOST_TO_HOST, stream);
     EXPECT_NE(ret, ACL_SUCCESS);
@@ -1868,8 +2003,7 @@ TEST_F(UTEST_ACL_Common, memory_getMemInfo)
 
 TEST_F(UTEST_ACL_Common, memory_memsetAsync)
 {
-
-    void *devPtr = (void *)0x01;
+    void* devPtr = (void*)0x01;
     aclrtStream stream = (aclrtStream)0x10;
     aclError ret = aclrtMemsetAsync(nullptr, 1, 1, 1, stream);
     EXPECT_NE(ret, ACL_SUCCESS);
@@ -1885,40 +2019,35 @@ TEST_F(UTEST_ACL_Common, memory_memsetAsync)
 
 TEST_F(UTEST_ACL_Common, GetCurLogLevel1)
 {
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), dlog_getlevel(_,_))
-        .WillOnce(Return((DLOG_ERROR)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), dlog_getlevel(_, _)).WillOnce(Return((DLOG_ERROR)));
     uint32_t log_level = AclLog::GetCurLogLevel();
     EXPECT_EQ(log_level, ACL_ERROR);
 }
 
 TEST_F(UTEST_ACL_Common, GetCurLogLevel2)
 {
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), dlog_getlevel(_,_))
-        .WillOnce(Return((DLOG_WARN)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), dlog_getlevel(_, _)).WillOnce(Return((DLOG_WARN)));
     uint32_t log_level = AclLog::GetCurLogLevel();
     EXPECT_EQ(log_level, ACL_WARNING);
 }
 
 TEST_F(UTEST_ACL_Common, GetCurLogLevel3)
 {
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), dlog_getlevel(_,_))
-        .WillOnce(Return((DLOG_INFO)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), dlog_getlevel(_, _)).WillOnce(Return((DLOG_INFO)));
     uint32_t log_level = AclLog::GetCurLogLevel();
     EXPECT_EQ(log_level, ACL_INFO);
 }
 
 TEST_F(UTEST_ACL_Common, GetCurLogLevel4)
 {
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), dlog_getlevel(_,_))
-        .WillOnce(Return((DLOG_DEBUG)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), dlog_getlevel(_, _)).WillOnce(Return((DLOG_DEBUG)));
     uint32_t log_level = AclLog::GetCurLogLevel();
     EXPECT_EQ(log_level, ACL_DEBUG);
 }
 
 TEST_F(UTEST_ACL_Common, GetCurLogLevel5)
 {
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), dlog_getlevel(_,_))
-        .WillOnce(Return((DLOG_NULL)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), dlog_getlevel(_, _)).WillOnce(Return((DLOG_NULL)));
     uint32_t log_level = AclLog::GetCurLogLevel();
     EXPECT_EQ(log_level, ACL_INFO);
 }
@@ -1926,7 +2055,7 @@ TEST_F(UTEST_ACL_Common, GetCurLogLevel5)
 extern int g_logLevel;
 TEST_F(UTEST_ACL_Common, ACLSaveLog)
 {
-    const char *strLog = "hello, acl";
+    const char* strLog = "hello, acl";
     AclLog::ACLSaveLog(ACL_DEBUG, strLog);
     EXPECT_EQ(g_logLevel, ACL_DEBUG);
     AclLog::ACLSaveLog(ACL_INFO, strLog);
@@ -1939,8 +2068,7 @@ TEST_F(UTEST_ACL_Common, ACLSaveLog)
 
 TEST_F(UTEST_ACL_Common, ACLProfiling)
 {
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), MsprofRegTypeInfo(_,_,_))
-    .WillRepeatedly(Return(2));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), MsprofRegTypeInfo(_, _, _)).WillRepeatedly(Return(2));
     EXPECT_NE(acl::AclProfilingManager::GetInstance().Init(), ACL_SUCCESS);
     EXPECT_EQ(acl::AclProfilingManager::GetInstance().UnInit(), ACL_SUCCESS);
 }
@@ -1948,8 +2076,7 @@ TEST_F(UTEST_ACL_Common, ACLProfiling)
 TEST_F(UTEST_ACL_Common, ACLExceptionCallback)
 {
     EXPECT_EQ(aclrtSetExceptionInfoCallback(ExceptionInfoCallback), ACL_SUCCESS);
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtRegTaskFailCallbackByModule(_, _))
-        .WillOnce(Return((1)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtRegTaskFailCallbackByModule(_, _)).WillOnce(Return((1)));
     EXPECT_NE(aclrtSetExceptionInfoCallback(ExceptionInfoCallback), ACL_SUCCESS);
     uint32_t task_id = aclrtGetTaskIdFromExceptionInfo(nullptr);
     uint32_t stream_id = aclrtGetStreamIdFromExceptionInfo(nullptr);
@@ -1971,45 +2098,53 @@ TEST_F(UTEST_ACL_Common, ACLSetGroup)
 {
     uint32_t count = 0;
     EXPECT_EQ(aclrtGetGroupCount(&count), ACL_SUCCESS);
-    aclrtGroupInfo * groupInfo = aclrtCreateGroupInfo();
+    aclrtGroupInfo* groupInfo = aclrtCreateGroupInfo();
     EXPECT_EQ(aclrtGetAllGroupInfo(groupInfo), ACL_SUCCESS);
 
     uint32_t aicoreNum = 0;
     size_t param_ret_size = 0;
-    EXPECT_EQ(aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_AICORE_INT,
-        (void *)(&aicoreNum), 4, &param_ret_size), ACL_SUCCESS);
+    EXPECT_EQ(
+        aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_AICORE_INT, (void*)(&aicoreNum), 4, &param_ret_size),
+        ACL_SUCCESS);
     EXPECT_EQ(aicoreNum, 2);
     EXPECT_EQ(param_ret_size, 4);
 
     uint32_t aicpuNum = 0;
-    EXPECT_EQ(aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_AIC_INT,
-        (void *)(&aicpuNum), 4, &param_ret_size), ACL_SUCCESS);
+    EXPECT_EQ(
+        aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_AIC_INT, (void*)(&aicpuNum), 4, &param_ret_size), ACL_SUCCESS);
     EXPECT_EQ(aicpuNum, 3);
 
     uint32_t aivectorNum = 0;
-    EXPECT_EQ(aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_AIV_INT,
-        (void *)(&aivectorNum), 4, &param_ret_size), ACL_SUCCESS);
+    EXPECT_EQ(
+        aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_AIV_INT, (void*)(&aivectorNum), 4, &param_ret_size),
+        ACL_SUCCESS);
     EXPECT_EQ(aivectorNum, 4);
 
     uint32_t sdmaNum = 0;
-    EXPECT_EQ(aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_SDMANUM_INT,
-        (void *)(&sdmaNum), 4, &param_ret_size), ACL_SUCCESS);
+    EXPECT_EQ(
+        aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_SDMANUM_INT, (void*)(&sdmaNum), 4, &param_ret_size),
+        ACL_SUCCESS);
     EXPECT_EQ(sdmaNum, 5);
 
     uint32_t activeStreamNum = 0;
-    EXPECT_EQ(aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_ASQNUM_INT,
-        (void *)(&activeStreamNum), 4, &param_ret_size), ACL_SUCCESS);
+    EXPECT_EQ(
+        aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_ASQNUM_INT, (void*)(&activeStreamNum), 4, &param_ret_size),
+        ACL_SUCCESS);
     EXPECT_EQ(activeStreamNum, 6);
 
     uint32_t groupId = 0;
-    EXPECT_EQ(aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_GROUPID_INT,
-        (void *)(&groupId), 4, &param_ret_size), ACL_SUCCESS);
+    EXPECT_EQ(
+        aclrtGetGroupInfoDetail(groupInfo, 1, ACL_GROUP_GROUPID_INT, (void*)(&groupId), 4, &param_ret_size),
+        ACL_SUCCESS);
 
-    EXPECT_EQ(aclrtGetGroupInfoDetail(groupInfo, 2, ACL_GROUP_ASQNUM_INT,
-        (void *)(&activeStreamNum), 4, &param_ret_size), ACL_ERROR_INVALID_PARAM);
+    EXPECT_EQ(
+        aclrtGetGroupInfoDetail(groupInfo, 2, ACL_GROUP_ASQNUM_INT, (void*)(&activeStreamNum), 4, &param_ret_size),
+        ACL_ERROR_INVALID_PARAM);
 
-    EXPECT_EQ(aclrtGetGroupInfoDetail(groupInfo, 1, static_cast<aclrtGroupAttr>(6),
-        (void *)(&activeStreamNum), 4, &param_ret_size), ACL_ERROR_INVALID_PARAM);
+    EXPECT_EQ(
+        aclrtGetGroupInfoDetail(
+            groupInfo, 1, static_cast<aclrtGroupAttr>(6), (void*)(&activeStreamNum), 4, &param_ret_size),
+        ACL_ERROR_INVALID_PARAM);
 
     EXPECT_EQ(aclrtSetGroup(1), ACL_SUCCESS);
     EXPECT_EQ(aclrtDestroyGroupInfo(groupInfo), ACL_SUCCESS);
@@ -2022,12 +2157,10 @@ TEST_F(UTEST_ACL_Common, ACLDeviceCanAccessPeer)
 
     EXPECT_EQ(aclrtDeviceCanAccessPeer(&canAccessPeer, 0, 1), ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceCanAccessPeer(_, _, _))
-        .WillOnce(Return((1)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceCanAccessPeer(_, _, _)).WillOnce(Return((1)));
     EXPECT_NE(aclrtDeviceCanAccessPeer(&canAccessPeer, 0, 1), ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevicePhyIdByIndex(_, _))
-        .WillOnce(Return((1)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevicePhyIdByIndex(_, _)).WillOnce(Return((1)));
     EXPECT_NE(aclrtDeviceCanAccessPeer(&canAccessPeer, 0, 1), ACL_SUCCESS);
 }
 
@@ -2042,16 +2175,13 @@ TEST_F(UTEST_ACL_Common, ACLEnablePeerAccess)
 
     EXPECT_EQ(aclrtDeviceEnablePeerAccess(0, flags), ACL_ERROR_INVALID_PARAM);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtEnableP2P(_, _, _))
-        .WillOnce(Return((1)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtEnableP2P(_, _, _)).WillOnce(Return((1)));
     EXPECT_NE(aclrtDeviceEnablePeerAccess(peerDeviceId, flags), ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevicePhyIdByIndex(_, _))
-        .WillOnce(Return((1)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevicePhyIdByIndex(_, _)).WillOnce(Return((1)));
     EXPECT_NE(aclrtDeviceEnablePeerAccess(peerDeviceId, flags), ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevice(_))
-        .WillRepeatedly(Return((1)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevice(_)).WillRepeatedly(Return((1)));
     EXPECT_NE(aclrtDeviceEnablePeerAccess(peerDeviceId, flags), ACL_SUCCESS);
 }
 
@@ -2062,61 +2192,55 @@ TEST_F(UTEST_ACL_Common, ACLDisablePeerAccess)
 
     EXPECT_EQ(aclrtDeviceDisablePeerAccess(0), ACL_ERROR_INVALID_PARAM);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDisableP2P(_, _))
-        .WillOnce(Return((1)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDisableP2P(_, _)).WillOnce(Return((1)));
     EXPECT_NE(aclrtDeviceDisablePeerAccess(peerDeviceId), ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevicePhyIdByIndex(_, _))
-        .WillOnce(Return((1)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevicePhyIdByIndex(_, _)).WillOnce(Return((1)));
     EXPECT_NE(aclrtDeviceDisablePeerAccess(peerDeviceId), ACL_SUCCESS);
 
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevice(_))
-        .WillRepeatedly(Return((1)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevice(_)).WillRepeatedly(Return((1)));
     EXPECT_NE(aclrtDeviceDisablePeerAccess(peerDeviceId), ACL_SUCCESS);
 }
 
 TEST_F(UTEST_ACL_Common, AclGetRecentErrMsgTest)
 {
     // GetErrMgrErrorMessage stub will return "default" as default return value.
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevMsg(_, _))
-        .WillOnce(Return(ACL_ERROR_RT_INTERNAL_ERROR));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevMsg(_, _)).WillOnce(Return(ACL_ERROR_RT_INTERNAL_ERROR));
     EXPECT_NE(aclGetRecentErrMsg(), nullptr);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
-    const char *str = "123";
+    const char* str = "123";
     std::unique_ptr<const char[]> errMsg(new char[std::strlen(str) + 1]);
     std::strcpy(const_cast<char*>(errMsg.get()), str);
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), GetErrMgrErrorMessage())
         .WillOnce(Return((ByMove(std::move(errMsg)))));
     EXPECT_NE(aclGetRecentErrMsg(), nullptr);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
     std::unique_ptr<const char[]> errMsg2(new char[std::strlen(str) + 1]);
     std::strcpy(const_cast<char*>(errMsg2.get()), str);
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevMsg(_, _))
-        .WillOnce(Return(RT_ERROR_NONE));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevMsg(_, _)).WillOnce(Return(RT_ERROR_NONE));
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), GetErrMgrErrorMessage())
         .WillOnce(Return((ByMove(std::move(errMsg2)))));
     EXPECT_NE(aclGetRecentErrMsg(), nullptr);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 
     const char* str1 = "";
     std::unique_ptr<const char[]> hostErrMsg(new char[std::strlen(str1) + 1]);
     std::strcpy(const_cast<char*>(hostErrMsg.get()), str1);
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevMsg(_, _))
-        .WillOnce(Return(RT_ERROR_NONE));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevMsg(_, _)).WillOnce(Return(RT_ERROR_NONE));
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), GetErrMgrErrorMessage())
         .WillOnce(Return(ByMove(std::move(hostErrMsg))));
     EXPECT_NE(aclGetRecentErrMsg(), nullptr);
 
-    const char_t *msg = nullptr;
+    const char_t* msg = nullptr;
     aclGetMsgCallback(msg, 0);
     msg = "abc";
     aclGetMsgCallback(msg, 3);
 }
 
-rtError_t rtGetFaultEvent_Invoke(const int32_t deviceId, rtDmsEventFilter *filter,
-                                 rtDmsFaultEvent *dmsEvent, uint32_t len, uint32_t *eventCount)
+rtError_t rtGetFaultEvent_Invoke(
+    const int32_t deviceId, rtDmsEventFilter* filter, rtDmsFaultEvent* dmsEvent, uint32_t len, uint32_t* eventCount)
 {
     (void)deviceId;
     (void)filter;
@@ -2136,7 +2260,7 @@ rtError_t rtGetFaultEvent_Invoke(const int32_t deviceId, rtDmsEventFilter *filte
 
 TEST_F(UTEST_ACL_Common, AclGetRecentErrMsgTest_FaultEvent_Succ_With_Host_Device_Event)
 {
-    const char_t *msg = "device";
+    const char_t* msg = "device";
     aclGetMsgCallback(msg, sizeof("device") - 1);
 
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetFaultEvent(_, _, _, _, _))
@@ -2147,12 +2271,12 @@ TEST_F(UTEST_ACL_Common, AclGetRecentErrMsgTest_FaultEvent_Succ_With_Host_Device
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), GetErrMgrErrorMessage())
         .WillOnce(Return((ByMove(std::move(errMsg)))));
     EXPECT_NE(aclGetRecentErrMsg(), nullptr);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 }
 
 TEST_F(UTEST_ACL_Common, AclGetRecentErrMsgTest_FaultEvent_Succ_With_Device_Event)
 {
-    const char_t *msg = "device";
+    const char_t* msg = "device";
     aclGetMsgCallback(msg, sizeof("device") - 1);
 
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetFaultEvent(_, _, _, _, _))
@@ -2163,12 +2287,12 @@ TEST_F(UTEST_ACL_Common, AclGetRecentErrMsgTest_FaultEvent_Succ_With_Device_Even
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), GetErrMgrErrorMessage())
         .WillOnce(Return((ByMove(std::move(errMsg)))));
     EXPECT_NE(aclGetRecentErrMsg(), nullptr);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 }
 
 TEST_F(UTEST_ACL_Common, AclGetRecentErrMsgTest_FaultEvent_Succ_With_Host_Event)
 {
-    const char_t *msg = "";
+    const char_t* msg = "";
     aclGetMsgCallback(msg, 0);
 
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetFaultEvent(_, _, _, _, _))
@@ -2179,12 +2303,12 @@ TEST_F(UTEST_ACL_Common, AclGetRecentErrMsgTest_FaultEvent_Succ_With_Host_Event)
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), GetErrMgrErrorMessage())
         .WillOnce(Return((ByMove(std::move(errMsg)))));
     EXPECT_NE(aclGetRecentErrMsg(), nullptr);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 }
 
 TEST_F(UTEST_ACL_Common, AclGetRecentErrMsgTest_FaultEvent_Succ_With_Event)
 {
-    const char_t *msg = "";
+    const char_t* msg = "";
     aclGetMsgCallback(msg, 0);
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetFaultEvent(_, _, _, _, _))
         .WillOnce(Invoke(rtGetFaultEvent_Invoke));
@@ -2194,7 +2318,7 @@ TEST_F(UTEST_ACL_Common, AclGetRecentErrMsgTest_FaultEvent_Succ_With_Event)
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), GetErrMgrErrorMessage())
         .WillOnce(Return((ByMove(std::move(errMsg)))));
     EXPECT_NE(aclGetRecentErrMsg(), nullptr);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 }
 
 TEST_F(UTEST_ACL_Common, AclGetRecentErrMsgTest_FaultEvent_Failed_With_GetDdevice_Failed)
@@ -2202,13 +2326,12 @@ TEST_F(UTEST_ACL_Common, AclGetRecentErrMsgTest_FaultEvent_Failed_With_GetDdevic
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDevice(_))
         .WillRepeatedly(Return((ACL_ERROR_RT_PARAM_INVALID)));
     EXPECT_NE(aclGetRecentErrMsg(), nullptr);
-    Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
 }
-
 
 TEST_F(UTEST_ACL_Common, AclrtGetSocNameTest)
 {
-    const char *ret = aclrtGetSocName();
+    const char* ret = aclrtGetSocName();
     EXPECT_NE(ret, nullptr);
 }
 
@@ -2222,6 +2345,34 @@ TEST_F(UTEST_ACL_Common, AclrtCtxSetSysParamOpt)
         .WillOnce(Return(ACL_ERROR_RT_INTERNAL_ERROR));
     ret = aclrtCtxSetSysParamOpt(ACL_OPT_DETERMINISTIC, 1);
     EXPECT_EQ(ret, ACL_ERROR_RT_INTERNAL_ERROR);
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
+    // DETERMINISTIC value=2 (strong consistency) should pass ACL validation
+    ret = aclrtCtxSetSysParamOpt(ACL_OPT_DETERMINISTIC, 2);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // DETERMINISTIC value=3 (batch consistency) should pass ACL validation
+    ret = aclrtCtxSetSysParamOpt(ACL_OPT_DETERMINISTIC, 3);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // DETERMINISTIC value=0 (disable, lower boundary) should pass
+    ret = aclrtCtxSetSysParamOpt(ACL_OPT_DETERMINISTIC, 0);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // ENABLE_DEBUG_KERNEL value=1 should pass
+    ret = aclrtCtxSetSysParamOpt(ACL_OPT_ENABLE_DEBUG_KERNEL, 1);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // STRONG_CONSISTENCY value=1 should still work (deprecated but accepted)
+    ret = aclrtCtxSetSysParamOpt(ACL_OPT_STRONG_CONSISTENCY, 1);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // ENABLE_DEBUG_KERNEL 下边界 0
+    ret = aclrtCtxSetSysParamOpt(ACL_OPT_ENABLE_DEBUG_KERNEL, 0);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // STRONG_CONSISTENCY 下边界 0
+    ret = aclrtCtxSetSysParamOpt(ACL_OPT_STRONG_CONSISTENCY, 0);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // opt 越界 opt=3（等于 ACL_OPT_ENABLE_KERNEL_EARLY_START)
+    ret = aclrtCtxSetSysParamOpt(static_cast<aclSysParamOpt>(3), 1);
+    EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
+    // opt 负数 opt=-1
+    ret = aclrtCtxSetSysParamOpt(static_cast<aclSysParamOpt>(-1), 1);
+    EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
 }
 
 TEST_F(UTEST_ACL_Common, AclrtCtxGetSysParamOptTest)
@@ -2255,6 +2406,37 @@ TEST_F(UTEST_ACL_Common, AclrtSetSysParamOpt)
         .WillOnce(Return(ACL_ERROR_RT_INTERNAL_ERROR));
     ret = aclrtSetSysParamOpt(ACL_OPT_DETERMINISTIC, 1);
     EXPECT_EQ(ret, ACL_ERROR_RT_INTERNAL_ERROR);
+    Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
+    // DETERMINISTIC value=2 (strong consistency) should pass ACL validation
+    ret = aclrtSetSysParamOpt(ACL_OPT_DETERMINISTIC, 2);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // DETERMINISTIC value=3 (batch consistency) should pass ACL validation
+    ret = aclrtSetSysParamOpt(ACL_OPT_DETERMINISTIC, 3);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // DETERMINISTIC value=0 (disable, lower boundary) should pass
+    ret = aclrtSetSysParamOpt(ACL_OPT_DETERMINISTIC, 0);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // ENABLE_DEBUG_KERNEL value=1 should pass
+    ret = aclrtSetSysParamOpt(ACL_OPT_ENABLE_DEBUG_KERNEL, 1);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // STRONG_CONSISTENCY value=1 should still work (deprecated but accepted)
+    ret = aclrtSetSysParamOpt(ACL_OPT_STRONG_CONSISTENCY, 1);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // ENABLE_DEBUG_KERNEL 下边界 0
+    ret = aclrtSetSysParamOpt(ACL_OPT_ENABLE_DEBUG_KERNEL, 0);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // STRONG_CONSISTENCY 下边界 0
+    ret = aclrtSetSysParamOpt(ACL_OPT_STRONG_CONSISTENCY, 0);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // ENABLE_KERNEL_EARLY_START value=1 should pass
+    ret = aclrtSetSysParamOpt(ACL_OPT_ENABLE_KERNEL_EARLY_START, 1);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    // opt 越界 opt=4（等于 SYS_OPT_RESERVED）
+    ret = aclrtSetSysParamOpt(static_cast<aclSysParamOpt>(4), 1);
+    EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
+    // opt 负数 opt=-1
+    ret = aclrtSetSysParamOpt(static_cast<aclSysParamOpt>(-1), 1);
+    EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
 }
 
 TEST_F(UTEST_ACL_Common, AclrtGetSysParamOptTest)
@@ -2282,11 +2464,11 @@ TEST_F(UTEST_ACL_Common, AclrtGetOverflowStatus)
 {
     aclError ret = aclrtGetOverflowStatus(nullptr, 0UL, nullptr);
     EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
-    ret = aclrtGetOverflowStatus((void *)0x1, 1UL, nullptr);
+    ret = aclrtGetOverflowStatus((void*)0x1, 1UL, nullptr);
     EXPECT_EQ(ret, ACL_SUCCESS);
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDeviceSatStatus(_, _, _))
         .WillOnce(Return(ACL_ERROR_RT_INTERNAL_ERROR));
-    ret = aclrtGetOverflowStatus((void *)0x1, 1UL, nullptr);
+    ret = aclrtGetOverflowStatus((void*)0x1, 1UL, nullptr);
     EXPECT_EQ(ret, ACL_ERROR_RT_INTERNAL_ERROR);
 }
 
@@ -2313,9 +2495,9 @@ TEST_F(UTEST_ACL_Common, GetAlignedAndPaddingSize)
     EXPECT_EQ(alignedSize, 64UL);
     ret = acl::GetAlignedAndPaddingSize(32UL, true, alignedSize);
     EXPECT_EQ(alignedSize, 64UL);
-
     ret = acl::GetAlignedAndPaddingSize(UINT64_MAX - 63UL, false, alignedSize);
-    EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    EXPECT_EQ(alignedSize, UINT64_MAX - 63UL);
     ret = acl::GetAlignedAndPaddingSize(UINT64_MAX - 64UL, false, alignedSize);
     EXPECT_EQ(ret, ACL_SUCCESS);
     EXPECT_EQ(alignedSize, UINT64_MAX - 63UL);
@@ -2326,9 +2508,34 @@ TEST_F(UTEST_ACL_Common, GetAlignedAndPaddingSize)
     EXPECT_EQ(alignedSize, 32UL);
 }
 
-static rtError_t rtDeviceStatusQueryInvok(const uint32_t devId, rtDeviceStatus *deviceStatus)
+TEST_F(UTEST_ACL_Common, GetPaddingSize)
 {
-    (void) devId;
+    size_t paddingSize = 0UL;
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetSocSpec(_, _, _, _)).WillOnce(Invoke(rtGetSocSpec_Success));
+    GetPaddingSize(&paddingSize);
+    EXPECT_EQ(paddingSize, 32UL);
+    paddingSize = 32UL;
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetSocSpec(_, _, _, _)).WillOnce(Invoke(rtGetSocSpec_Fail));
+    GetPaddingSize(&paddingSize);
+    EXPECT_EQ(paddingSize, 32UL);
+    paddingSize = 32UL;
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetSocSpec(_, _, _, _)).WillOnce(Invoke(rtGetSocSpec_Invalid));
+    GetPaddingSize(&paddingSize);
+    EXPECT_EQ(paddingSize, 32UL);
+    paddingSize = 32UL;
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetSocSpec(_, _, _, _)).WillOnce(Invoke(rtGetSocSpec_Empty));
+    GetPaddingSize(&paddingSize);
+    EXPECT_EQ(paddingSize, 32UL);
+    paddingSize = 32UL;
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetSocSpec(_, _, _, _))
+        .WillOnce(Invoke(rtGetSocSpec_OutOfRange));
+    GetPaddingSize(&paddingSize);
+    EXPECT_EQ(paddingSize, 32UL);
+}
+
+static rtError_t rtDeviceStatusQueryInvok(const uint32_t devId, rtDeviceStatus* deviceStatus)
+{
+    (void)devId;
     *deviceStatus = static_cast<rtDeviceStatus>(0);
     return RT_ERROR_NONE;
 }
@@ -2343,14 +2550,14 @@ TEST_F(UTEST_ACL_Common, aclrtQueryDeviceStatusTest)
     EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
 
     // get status success
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceStatusQuery(_,_))
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceStatusQuery(_, _))
         .WillOnce(Invoke(rtDeviceStatusQueryInvok));
     ret = aclrtQueryDeviceStatus(deviceId, &status);
     EXPECT_EQ(ret, ACL_SUCCESS);
     EXPECT_EQ(status, ACL_RT_DEVICE_STATUS_NORMAL);
 
     // get status fail
-    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceStatusQuery(_,_))
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtDeviceStatusQuery(_, _))
         .WillOnce(Return((ACL_ERROR_RT_PARAM_INVALID)));
     ret = aclrtQueryDeviceStatus(deviceId, &status);
     EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
@@ -2432,7 +2639,7 @@ TEST_F(UTEST_ACL_Common, ParseJsonFromFile_failed_with_illegal_format)
 
 TEST_F(UTEST_ACL_Common, GetMaxNestedLayers_with_invalid_file)
 {
-    const char_t *fileName = "xxyyzz.json";
+    const char_t* fileName = "xxyyzz.json";
     size_t length = 1UL;
     size_t maxObjDepth = 1000000000UL;
     size_t maxArrayDepth = 1000000000UL;
@@ -2443,7 +2650,7 @@ TEST_F(UTEST_ACL_Common, GetMaxNestedLayers_with_invalid_file)
 
 TEST_F(UTEST_ACL_Common, GetMaxNestedLayers_with_invliad_length)
 {
-    const char_t *fileName = ACL_BASE_DIR "/tests/ut/acl/json/illegal_format.json";
+    const char_t* fileName = ACL_BASE_DIR "/tests/ut/acl/json/illegal_format.json";
     size_t length = 0UL;
     size_t maxObjDepth = 1000000000UL;
     size_t maxArrayDepth = 1000000000UL;
@@ -2454,7 +2661,7 @@ TEST_F(UTEST_ACL_Common, GetMaxNestedLayers_with_invliad_length)
 
 TEST_F(UTEST_ACL_Common, GetMaxNestedLayers_with_normal)
 {
-    const char_t *fileName = ACL_BASE_DIR "/tests/ut/acl/json/testDepth.json";
+    const char_t* fileName = ACL_BASE_DIR "/tests/ut/acl/json/testDepth.json";
     size_t length = 1UL;
     size_t maxObjDepth = 1000000000UL;
     size_t maxArrayDepth = 1000000000UL;
@@ -2465,7 +2672,7 @@ TEST_F(UTEST_ACL_Common, GetMaxNestedLayers_with_normal)
 
 TEST_F(UTEST_ACL_Common, GetMaxNestedLayers_with_large_length)
 {
-    const char_t *fileName = ACL_BASE_DIR "/tests/ut/acl/json/illegal_format.json";
+    const char_t* fileName = ACL_BASE_DIR "/tests/ut/acl/json/illegal_format.json";
     size_t length = 100000UL;
     size_t maxObjDepth = 1000000000UL;
     size_t maxArrayDepth = 1000000000UL;
@@ -2497,7 +2704,7 @@ TEST_F(UTEST_ACL_Common, GetAttrConfigFromFile_failed)
 
 TEST_F(UTEST_ACL_Common, GetDefaultDeviceIdFromFile_failed)
 {
-    const char_t *fileName = ACL_BASE_DIR "/tests/ut/acl/json/testDefaultDevice/testDefaultDevice_07_invalid.json";
+    const char_t* fileName = ACL_BASE_DIR "/tests/ut/acl/json/testDefaultDevice/testDefaultDevice_07_invalid.json";
     int32_t devId = 0;
     auto ret = acl::JsonParser::GetDefaultDeviceIdFromFile(fileName, devId);
     EXPECT_EQ(ret, ACL_ERROR_INTERNAL_ERROR);
@@ -2506,8 +2713,8 @@ TEST_F(UTEST_ACL_Common, GetDefaultDeviceIdFromFile_failed)
 TEST_F(UTEST_ACL_Common, aclAppLogWithArgs_succ)
 {
     aclLogLevel level = ACL_ERROR;
-    const char *func = "UserFunc";
-    const char *file = "main.cpp";
+    const char* func = "UserFunc";
+    const char* file = "main.cpp";
     uint32_t line = 88U;
     TestAclAppLogWithArgs(level, func, file, line, "hello world!");
     EXPECT_TRUE(g_logLevel == ACL_ERROR);
@@ -2516,73 +2723,323 @@ TEST_F(UTEST_ACL_Common, aclAppLogWithArgs_succ)
 TEST_F(UTEST_ACL_Common, aclAppLog_succ)
 {
     aclLogLevel level = ACL_ERROR;
-    const char *func = "UserFunc";
-    const char *file = "main.cpp";
+    const char* func = "UserFunc";
+    const char* file = "main.cpp";
     uint32_t line = 88U;
     aclAppLog(level, func, file, line, "hello world!");
     EXPECT_TRUE(g_logLevel == ACL_ERROR);
 }
 
-TEST_F(UTEST_ACL_Common, aclAppLog_failed_1000bytes)
+TEST_F(UTEST_ACL_Common, aclAppLog_truncate_1000bytes)
 {
     aclLogLevel level = ACL_ERROR;
-    const char *func = "UserFunc";
-    const char *file = "main.cpp";
+    const char* func = "UserFunc";
+    const char* file = "main.cpp";
     uint32_t line = 88U;
-    const char_t *fmt =
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
+    const char_t* fmt =
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
     aclAppLog(level, func, file, line, fmt);
+    // 超长日志被截断后仍按原 level 落盘，不再被强制成 ERROR 误报。
     EXPECT_TRUE(g_logLevel == ACL_ERROR);
 }
 
-TEST_F(UTEST_ACL_Common, aclAppLog_failed_1100bytes)
+TEST_F(UTEST_ACL_Common, aclAppLog_truncate_1100bytes)
 {
     aclLogLevel level = ACL_ERROR;
-    const char *func = "UserFunc";
-    const char *file = "main.cpp";
+    const char* func = "UserFunc";
+    const char* file = "main.cpp";
     uint32_t line = 88U;
-    const char_t *fmt =
-              "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-              "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-              "012345678901345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-              "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-              "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-              "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-              "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-              "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-              "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-              "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-              "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
+    const char_t* fmt =
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "012345678901345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
     aclAppLog(level, func, file, line, fmt);
+    // 超长日志被截断后仍按原 level 落盘，不再被丢弃或误报。
     EXPECT_TRUE(g_logLevel == ACL_ERROR);
+    // 超长日志被截断后尾部应追加截断标记，提示用户内容不完整。
+    EXPECT_TRUE(strstr(DlogStubGetLastLogMsg(), "...[truncated]") != nullptr);
+}
+
+TEST_F(UTEST_ACL_Common, aclAppLog_truncate_keep_level)
+{
+    // 验证超长日志被截断后仍按调用级别输出，不会被强制成 ACL_ERROR。
+    aclLogLevel level = ACL_INFO;
+    const char* func = "UserFunc";
+    const char* file = "main.cpp";
+    uint32_t line = 88U;
+    const std::string fmt(1100U, 'a');
+    aclAppLog(level, func, file, line, fmt.c_str());
+    EXPECT_TRUE(g_logLevel == ACL_INFO);
+    // 截断标记应落在 MAX_LOG_STRING 预算内，最终落盘的日志总长不超过 1024 字节。
+    EXPECT_TRUE(strstr(DlogStubGetLastLogMsg(), "...[truncated]") != nullptr);
+    EXPECT_TRUE(strlen(DlogStubGetLastLogMsg()) < 1024U);
+}
+
+TEST_F(UTEST_ACL_Common, aclAppLog_short_keep_level)
+{
+    // 正常短日志按调用级别输出，且不追加截断标记。
+    aclLogLevel level = ACL_INFO;
+    const char* func = "UserFunc";
+    const char* file = "main.cpp";
+    uint32_t line = 88U;
+    aclAppLog(level, func, file, line, "short message");
+    EXPECT_TRUE(g_logLevel == ACL_INFO);
+    EXPECT_TRUE(strstr(DlogStubGetLastLogMsg(), "...[truncated]") == nullptr);
+}
+
+TEST_F(UTEST_ACL_Common, aclAppLog_invalid_format)
+{
+    // 非法格式化字符串（含 %n，安全函数会拒绝并返回 -1）应输出准确的错误提示。
+    // 运行时构造格式串，避免触发编译期 -Wformat 告警。
+    aclLogLevel level = ACL_ERROR;
+    const char* func = "UserFunc";
+    const char* file = "main.cpp";
+    uint32_t line = 88U;
+    char fmt[8] = {};
+    fmt[0] = '%';
+    fmt[1] = 'n';
+    int dummy = 0;
+    aclAppLog(level, func, file, line, fmt, &dummy);
+    EXPECT_TRUE(g_logLevel == ACL_ERROR);
+    EXPECT_TRUE(strstr(DlogStubGetLastLogMsg(), "format string is invalid") != nullptr);
 }
 
 TEST_F(UTEST_ACL_Common, FormatStr_failed_1100bytes)
 {
-    const char_t *fmt =
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "012345678901345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-            "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
+    const char_t* fmt =
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "012345678901345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
     std::string value = acl::AclErrorLogManager::FormatStr(fmt);
     EXPECT_TRUE(value.empty());
 
     value = acl::AclErrorLogManager::FormatStr(nullptr);
     EXPECT_TRUE(value.empty());
+}
+
+TEST_F(UTEST_ACL_Common, GetFuncNameWithoutImplSuffix_empty_string)
+{
+    std::string result = acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("");
+    EXPECT_EQ("", result);
+}
+
+TEST_F(UTEST_ACL_Common, GetFuncNameWithoutImplSuffix_shorter_than_suffix)
+{
+    std::string result = acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("abc");
+    EXPECT_EQ("abc", result);
+}
+
+TEST_F(UTEST_ACL_Common, GetFuncNameWithoutImplSuffix_not_start_with_acl)
+{
+    std::string result = acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("fooImpl");
+    EXPECT_EQ("fooImpl", result);
+}
+
+TEST_F(UTEST_ACL_Common, GetFuncNameWithoutImplSuffix_start_with_acl_not_end_with_Impl)
+{
+    std::string result = acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("aclBar");
+    EXPECT_EQ("aclBar", result);
+}
+
+TEST_F(UTEST_ACL_Common, GetFuncNameWithoutImplSuffix_acl_only)
+{
+    std::string result = acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("acl");
+    EXPECT_EQ("acl", result);
+}
+
+TEST_F(UTEST_ACL_Common, GetFuncNameWithoutImplSuffix_normal_acl_Impl)
+{
+    std::string result = acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("aclFooImpl");
+    EXPECT_EQ("aclFoo", result);
+}
+
+TEST_F(UTEST_ACL_Common, GetFuncNameWithoutImplSuffix_exact_aclImpl)
+{
+    std::string result = acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("aclImpl");
+    EXPECT_EQ("acl", result);
+}
+
+TEST_F(UTEST_ACL_Common, GetFuncNameWithoutImplSuffix_not_start_acl_not_end_Impl)
+{
+    std::string result = acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("fooBar");
+    EXPECT_EQ("fooBar", result);
+}
+
+TEST_F(UTEST_ACL_Common, GetFuncNameWithoutImplSuffix_ends_Impl_not_start_acl)
+{
+    std::string result = acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("fooBarImpl");
+    EXPECT_EQ("fooBarImpl", result);
+}
+
+TEST_F(UTEST_ACL_Common, GetFuncNameWithoutImplSuffix_acl_middle_Impl)
+{
+    std::string result = acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("aclFooImplBar");
+    EXPECT_EQ("aclFooImplBar", result);
+}
+
+TEST_F(UTEST_ACL_Common, GetFuncNameWithoutImplSuffix_multiple_calls)
+{
+    EXPECT_EQ("aclFoo", acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("aclFooImpl"));
+    EXPECT_EQ("aclBar", acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("aclBarImpl"));
+    EXPECT_EQ("noChange", acl::AclErrorLogManager::GetFuncNameWithoutImplSuffix("noChange"));
+}
+
+TEST_F(UTEST_ACL_Common, EnumDescUsesNameWithoutAclPrefixAndNumericValue)
+{
+    EXPECT_STREQ(GetCaptureModeDesc(ACL_MODEL_RI_CAPTURE_MODE_GLOBAL), "MODEL_RI_CAPTURE_MODE_GLOBAL(0)");
+    EXPECT_STREQ(GetSysParamOptDesc(ACL_OPT_DETERMINISTIC), "OPT_DETERMINISTIC(0)");
+    EXPECT_STREQ(GetMemLocationTypeDesc(ACL_MEM_LOCATION_TYPE_DEVICE), "MEM_LOCATION_TYPE_DEVICE(1)");
+    EXPECT_STREQ(GetDeviceInfoDesc(ACL_DEVICE_INFO_UNDEFINED), "DEVICE_INFO_UNDEFINED(-1)");
+
+    EXPECT_STREQ(GetDataTypeDesc(ACL_DT_UNDEFINED), "DT_UNDEFINED(-1)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_FLOAT), "FLOAT(0)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_FLOAT16), "FLOAT16(1)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_INT8), "INT8(2)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_INT32), "INT32(3)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_UINT8), "UINT8(4)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_INT16), "INT16(6)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_UINT16), "UINT16(7)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_UINT32), "UINT32(8)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_INT64), "INT64(9)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_UINT64), "UINT64(10)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_DOUBLE), "DOUBLE(11)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_BOOL), "BOOL(12)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_STRING), "STRING(13)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_COMPLEX64), "COMPLEX64(16)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_COMPLEX128), "COMPLEX128(17)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_BF16), "BF16(27)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_INT4), "INT4(29)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_UINT1), "UINT1(30)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_COMPLEX32), "COMPLEX32(33)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_HIFLOAT8), "HIFLOAT8(34)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_FLOAT8_E5M2), "FLOAT8_E5M2(35)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_FLOAT8_E4M3FN), "FLOAT8_E4M3FN(36)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_FLOAT8_E8M0), "FLOAT8_E8M0(37)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_FLOAT6_E3M2), "FLOAT6_E3M2(38)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_FLOAT6_E2M3), "FLOAT6_E2M3(39)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_FLOAT4_E2M1), "FLOAT4_E2M1(40)");
+    EXPECT_STREQ(GetDataTypeDesc(ACL_FLOAT4_E1M2), "FLOAT4_E1M2(41)");
+
+    EXPECT_STREQ(GetMemcpyKindDesc(ACL_MEMCPY_HOST_TO_HOST), "MEMCPY_HOST_TO_HOST(0)");
+    EXPECT_STREQ(GetMemcpyKindDesc(ACL_MEMCPY_HOST_TO_DEVICE), "MEMCPY_HOST_TO_DEVICE(1)");
+    EXPECT_STREQ(GetMemcpyKindDesc(ACL_MEMCPY_DEVICE_TO_HOST), "MEMCPY_DEVICE_TO_HOST(2)");
+    EXPECT_STREQ(GetMemcpyKindDesc(ACL_MEMCPY_DEVICE_TO_DEVICE), "MEMCPY_DEVICE_TO_DEVICE(3)");
+    EXPECT_STREQ(GetMemcpyKindDesc(ACL_MEMCPY_DEFAULT), "MEMCPY_DEFAULT(4)");
+    EXPECT_STREQ(GetMemcpyKindDesc(ACL_MEMCPY_HOST_TO_BUF_TO_DEVICE), "MEMCPY_HOST_TO_BUF_TO_DEVICE(5)");
+    EXPECT_STREQ(GetMemcpyKindDesc(ACL_MEMCPY_INNER_DEVICE_TO_DEVICE), "MEMCPY_INNER_DEVICE_TO_DEVICE(6)");
+    EXPECT_STREQ(GetMemcpyKindDesc(ACL_MEMCPY_INTER_DEVICE_TO_DEVICE), "MEMCPY_INTER_DEVICE_TO_DEVICE(7)");
+
+    EXPECT_STREQ(GetMemAttrDesc(ACL_DDR_MEM), "DDR_MEM(0)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_HBM_MEM), "HBM_MEM(1)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_DDR_MEM_HUGE), "DDR_MEM_HUGE(2)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_DDR_MEM_NORMAL), "DDR_MEM_NORMAL(3)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_HBM_MEM_HUGE), "HBM_MEM_HUGE(4)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_HBM_MEM_NORMAL), "HBM_MEM_NORMAL(5)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_DDR_MEM_P2P_HUGE), "DDR_MEM_P2P_HUGE(6)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_DDR_MEM_P2P_NORMAL), "DDR_MEM_P2P_NORMAL(7)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_HBM_MEM_P2P_HUGE), "HBM_MEM_P2P_HUGE(8)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_HBM_MEM_P2P_NORMAL), "HBM_MEM_P2P_NORMAL(9)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_HBM_MEM_HUGE1G), "HBM_MEM_HUGE1G(10)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_HBM_MEM_P2P_HUGE1G), "HBM_MEM_P2P_HUGE1G(11)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_MEM_NORMAL), "MEM_NORMAL(12)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_MEM_HUGE), "MEM_HUGE(13)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_MEM_HUGE1G), "MEM_HUGE1G(14)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_MEM_P2P_NORMAL), "MEM_P2P_NORMAL(15)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_MEM_P2P_HUGE), "MEM_P2P_HUGE(16)");
+    EXPECT_STREQ(GetMemAttrDesc(ACL_MEM_P2P_HUGE1G), "MEM_P2P_HUGE1G(17)");
+
+    EXPECT_STREQ(GetCannAttrDesc(ACL_CANN_ATTR_UNDEFINED), "CANN_ATTR_UNDEFINED(-1)");
+    EXPECT_STREQ(GetCannAttrDesc(ACL_CANN_ATTR_INF_NAN), "CANN_ATTR_INF_NAN(0)");
+    EXPECT_STREQ(GetCannAttrDesc(ACL_CANN_ATTR_BF16), "CANN_ATTR_BF16(1)");
+    EXPECT_STREQ(GetCannAttrDesc(ACL_CANN_ATTR_JIT_COMPILE), "CANN_ATTR_JIT_COMPILE(2)");
+    EXPECT_STREQ(GetDevResLimitTypeDesc(ACL_RT_DEV_RES_CUBE_CORE), "RT_DEV_RES_CUBE_CORE(0)");
+    EXPECT_STREQ(GetDevResLimitTypeDesc(ACL_RT_DEV_RES_VECTOR_CORE), "RT_DEV_RES_VECTOR_CORE(1)");
+    EXPECT_STREQ(GetReduceKindDesc(ACL_RT_MEMCPY_SDMA_AUTOMATIC_SUM), "RT_MEMCPY_SDMA_AUTOMATIC_SUM(10)");
+    EXPECT_STREQ(GetReduceKindDesc(ACL_RT_MEMCPY_SDMA_AUTOMATIC_MAX), "RT_MEMCPY_SDMA_AUTOMATIC_MAX(11)");
+    EXPECT_STREQ(GetReduceKindDesc(ACL_RT_MEMCPY_SDMA_AUTOMATIC_MIN), "RT_MEMCPY_SDMA_AUTOMATIC_MIN(12)");
+    EXPECT_STREQ(GetReduceKindDesc(ACL_RT_MEMCPY_SDMA_AUTOMATIC_EQUAL), "RT_MEMCPY_SDMA_AUTOMATIC_EQUAL(13)");
+    EXPECT_STREQ(GetMemLinkTypeDesc(ACL_RT_MEM_ACCESS_LINK_SIO), "RT_MEM_ACCESS_LINK_SIO(0)");
+    EXPECT_STREQ(GetMemLinkTypeDesc(ACL_RT_MEM_ACCESS_LINK_HCCS), "RT_MEM_ACCESS_LINK_HCCS(1)");
+    EXPECT_STREQ(GetMemLinkTypeDesc(ACL_RT_MEM_ACCESS_UB_ONE_PORT_PATH), "RT_MEM_ACCESS_UB_ONE_PORT_PATH(2)");
+    EXPECT_STREQ(GetMemLinkTypeDesc(ACL_RT_MEM_ACCESS_UB_MULTI_PORT_PATH), "RT_MEM_ACCESS_UB_MULTI_PORT_PATH(3)");
+    EXPECT_STREQ(GetErrorTypeDesc(ACL_RT_NO_ERROR), "RT_NO_ERROR(0)");
+    EXPECT_STREQ(GetErrorTypeDesc(ACL_RT_ERROR_MEMORY), "RT_ERROR_MEMORY(1)");
+    EXPECT_STREQ(GetErrorTypeDesc(ACL_RT_ERROR_L2), "RT_ERROR_L2(2)");
+    EXPECT_STREQ(GetErrorTypeDesc(ACL_RT_ERROR_AICORE), "RT_ERROR_AICORE(3)");
+    EXPECT_STREQ(GetErrorTypeDesc(ACL_RT_ERROR_LINK), "RT_ERROR_LINK(4)");
+    EXPECT_STREQ(GetErrorTypeDesc(ACL_RT_ERROR_L3_PORT), "RT_ERROR_L3_PORT(5)");
+    EXPECT_STREQ(GetErrorTypeDesc(ACL_RT_ERROR_OTHERS), "RT_ERROR_OTHERS(65535)");
+    EXPECT_STREQ(GetStreamAttrDesc(ACL_STREAM_ATTR_FAILURE_MODE), "STREAM_ATTR_FAILURE_MODE(1)");
+    EXPECT_STREQ(GetStreamAttrDesc(ACL_STREAM_ATTR_FLOAT_OVERFLOW_CHECK), "STREAM_ATTR_FLOAT_OVERFLOW_CHECK(2)");
+    EXPECT_STREQ(GetStreamAttrDesc(ACL_STREAM_ATTR_USER_CUSTOM_TAG), "STREAM_ATTR_USER_CUSTOM_TAG(3)");
+    EXPECT_STREQ(GetStreamAttrDesc(ACL_STREAM_ATTR_CACHE_OP_INFO), "STREAM_ATTR_CACHE_OP_INFO(4)");
+    EXPECT_STREQ(GetStreamAttrDesc(ACL_STREAM_ATTR_PRIORITY), "STREAM_ATTR_PRIORITY(5)");
+    EXPECT_STREQ(GetConditionDesc(ACL_RT_EQUAL), "RT_EQUAL(0)");
+    EXPECT_STREQ(GetConditionDesc(ACL_RT_NOT_EQUAL), "RT_NOT_EQUAL(1)");
+    EXPECT_STREQ(GetConditionDesc(ACL_RT_GREATER), "RT_GREATER(2)");
+    EXPECT_STREQ(GetConditionDesc(ACL_RT_GREATER_OR_EQUAL), "RT_GREATER_OR_EQUAL(3)");
+    EXPECT_STREQ(GetConditionDesc(ACL_RT_LESS), "RT_LESS(4)");
+    EXPECT_STREQ(GetConditionDesc(ACL_RT_LESS_OR_EQUAL), "RT_LESS_OR_EQUAL(5)");
+    EXPECT_STREQ(GetCompareDataTypeDesc(ACL_RT_SWITCH_INT32), "RT_SWITCH_INT32(0)");
+    EXPECT_STREQ(GetCompareDataTypeDesc(ACL_RT_SWITCH_INT64), "RT_SWITCH_INT64(1)");
+    EXPECT_STREQ(GetIpcMemAttrTypeDesc(ACL_RT_IPC_MEM_ATTR_ACCESS_LINK), "RT_IPC_MEM_ATTR_ACCESS_LINK(0)");
+    EXPECT_STREQ(GetFloatOverflowModeDesc(ACL_RT_OVERFLOW_MODE_SATURATION), "RT_OVERFLOW_MODE_SATURATION(0)");
+    EXPECT_STREQ(GetFloatOverflowModeDesc(ACL_RT_OVERFLOW_MODE_INFNAN), "RT_OVERFLOW_MODE_INFNAN(1)");
+    EXPECT_STREQ(GetFloatOverflowModeDesc(ACL_RT_OVERFLOW_MODE_UNDEF), "RT_OVERFLOW_MODE_UNDEF(2)");
+    EXPECT_STREQ(GetCmoTypeDesc(ACL_RT_CMO_TYPE_PREFETCH), "RT_CMO_TYPE_PREFETCH(0)");
+    EXPECT_STREQ(GetCmoTypeDesc(ACL_RT_CMO_TYPE_WRITEBACK), "RT_CMO_TYPE_WRITEBACK(1)");
+    EXPECT_STREQ(GetCmoTypeDesc(ACL_RT_CMO_TYPE_INVALID), "RT_CMO_TYPE_INVALID(2)");
+    EXPECT_STREQ(GetCmoTypeDesc(ACL_RT_CMO_TYPE_FLUSH), "RT_CMO_TYPE_FLUSH(3)");
+    EXPECT_STREQ(GetDeviceLimitDesc(ACL_RT_DEV_LIMIT_SIMT_STACK_SIZE), "RT_DEV_LIMIT_SIMT_STACK_SIZE(0)");
+    EXPECT_STREQ(
+        GetDeviceLimitDesc(ACL_RT_DEV_LIMIT_SIMT_DVG_WARP_STACK_SIZE), "RT_DEV_LIMIT_SIMT_DVG_WARP_STACK_SIZE(1)");
+    EXPECT_STREQ(GetDeviceLimitDesc(ACL_RT_DEV_LIMIT_SIMD_STACK_SIZE), "RT_DEV_LIMIT_SIMD_STACK_SIZE(2)");
+    EXPECT_STREQ(
+        GetDeviceLimitDesc(ACL_RT_DEV_LIMIT_SIMD_PRINTF_FIFO_SIZE_PER_CORE),
+        "RT_DEV_LIMIT_SIMD_PRINTF_FIFO_SIZE_PER_CORE(3)");
+    EXPECT_STREQ(GetDeviceLimitDesc(ACL_RT_DEV_LIMIT_SIMT_PRINTF_FIFO_SIZE), "RT_DEV_LIMIT_SIMT_PRINTF_FIFO_SIZE(4)");
+}
+
+TEST_F(UTEST_ACL_Common, EnumDescPreservesUnknownNumericValue)
+{
+    EXPECT_STREQ(GetDataTypeDesc(static_cast<aclDataType>(97)), "UNKNOWN(97)");
+    EXPECT_STREQ(GetMemcpyKindDesc(static_cast<aclrtMemcpyKind>(98)), "UNKNOWN(98)");
+    EXPECT_STREQ(GetMemAttrDesc(static_cast<aclrtMemAttr>(99)), "UNKNOWN(99)");
+    EXPECT_STREQ(GetCannAttrDesc(static_cast<aclCannAttr>(90)), "UNKNOWN(90)");
+    EXPECT_STREQ(GetDevResLimitTypeDesc(static_cast<aclrtDevResLimitType>(91)), "UNKNOWN(91)");
+    EXPECT_STREQ(GetReduceKindDesc(static_cast<aclrtReduceKind>(92)), "UNKNOWN(92)");
+    EXPECT_STREQ(GetMemLinkTypeDesc(static_cast<aclrtMemLinkType>(93)), "UNKNOWN(93)");
+    EXPECT_STREQ(GetErrorTypeDesc(static_cast<aclrtErrorType>(94)), "UNKNOWN(94)");
+    EXPECT_STREQ(GetStreamAttrDesc(static_cast<aclrtStreamAttr>(104)), "UNKNOWN(104)");
+    EXPECT_STREQ(GetConditionDesc(static_cast<aclrtCondition>(95)), "UNKNOWN(95)");
+    EXPECT_STREQ(GetCompareDataTypeDesc(static_cast<aclrtCompareDataType>(96)), "UNKNOWN(96)");
+    EXPECT_STREQ(GetIpcMemAttrTypeDesc(static_cast<aclrtIpcMemAttrType>(100)), "UNKNOWN(100)");
+    EXPECT_STREQ(GetFloatOverflowModeDesc(static_cast<aclrtFloatOverflowMode>(101)), "UNKNOWN(101)");
+    EXPECT_STREQ(GetCmoTypeDesc(static_cast<aclrtCmoType>(102)), "UNKNOWN(102)");
+    EXPECT_STREQ(GetDeviceLimitDesc(static_cast<aclrtDeviceLimit>(103)), "UNKNOWN(103)");
 }

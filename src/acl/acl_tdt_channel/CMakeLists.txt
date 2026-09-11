@@ -20,9 +20,12 @@ target_include_directories(acl_tdt_channel PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/..
     ${CMAKE_CURRENT_LIST_DIR}/../common
+    ${CMAKE_CURRENT_LIST_DIR}/../aclrt_impl
     ${ACL_INC_EXTERNAL_DIR}
     ${CMAKE_BINARY_DIR}/include_acl/tdt
-    ${LIBC_SEC_HEADER}
+    ${RUNTIME_DIR}/pkg_inc/runtime/runtime
+ 	${RUNTIME_DIR}/src/inc
+ 	${RUNTIME_DIR}/src/inc/tdt
 )
 
 target_compile_options(acl_tdt_channel PRIVATE
@@ -34,17 +37,20 @@ target_compile_definitions(acl_tdt_channel PRIVATE
     _FORTIFY_SOURCE=2
     OS_TYPE=0
     FUNC_VISIBILITY
+    # pkg_inc/runtime/runtime 下废弃接口调用错误抑制
+    RT_RUNTIME_DISABLE_DEPRECATED_WARNINGS
 )
 
 target_link_options(acl_tdt_channel PRIVATE
     -rdynamic
     -Wl,-Bsymbolic
     -Wl,--exclude-libs,ALL
-    -Wl,--no-undefined
+    $<$<NOT:$<BOOL:${ENABLE_TSAN}>>:-Wl,--no-undefined>
 )
 
 target_link_libraries(acl_tdt_channel PRIVATE
     $<BUILD_INTERFACE:intf_pub>
+    $<BUILD_INTERFACE:c_sec_headers>
     $<BUILD_INTERFACE:msprof_headers>
     acl_rt_impl
     mmpa
@@ -55,3 +61,5 @@ target_link_libraries(acl_tdt_channel PRIVATE
     -ldl
     -lpthread
 )
+
+add_dependencies(acl_tdt_channel copy_acl_headers_and_libs)

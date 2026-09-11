@@ -8,7 +8,6 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
-############################# [ascend610/ascend610Lite/ascend610Lite] ####################################
 ############################# libslog.so #################################################################
 set (libslogSrcFiles
     ${CMAKE_CURRENT_SOURCE_DIR}/../alog_to_slog.c
@@ -32,14 +31,14 @@ set (libslogSrcFiles
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../utils/library_load.c)
 
 set(libslogHeaderDir
-    ${RUNTIME_DIR}/abl/libc_sec/include
+    ${LIBC_SEC_HEADER}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../utils
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../utils/log_buffer
     ${IAM_HEADER_DIR}/include
     ${MDC_LINUX_SDK_DIR}/include
-    ${RUNTIME_DIR}/inc/driver
-    ${RUNTIME_DIR}/manager/resmgr/procmgr/unified_timer/include)
+    ${RUNTIME_DIR}/pkg_inc/driver
+    ${RUNTIME_DIR}/../manager/resmgr/procmgr/unified_timer/include)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 11)
@@ -128,9 +127,8 @@ set_target_properties(slog
     PROPERTIES
     OUTPUT_NAME slog
 )
-endif()
+endif ()
 
-############################# [ascend610/ascend610Lite/ascend610Lite] ####################################
 ############################# libalog.so #################################################################
 add_library(alog
     SHARED
@@ -205,7 +203,6 @@ set_target_properties(alog
     OUTPUT_NAME ascendalog
 )
 
-############################# [ascend610/ascend610Lite/ascend610Lite] ####################################
 ############################# install ####################################################################
 install(TARGETS slog alog
     LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL
@@ -215,7 +212,6 @@ install(TARGETS slog alog
     LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}/${CMAKE_SYSTEM_PROCESSOR} OPTIONAL
 )
 
-############################# [ascend610/ascend610Lite/ascend610Lite] ####################################
 ################################# libunified_npu_log.so(driver) ##########################################
 add_library(unified_slog
     SHARED
@@ -289,11 +285,11 @@ set_target_properties(unified_slog
 )
 
 install(TARGETS unified_slog
-    LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL
+    LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}/syslib OPTIONAL
 )
 
 install(TARGETS unified_slog
-    LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}/${CMAKE_SYSTEM_PROCESSOR} OPTIONAL
+    LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}/${CMAKE_SYSTEM_PROCESSOR}/syslib OPTIONAL
 )
 
 ################################# libunified_npu_log.so(runtime) ##########################################
@@ -377,3 +373,4 @@ install(TARGETS unified_dlog
 install(TARGETS unified_dlog
     LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}/${CMAKE_SYSTEM_PROCESSOR} OPTIONAL
 )
+### INTERNAL END ###

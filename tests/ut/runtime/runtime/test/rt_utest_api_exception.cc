@@ -1,0 +1,190 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+#include "rt_utest_api.hpp"
+#include "rt_unwrap.h"
+#include "common/rt_utest_context_reset_helper.hpp"
+
+class ApiExceptionTest : public testing::Test {
+protected:
+    static void SetUpTestCase() {}
+
+    static void TearDownTestCase() {}
+
+    virtual void SetUp() {}
+
+    virtual void TearDown()
+    {
+        GlobalMockObject::verify();
+        GlobalMockObject::reset();
+        ut::ResetPrimaryDeviceIfActiveWithDeviceDown();
+    }
+};
+
+void MyOpExceptionCallback(rtExceptionInfo_t* exceptionInfo, void* userData) { EXPECT_EQ(exceptionInfo->retcode, 100); }
+
+uint32_t g_opExceptionCallbackCount = 0U;
+
+void CountOpExceptionCallback(rtExceptionInfo_t* exceptionInfo, void* userData)
+{
+    MyOpExceptionCallback(exceptionInfo, userData);
+    ++g_opExceptionCallbackCount;
+}
+
+TEST_F(ApiExceptionTest, rtBinarySetExceptionCallback)
+{
+    ElfProgram bin_handle;
+    Program* programBase = &bin_handle;
+    rtBinHandle binHandle = rt_ut::InitAndExportHandle<rtBinHandle>(programBase);
+    rtError_t error;
+
+    rtOpExceptionCallback callback = MyOpExceptionCallback;
+    error = rtBinarySetExceptionCallback(binHandle, callback, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(bin_handle.opExceptionCallback_, callback);
+
+    // 验证重复注册场景
+    error = rtBinarySetExceptionCallback(binHandle, callback, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(ApiExceptionTest, rtGetFuncHandleFromExceptionInfo)
+{
+    ElfProgram bin_handle;
+    Program* programBase = &bin_handle;
+    rtBinHandle binHandle = rt_ut::InitAndExportHandle<rtBinHandle>(programBase);
+    // bin_handle析构会释放内存
+    Kernel* kernel = new Kernel("kernel.so", "kernel_func", "op_type");
+    kernel->SetCpuOpType("test");
+    bin_handle.KernelNameMapAdd(kernel);
+    rtError_t error;
+
+    (void)rtSetDevice(0);
+
+    rtExceptionInfo_t exceptionInfo;
+    (void)memset_s(&exceptionInfo, sizeof(rtExceptionInfo_t), 0, sizeof(rtExceptionInfo_t));
+    exceptionInfo.retcode = 100;
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_AICORE;
+    exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.bin = binHandle;
+    exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.kernelName = "test_mix_aic";
+
+    rtFuncHandle func;
+    error = rtGetFuncHandleFromExceptionInfo(&exceptionInfo, &func);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(rt_ut::UnwrapOrNull<Kernel>(func), kernel);
+
+    exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.kernelName = "test";
+    error = rtGetFuncHandleFromExceptionInfo(&exceptionInfo, &func);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(rt_ut::UnwrapOrNull<Kernel>(func), kernel);
+
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_FUSION;
+    exceptionInfo.expandInfo.u.fusionInfo.type == RT_FUSION_AICORE_CCU;
+    exceptionInfo.expandInfo.u.fusionInfo.u.aicoreCcuInfo.exceptionArgs.exceptionKernelInfo.bin = binHandle;
+    exceptionInfo.expandInfo.u.fusionInfo.u.aicoreCcuInfo.exceptionArgs.exceptionKernelInfo.kernelName = "test_mix_aiv";
+
+    rtFuncHandle func1;
+    error = rtGetFuncHandleFromExceptionInfo(&exceptionInfo, &func1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_AICPU;
+    exceptionInfo.expandInfo.u.aicpuInfo.funcHandle = rt_ut::InitAndExportHandle<rtFuncHandle>(kernel);
+
+    rtFuncHandle funcAicpu;
+    error = rtGetFuncHandleFromExceptionInfo(&exceptionInfo, &funcAicpu);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(rt_ut::UnwrapOrNull<Kernel>(funcAicpu), kernel);
+
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_INVALID;
+
+    rtFuncHandle func2;
+    error = rtGetFuncHandleFromExceptionInfo(&exceptionInfo, &func2);
+    EXPECT_NE(error, RT_ERROR_NONE);
+}
+
+TEST_F(ApiExceptionTest, rtGetFuncHandleFromExceptionInfoAicpuNullFuncHandle)
+{
+    rtExceptionInfo_t exceptionInfo;
+    (void)memset_s(&exceptionInfo, sizeof(rtExceptionInfo_t), 0, sizeof(rtExceptionInfo_t));
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_AICPU;
+
+    rtFuncHandle func = nullptr;
+    const rtError_t error = rtGetFuncHandleFromExceptionInfo(&exceptionInfo, &func);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+    EXPECT_EQ(func, nullptr);
+}
+
+TEST_F(ApiExceptionTest, OpTaskFailCallbackNotifyAicpuInvalidInputs)
+{
+    rtExceptionInfo_t exceptionInfo;
+    (void)memset_s(&exceptionInfo, sizeof(rtExceptionInfo_t), 0, sizeof(rtExceptionInfo_t));
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_AICPU;
+
+    exceptionInfo.expandInfo.u.aicpuInfo.funcHandle = nullptr;
+    OpTaskFailCallbackNotify(&exceptionInfo);
+
+    rtInnerObject invalidInnerHandle;
+    invalidInnerHandle.magic.store(0U);
+    invalidInnerHandle.object = nullptr;
+    exceptionInfo.expandInfo.u.aicpuInfo.funcHandle = reinterpret_cast<rtFuncHandle>(&invalidInnerHandle);
+    OpTaskFailCallbackNotify(&exceptionInfo);
+
+    Kernel* kernel = new Kernel("aicpu_test", 0U, nullptr, RT_KERNEL_ATTR_TYPE_AICPU, 0U);
+    exceptionInfo.expandInfo.u.aicpuInfo.funcHandle = rt_ut::InitAndExportHandle<rtFuncHandle>(kernel);
+    OpTaskFailCallbackNotify(&exceptionInfo);
+    delete kernel;
+
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_AICORE;
+    exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.bin =
+        reinterpret_cast<rtBinHandle>(&invalidInnerHandle);
+    exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.kernelName = "invalid";
+    OpTaskFailCallbackNotify(&exceptionInfo);
+}
+
+TEST_F(ApiExceptionTest, OpTaskFailCallbackNotify)
+{
+    ElfProgram bin_handle;
+    Program* programBase = &bin_handle;
+    rtBinHandle apiBinHandle = rt_ut::InitAndExportHandle<rtBinHandle>(programBase);
+    rtBinHandle exceptionBinHandle = apiBinHandle;
+    rtError_t error;
+
+    rtExceptionInfo_t exceptionInfo;
+    (void)memset_s(&exceptionInfo, sizeof(rtExceptionInfo_t), 0, sizeof(rtExceptionInfo_t));
+    exceptionInfo.retcode = 100;
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_AICORE;
+    exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.bin = exceptionBinHandle;
+    exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.kernelName = "test";
+
+    rtOpExceptionCallback callback = CountOpExceptionCallback;
+    error = rtBinarySetExceptionCallback(apiBinHandle, callback, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    g_opExceptionCallbackCount = 0U;
+
+    OpTaskFailCallbackNotify(&exceptionInfo);
+    EXPECT_EQ(g_opExceptionCallbackCount, 1U);
+
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_FUSION;
+    exceptionInfo.expandInfo.u.fusionInfo.type = RT_FUSION_AICORE_AICPU;
+    exceptionInfo.expandInfo.u.fusionInfo.u.aicoreCcuInfo.exceptionArgs.exceptionKernelInfo.bin = exceptionBinHandle;
+    exceptionInfo.expandInfo.u.fusionInfo.u.aicoreCcuInfo.exceptionArgs.exceptionKernelInfo.kernelName = "test";
+    OpTaskFailCallbackNotify(&exceptionInfo);
+    EXPECT_EQ(g_opExceptionCallbackCount, 2U);
+
+    Kernel* kernel = new Kernel("aicpu_test", 0U, programBase, RT_KERNEL_ATTR_TYPE_AICPU, 0U);
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_AICPU;
+    exceptionInfo.expandInfo.u.aicpuInfo.funcHandle = rt_ut::InitAndExportHandle<rtFuncHandle>(kernel);
+    OpTaskFailCallbackNotify(&exceptionInfo);
+    EXPECT_EQ(g_opExceptionCallbackCount, 3U);
+    delete kernel;
+
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_INVALID;
+    OpTaskFailCallbackNotify(&exceptionInfo);
+    EXPECT_EQ(g_opExceptionCallbackCount, 3U);
+}

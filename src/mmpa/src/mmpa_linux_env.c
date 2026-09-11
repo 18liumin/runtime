@@ -7,17 +7,18 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
+
 #include "mmpa_api.h"
 
 #ifdef __cplusplus
-#if    __cplusplus
+#if __cplusplus
 extern "C" {
 #endif /* __cpluscplus */
 #endif
 
 typedef struct {
     mmEnvId id;
-    const CHAR *name;
+    const CHAR* name;
 } mmEnvInfo;
 
 static mmEnvInfo s_envList[] = {
@@ -57,7 +58,7 @@ static mmEnvInfo s_envList[] = {
     {MM_ENV_ASCEND_LATEST_INSTALL_PATH, "ASCEND_LATEST_INSTALL_PATH"},
     {MM_ENV_DATAMASTER_RUN_MODE, "DATAMASTER_RUN_MODE"},
     {MM_ENV_REGISTER_TO_ASCENDMONITOR, "REGISTER_TO_ASCENDMONITOR"},
-    {MM_ENV_ASAN_RUN_MODE,"ASAN_RUN_MODE"},
+    {MM_ENV_ASAN_RUN_MODE, "ASAN_RUN_MODE"},
     {MM_ENV_MAX_COMPILE_CORE_NUMBER, "MAX_COMPILE_CORE_NUMBER"},
     {MM_ENV_EMBEDDING_MAX_THREAD_CORE_NUMBER, "EMBEDDING_MAX_THREAD_CORE_NUMBER"},
     {MM_ENV_AICPU_PROFILING_MODE, "AICPU_PROFILING_MODE"},
@@ -141,7 +142,7 @@ static mmEnvInfo s_envList[] = {
 
     // AOE
     {MM_ENV_TUNE_BANK_PATH, "TUNE_BANK_PATH"},
-    
+
     // FE
     {MM_ENV_ENABLE_ACLNN, "ENABLE_ACLNN"},
     {MM_ENV_MIN_COMPILE_RESOURCE_USAGE_CTRL, "MIN_COMPILE_RESOURCE_USAGE_CTRL"},
@@ -163,13 +164,12 @@ static mmEnvInfo s_envList[] = {
     {MM_ENV_AMCT_LOG_DUMP, "AMCT_LOG_DUMP"},
     // RUNTIME
     {MM_ENV_CAMODEL_LOG_PATH, "CAMODEL_LOG_PATH"},
-
 };
 
-static mmEnvInfo *GetEnvInfoById(mmEnvId id)
+static mmEnvInfo* GetEnvInfoById(mmEnvId id)
 {
     ULONG i = 0;
-    for (i = 0; i < sizeof(s_envList)/sizeof(s_envList[0]); ++i) {
+    for (i = 0; i < sizeof(s_envList) / sizeof(s_envList[0]); ++i) {
         if (s_envList[i].id == id) {
             return &s_envList[i];
         }
@@ -182,9 +182,9 @@ static mmEnvInfo *GetEnvInfoById(mmEnvId id)
  * 参数:id --环境变量枚举值
  * 返回值:执行成功返回内指针, 执行错误返回NULL
  */
-CHAR *mmSysGetEnv(mmEnvId id)
+CHAR* mmSysGetEnv(mmEnvId id)
 {
-    mmEnvInfo *envInfo = GetEnvInfoById(id);
+    mmEnvInfo* envInfo = GetEnvInfoById(id);
     if (NULL != envInfo) {
         return getenv(envInfo->name);
     }
@@ -198,9 +198,9 @@ CHAR *mmSysGetEnv(mmEnvId id)
  *      overwrite -- 是否覆盖标志位 0 表示不覆盖
  * 返回值:执行成功返回EN_OK, 执行错误返回EN_ERROR, 入参检查错误返回EN_INVALID_PARAM
  */
-INT32 mmSysSetEnv(mmEnvId id, const CHAR *value, INT32 overwrite)
+INT32 mmSysSetEnv(mmEnvId id, const CHAR* value, INT32 overwrite)
 {
-    mmEnvInfo *envInfo = GetEnvInfoById(id);
+    mmEnvInfo* envInfo = GetEnvInfoById(id);
     if (NULL == envInfo) {
         return EN_INVALID_PARAM;
     }
@@ -214,7 +214,7 @@ INT32 mmSysSetEnv(mmEnvId id, const CHAR *value, INT32 overwrite)
  */
 INT32 mmSysUnsetEnv(mmEnvId id)
 {
-    mmEnvInfo *envInfo = GetEnvInfoById(id);
+    mmEnvInfo* envInfo = GetEnvInfoById(id);
     if (NULL == envInfo) {
         return EN_INVALID_PARAM;
     }
@@ -228,14 +228,14 @@ INT32 mmSysUnsetEnv(mmEnvId id)
  *      value -- 由用户分配用来存放环境变量的缓存
  * 返回值:执行成功返回EN_OK, 执行错误返回EN_ERROR, 入参检查错误返回EN_INVALID_PARAM
  */
-INT32 mmGetEnv(const CHAR *name, CHAR *value, UINT32 len)
+INT32 mmGetEnv(const CHAR* name, CHAR* value, UINT32 len)
 {
     INT32 ret;
     UINT32 envLen = 0;
     if ((name == NULL) || (value == NULL) || (len == MMPA_ZERO)) {
         return EN_INVALID_PARAM;
     }
-    const CHAR *envPtr = getenv(name);
+    const CHAR* envPtr = getenv(name);
     if (envPtr == NULL) {
         return EN_ERROR;
     }
@@ -248,7 +248,7 @@ INT32 mmGetEnv(const CHAR *name, CHAR *value, UINT32 len)
     if ((envLen != MMPA_ZERO) && (len < envLen)) {
         return EN_INVALID_PARAM;
     } else {
-        ret = memcpy_s(value, len, envPtr, envLen); //lint !e613
+        ret = memcpy_s(value, len, envPtr, envLen);
         if (ret != EN_OK) {
             return EN_ERROR;
         }
@@ -263,7 +263,7 @@ INT32 mmGetEnv(const CHAR *name, CHAR *value, UINT32 len)
  *      overwrite -- 是否覆盖标志位 0 表示不覆盖
  * 返回值:执行成功返回EN_OK, 执行错误返回EN_ERROR, 入参检查错误返回EN_INVALID_PARAM
  */
-INT32 mmSetEnv(const CHAR *name, const CHAR *value, INT32 overwrite)
+INT32 mmSetEnv(const CHAR* name, const CHAR* value, INT32 overwrite)
 {
     if ((name == NULL) || (value == NULL)) {
         return EN_INVALID_PARAM;

@@ -11,6 +11,7 @@
 #include "mockcpp/mockcpp.hpp"
 #include "runtime/rt.h"
 #include "adump_dsmi.h"
+#include "adump_platform_manager.h"
 #include "dump_setting.h"
 #include "operator_preliminary.h"
 #include "common/path.h"
@@ -20,9 +21,10 @@ using namespace Adx;
 
 class OperatorPreliminaryUtest: public testing::Test {
 protected:
-    virtual void SetUp() {}
+    virtual void SetUp() { ResetAllPlatformManagers(); }
     virtual void TearDown()
     {
+        ResetAllPlatformManagers();
         GlobalMockObject::verify();
     }
 };
@@ -48,6 +50,8 @@ TEST_F(OperatorPreliminaryUtest, Test_Operator_Init_Success)
             break;
         }
         MOCKER_CPP(&DumpSetting::GetPlatformType).stubs().will(returnValue(PlatformType::CHIP_CLOUD_V2));
+        uint32_t v2Type = static_cast<uint32_t>(PlatformType::CHIP_CLOUD_V2);
+        MOCKER_CPP(&Adx::AdumpDsmi::DrvGetPlatformType).stubs().with(outBound(v2Type)).will(returnValue(true));
         std::string path = ADUMP_BASE_DIR "stub/data/simulated_data.txt";
         Path retPath(path);
         MOCKER_CPP(&Path::Concat).stubs().will(returnValue(retPath));
@@ -75,7 +79,7 @@ TEST_F(OperatorPreliminaryUtest, Test_Operator_Failed_BinLoad)
         if (opIniter == nullptr) {
             break;
         }
-        std::string path = "./llt/abl/adump/ut/adump_base/stub/data/";
+        std::string path = "./llt/runtime/src/dfx/adump/ut/adump_base/stub/data/";
         MOCKER_CPP(&LibPath::GetInstallPath).stubs().will(returnValue(Adx::Path(path)));
 
         EXPECT_EQ(opIniter->OperatorInit(), ADUMP_FAILED);

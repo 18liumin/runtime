@@ -14,126 +14,131 @@
 #include "acl/acl.h"
 #include "acl_stub.h"
 #include "nlohmann/json.hpp"
+#define private public
+#include "utils/cann_info_utils.h"
+#undef private
 
 using namespace testing;
 
 namespace {
-    class TestDirUtils {
-    public:
-        void BuildTestDir()
-        {
-            // temporary test directory
-            (void)!system(("mkdir -p " + testDir).c_str());
-            (void)!system(("mkdir -p " + configDir).c_str());
-            const std::string configFile = ACL_BASE_DIR"/src/acl/config/swFeatureList.json";
-            (void)!system(("cp " + configFile + " " + configDir).c_str());
-            (void)!system(("mkdir -p " + runtimeDir).c_str());
-            (void)!system(("touch " + infoFile).c_str());
-            (void)!system(("mkdir -p " + fakeConfigDir).c_str());
-            (void)!system(("touch " + fakeConfigFile).c_str());
-        }
-        void RemoveTestDir()
-        {
-            (void)!system(("rm -rf " + testDir).c_str());
-        }
-        void MakeRuntimeVersionInfo()
-        {
-            std::ofstream ofs(infoFile, std::ios::trunc);
-            ofs << "Version=7.1.T7.0.B207\n";
-            ofs << "version_dir=CANN-7.0\n";
-            ofs << "runtime_acl_version=1.0";
-            ofs.close();
-        }
-        void MakeEmptyVersionInfo()
-        {
-            std::ofstream ofs(infoFile, std::ios::trunc);
-            ofs << "\n";
-            ofs.close();
-        }
-        void MakeIncorrectVersionInfo()
-        {
-            std::ofstream ofs(infoFile, std::ios::trunc);
-            ofs << "Version=CANN7.1.T7.0.B207\n";
-            ofs.close();
-        }
-
-        void MakeFakeConfigFile()
-        {
-            std::ofstream ofs(fakeConfigFile, std::ios::trunc);
-            // soc version is not a list, parse failed
-            nlohmann::json js = R"({"INF_NAN": {"runtimeVersion" : "7.1","socVersionList" : "910B"}})"_json;
-            ofs << js.dump();
-            ofs.close();
-        }
-
-    private:
-        const std::string testDir = ACL_BASE_DIR"/tests/tmp_run_data";
-        const std::string runtimeDir = testDir + "/share/info/runtime";
-        const std::string configDir = testDir + "/ascendcl_config";
-        const std::string infoFile = runtimeDir + "/version.info";
-        const std::string failDir = testDir + "/tmp_fail";
-        const std::string fakeConfigDir = failDir + "/tmp_run_data/ascendcl_config";
-        const std::string fakeConfigFile = fakeConfigDir + "/swFeatureList.json";
-    };
-
-    bool MockGetPlatformResWithLock(const string &label, const string &key, string &val)
+class TestDirUtils {
+public:
+    void BuildTestDir()
     {
-        (void)label;
-        static std::map<std::string, std::string> valTable = {{"ai_core_cnt", "20"}, {"vector_core_cnt", "XXX"}};
-        auto iter = valTable.find(key);
-        if (iter != valTable.end()) {
-            val = iter->second;
-            return true;
-        }
-        // l2_size will fail
-        return false;
-    };
+        // temporary test directory
+        (void)!system(("mkdir -p " + testDir).c_str());
+        (void)!system(("mkdir -p " + configDir).c_str());
+        const std::string configFile = ACL_BASE_DIR "/src/acl/config/swFeatureList.json";
+        (void)!system(("cp " + configFile + " " + configDir).c_str());
+        (void)!system(("mkdir -p " + runtimeDir).c_str());
+        (void)!system(("touch " + infoFile).c_str());
+        (void)!system(("mkdir -p " + fakeConfigDir).c_str());
+        (void)!system(("touch " + fakeConfigFile).c_str());
+        (void)!system(("mkdir -p " + camodelDir).c_str());
+        (void)!system(("touch " + camodelRuntimeFile).c_str());
+    }
+    void RemoveTestDir() { (void)!system(("rm -rf " + testDir).c_str()); }
+    void MakeRuntimeVersionInfo()
+    {
+        std::ofstream ofs(infoFile, std::ios::trunc);
+        ofs << "Version=7.1.T7.0.B207\n";
+        ofs << "version_dir=CANN-7.0\n";
+        ofs << "runtime_acl_version=1.0";
+        ofs.close();
+    }
+    void MakeEmptyVersionInfo()
+    {
+        std::ofstream ofs(infoFile, std::ios::trunc);
+        ofs << "\n";
+        ofs.close();
+    }
+    void MakeIncorrectVersionInfo()
+    {
+        std::ofstream ofs(infoFile, std::ios::trunc);
+        ofs << "Version=CANN7.1.T7.0.B207\n";
+        ofs.close();
+    }
 
-    class MockMmpa {
-    public:
-        static INT32 mmDladdr(VOID *addr, mmDlInfo *info)
-        {
-            (void)addr;
-            info->dli_fname = ACL_BASE_DIR"/tests/tmp_run_data/ascendcl_config";
-            return 0;
-        }
+    void MakeFakeConfigFile()
+    {
+        std::ofstream ofs(fakeConfigFile, std::ios::trunc);
+        // soc version is not a list, parse failed
+        nlohmann::json js = R"({"INF_NAN": {"runtimeVersion" : "7.1"}})"_json;
+        ofs << js.dump();
+        ofs.close();
+    }
 
-        static INT32 mmDladdrFail(VOID *addr, mmDlInfo *info)
-        {
-            (void)addr;
-            info->dli_fname = "fake_config_path";
-            return 0;
-        }
+private:
+    const std::string testDir = ACL_BASE_DIR "/tests/tmp_run_data";
+    const std::string runtimeDir = testDir + "/share/info/runtime";
+    const std::string configDir = testDir + "/ascendcl_config";
+    const std::string infoFile = runtimeDir + "/version.info";
+    const std::string failDir = testDir + "/tmp_fail";
+    const std::string fakeConfigDir = failDir + "/tmp_run_data/ascendcl_config";
+    const std::string fakeConfigFile = fakeConfigDir + "/swFeatureList.json";
+    const std::string camodelDir = testDir + "/simulator/dav_3510/camodel";
+    const std::string camodelRuntimeFile = camodelDir + "/libruntime_camodel.so";
+};
 
-        static INT32 mmDladdrFail2(VOID *addr, mmDlInfo *info)
-        {
-            (void)addr;
-            info->dli_fname = ACL_BASE_DIR"/tests/tmp_run_data/tmp_fail/tmp_run_data/ascendcl_config";
-            return 0;
-        }
-    };
+bool MockGetPlatformResWithLock(const string& label, const string& key, string& val)
+{
+    (void)label;
+    static std::map<std::string, std::string> valTable = {{"ai_core_cnt", "20"}, {"vector_core_cnt", "XXX"}};
+    auto iter = valTable.find(key);
+    if (iter != valTable.end()) {
+        val = iter->second;
+        return true;
+    }
+    // l2_size will fail
+    return false;
+};
 
-    class MockRuntime {
-    public:
-        static rtError_t rtGetSocVersion(char *version, const uint32_t maxLen)
-        {
-            const char *socVersion = "Ascend310P1";
-            memcpy_s(version, maxLen, socVersion, strlen(socVersion) + 1);
-            return RT_ERROR_NONE;
-        }
-    };
+class MockMmpa {
+public:
+    static INT32 mmDladdr(VOID* addr, mmDlInfo* info)
+    {
+        (void)addr;
+        info->dli_fname = ACL_BASE_DIR "/tests/tmp_run_data/ascendcl_config";
+        return 0;
+    }
+
+    static INT32 mmDladdrFail(VOID* addr, mmDlInfo* info)
+    {
+        (void)addr;
+        info->dli_fname = "fake_config_path";
+        return 0;
+    }
+
+    static INT32 mmDladdrFail2(VOID* addr, mmDlInfo* info)
+    {
+        (void)addr;
+        info->dli_fname = ACL_BASE_DIR "/tests/tmp_run_data/tmp_fail/tmp_run_data/ascendcl_config";
+        return 0;
+    }
+
+    static INT32 mmDladdrCamodel(VOID* addr, mmDlInfo* info)
+    {
+        (void)addr;
+        info->dli_fname = ACL_BASE_DIR "/tests/tmp_run_data/simulator/dav_3510/camodel/libruntime_camodel.so";
+        return 0;
+    }
+};
+
+class MockRuntime {
+public:
+    static rtError_t rtGetSocVersion(char* version, const uint32_t maxLen)
+    {
+        const char* socVersion = "Ascend310P1";
+        memcpy_s(version, maxLen, socVersion, strlen(socVersion) + 1);
+        return RT_ERROR_NONE;
+    }
+};
 } // namespace
 
 class UTEST_ACL_Capability : public Test {
 protected:
-    static void SetUpTestCase()
-    {
-        (void)aclInit(nullptr);
-    }
-    static void TearDownTestCase()
-    {
-        (void)aclFinalize();
-    }
+    static void SetUpTestCase() { (void)aclInit(nullptr); }
+    static void TearDownTestCase() { (void)aclFinalize(); }
     void SetUp() override
     {
         ::testing::FLAGS_gmock_verbose = "error";
@@ -141,7 +146,7 @@ protected:
     }
     void TearDown() override
     {
-        Mock::VerifyAndClear((void *)(&MockFunctionTest::aclStubInstance()));
+        Mock::VerifyAndClear((void*)(&MockFunctionTest::aclStubInstance()));
         dirUtils.RemoveTestDir();
     }
     TestDirUtils dirUtils;
@@ -174,6 +179,21 @@ TEST_F(UTEST_ACL_Capability, aclGetDeviceCapability_Fail_InvalidDeviceIdOrInfoTy
     // case: invalid infoType
     infoType = ACL_DEVICE_INFO_UNDEFINED;
     ret = aclGetDeviceCapability(0U, infoType, &value);
+    EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(UTEST_ACL_Capability, aclGetDeviceCapability_Fail_DeviceIdOutOfRange)
+{
+    aclDeviceInfo infoType = ACL_DEVICE_INFO_AI_CORE_NUM;
+    int64_t value;
+    // Mock rtGetDeviceCount to return count = 2 (devices 0 and 1)
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), rtGetDeviceCount(_))
+        .WillOnce(DoAll(SetArgPointee<0>(2), Return(RT_ERROR_NONE)));
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), GetPlatformResWithLock(_, _, _))
+        .WillRepeatedly(Invoke(MockGetPlatformResWithLock));
+
+    // case: deviceId = 5 exceeds valid range [0, 1] when count = 2
+    aclError ret = aclGetDeviceCapability(5U, infoType, &value);
     EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
 }
 
@@ -222,7 +242,7 @@ TEST_F(UTEST_ACL_Capability, aclGetDeviceCapability_Fail_NullInput)
 
 TEST_F(UTEST_ACL_Capability, aclGetCannAttributeList_Fail_CannInfoUtilsInitError)
 {
-    const aclCannAttr *attrArray = nullptr;
+    const aclCannAttr* attrArray = nullptr;
     size_t num = 0;
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), mmDladdr(_, _))
         .WillOnce(Return(EN_ERR))
@@ -292,6 +312,18 @@ TEST_F(UTEST_ACL_Capability, aclGetCannAttribute_Fail_CannInfoUtilsInitError)
 }
 
 // test cases bewlow will successfully initialize CannInfoUtils
+TEST_F(UTEST_ACL_Capability, aclGetCannAttribute_Ok_CamodelFallbackGetInfNan)
+{
+    dirUtils.MakeRuntimeVersionInfo();
+    aclCannAttr cannAttr = ACL_CANN_ATTR_INF_NAN;
+    int32_t value;
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), mmDladdr(_, _)).WillRepeatedly(Invoke(MockMmpa::mmDladdrCamodel));
+
+    aclError ret = aclGetCannAttribute(cannAttr, &value);
+    EXPECT_EQ(ret, ACL_SUCCESS);
+    EXPECT_EQ(value, 1);
+}
+
 TEST_F(UTEST_ACL_Capability, aclGetCannAttribute_Fail_InvalidCannAttr)
 {
     dirUtils.MakeRuntimeVersionInfo();
@@ -328,7 +360,7 @@ TEST_F(UTEST_ACL_Capability, aclGetCannAttribute_Ok_GetInfNan)
 TEST_F(UTEST_ACL_Capability, aclGetCannAttributeList_Ok_Ascend910B1)
 {
     dirUtils.MakeRuntimeVersionInfo();
-    const aclCannAttr *attrArray = nullptr;
+    const aclCannAttr* attrArray = nullptr;
     size_t num = 0;
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), mmDladdr(_, _)).WillRepeatedly(Invoke(MockMmpa::mmDladdr));
 
@@ -341,7 +373,7 @@ TEST_F(UTEST_ACL_Capability, aclGetCannAttributeList_Ok_Ascend910B1)
 TEST_F(UTEST_ACL_Capability, aclGetCannAttributeList_Fail_NullInput)
 {
     dirUtils.MakeRuntimeVersionInfo();
-    const aclCannAttr *attrArray = nullptr;
+    const aclCannAttr* attrArray = nullptr;
     size_t num = 0;
     EXPECT_CALL(MockFunctionTest::aclStubInstance(), mmDladdr(_, _)).WillRepeatedly(Invoke(MockMmpa::mmDladdr));
 
@@ -352,4 +384,27 @@ TEST_F(UTEST_ACL_Capability, aclGetCannAttributeList_Fail_NullInput)
     // case: nullptr input num
     ret = aclGetCannAttributeList(&attrArray, nullptr);
     EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(UTEST_ACL_Capability, aclGetCannAttribute_Fail_GetAttrConfigFromFileError)
+{
+    auto oldFlag = acl::CannInfoUtils::initFlag_;
+    auto attrNum = acl::CannInfoUtils::attrNum_;
+    acl::CannInfoUtils::initFlag_ = false;
+    acl::CannInfoUtils::attrNum_ = 0;
+
+    aclCannAttr cannAttr = ACL_CANN_ATTR_INF_NAN;
+    int32_t value;
+
+    dirUtils.MakeFakeConfigFile();
+
+    EXPECT_CALL(MockFunctionTest::aclStubInstance(), mmDladdr(_, _))
+        .WillOnce(Invoke(MockMmpa::mmDladdrFail2))
+        .WillRepeatedly(Invoke(MockMmpa::mmDladdr));
+
+    aclError ret = aclGetCannAttribute(cannAttr, &value);
+    EXPECT_EQ(ret, ACL_ERROR_INTERNAL_ERROR);
+
+    acl::CannInfoUtils::initFlag_ = oldFlag;
+    acl::CannInfoUtils::attrNum_ = attrNum;
 }

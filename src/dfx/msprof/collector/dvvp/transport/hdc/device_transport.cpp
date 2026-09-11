@@ -30,10 +30,8 @@ using namespace analysis::dvvp::common::config;
 using namespace analysis::dvvp::common::validation;
 using namespace Analysis::Dvvp::MsprofErrMgr;
 
-DeviceTransport::DeviceTransport(HDC_CLIENT client,
-                                 const std::string &devId,
-                                 const std::string &jobId,
-                                 const std::string &mode)
+DeviceTransport::DeviceTransport(
+    HDC_CLIENT client, const std::string& devId, const std::string& jobId, const std::string& mode)
     : client_(client),
       devIndexId_(0),
       devIndexIdStr_(devId),
@@ -45,8 +43,7 @@ DeviceTransport::DeviceTransport(HDC_CLIENT client,
       isClosed_(false),
       dataTran_(nullptr),
       ctrlTran_(nullptr)
-{
-}
+{}
 
 DeviceTransport::~DeviceTransport()
 {
@@ -54,48 +51,39 @@ DeviceTransport::~DeviceTransport()
     Join();
 }
 
-bool DeviceTransport::IsInitialized()
-{
-    return (dataInitialized_ && ctrlInitialized_);
-}
+bool DeviceTransport::IsInitialized() { return (dataInitialized_ && ctrlInitialized_); }
 
-void DeviceTransport::SetTimeOut(uint32_t timeout)
-{
-    timeout_ = timeout;
-}
+void DeviceTransport::SetTimeOut(uint32_t timeout) { timeout_ = timeout; }
 
-int32_t DeviceTransport::HandlePacket(TLV_REQ_PTR packet, analysis::dvvp::message::StatusInfo &status)
+int32_t DeviceTransport::HandlePacket(TLV_REQ_PTR packet, analysis::dvvp::message::StatusInfo& status)
 {
     int32_t ret = PROFILING_FAILED;
     do {
         if (packet == nullptr) {
             MSPROF_LOGE("Device(%s) packet is nullptr", devIndexIdStr_.c_str());
-            MSPROF_INNER_ERROR("EK9999", "Device(%s) packet is nullptr", devIndexIdStr_.c_str());
             break;
         }
         std::string responseStr(packet->value, packet->len);
         auto message = analysis::dvvp::message::DecodeMessage(responseStr);
         if (message == nullptr) {
             MSPROF_LOGE("Device(%s) message decode failed", devIndexIdStr_.c_str());
-            MSPROF_INNER_ERROR("EK9999", "Device(%s) message decode failed", devIndexIdStr_.c_str());
             break;
         }
 
         auto responseMessage = std::dynamic_pointer_cast<analysis::dvvp::proto::Response>(message);
         if (responseMessage == nullptr) {
             MSPROF_LOGE("Device(%s) Not response Message", devIndexIdStr_.c_str());
-            MSPROF_INNER_ERROR("EK9999", "Device(%s) Not response Message", devIndexIdStr_.c_str());
             break;
         }
 
         std::string statusStr = responseMessage->message();
         if (!status.FromString(statusStr)) {
             MSPROF_LOGE("Device(%s) message from string failed", devIndexIdStr_.c_str());
-            MSPROF_INNER_ERROR("EK9999", "Device(%s) message from string failed", devIndexIdStr_.c_str());
             break;
         }
-        FUNRET_CHECK_EXPR_ACTION_LOGW(status.status != analysis::dvvp::message::SUCCESS, break,
-            "Device(%s) message status abnormal, info: %s", devIndexIdStr_.c_str(), status.info.c_str());
+        FUNRET_CHECK_EXPR_ACTION_LOGW(
+            status.status != analysis::dvvp::message::SUCCESS, break, "Device(%s) message status abnormal, info: %s",
+            devIndexIdStr_.c_str(), status.info.c_str());
         ret = PROFILING_SUCCESS;
     } while (0);
     ctrlTran_->DestroyPacket(packet);
@@ -115,11 +103,11 @@ int32_t DeviceTransport::HandleShake(SHARED_PTR_ALIA<google::protobuf::Message> 
     int32_t ret = PROFILING_FAILED;
     std::string encoded = analysis::dvvp::message::EncodeMessage(message);
     int32_t handshakeCount = 0;
-    const int32_t handshakeRetryTimes = 5;    // try 5 times to handshake
-    const unsigned long handshakeRetryInterval = 100000;   // sleep 100000us before retry
+    const int32_t handshakeRetryTimes = 5;               // try 5 times to handshake
+    const unsigned long handshakeRetryInterval = 100000; // sleep 100000us before retry
     SHARED_PTR_ALIA<analysis::dvvp::transport::AdxTransport> tran;
     do {
-        if (handshakeCount > 0) {   // no sleep at first time
+        if (handshakeCount > 0) { // no sleep at first time
             analysis::dvvp::common::utils::Utils::UsleepInterupt(handshakeRetryInterval);
         }
         handshakeCount++;
@@ -152,16 +140,15 @@ int32_t DeviceTransport::HandleShake(SHARED_PTR_ALIA<google::protobuf::Message> 
 
         analysis::dvvp::message::StatusInfo status;
         ret = HandlePacket(packet, status);
-        FUNRET_CHECK_EXPR_ACTION_LOGW(ret != PROFILING_SUCCESS, continue,
-            "Device(%s) create channel handle packet exception.", devIndexIdStr_.c_str());
+        FUNRET_CHECK_EXPR_ACTION_LOGW(
+            ret != PROFILING_SUCCESS, continue, "Device(%s) create channel handle packet exception.",
+            devIndexIdStr_.c_str());
 
         break;
     } while (handshakeCount < handshakeRetryTimes && ctrlShake);
 
     if (ret != PROFILING_SUCCESS && ret != PROFILING_NOTSUPPORT) {
         MSPROF_LOGE("Failed to handshake with device %s, try times %d", devIndexIdStr_.c_str(), handshakeCount);
-        MSPROF_INNER_ERROR("EK9999", "Failed to handshake with device %s, try times %d",
-            devIndexIdStr_.c_str(), handshakeCount);
     }
     return ret;
 }
@@ -174,11 +161,11 @@ int32_t DeviceTransport::Init()
     MSVP_MAKE_SHARED0(dataMessage, analysis::dvvp::proto::DataChannelHandshake, return PROFILING_FAILED);
     if (!ParamValidation::instance()->CheckDeviceIdIsValid(devIndexIdStr_)) {
         MSPROF_LOGE("[DeviceTransport::Init]devId %s is not valid!", devIndexIdStr_.c_str());
-        MSPROF_INNER_ERROR("EK9999", "devId %s is not valid!", devIndexIdStr_.c_str());
         return PROFILING_FAILED;
     }
-    FUNRET_CHECK_EXPR_ACTION(!Utils::StrToInt32(devIndexId_, devIndexIdStr_), return PROFILING_FAILED,
-        "devIndexIdStr_ %s is invalid", devIndexIdStr_.c_str());
+    FUNRET_CHECK_EXPR_ACTION(
+        !Utils::StrToInt32(devIndexId_, devIndexIdStr_), return PROFILING_FAILED, "devIndexIdStr_ %s is invalid",
+        devIndexIdStr_.c_str());
     MSPROF_LOGI("Try to shake hand with Device %d", devIndexId_);
     ctrlMessage->set_devid(devIndexId_);
     ctrlMessage->set_jobid(jobId_);
@@ -214,17 +201,13 @@ int32_t DeviceTransport::Init()
     return ret;
 }
 
-int32_t DeviceTransport::RecvDataPacket(TLV_REQ_2PTR packet)
-{
-    return dataTran_->RecvPacket(packet, timeout_);
-}
+int32_t DeviceTransport::RecvDataPacket(TLV_REQ_2PTR packet) { return dataTran_->RecvPacket(packet, timeout_); }
 
-void DeviceTransport::Run(const struct error_message::Context &errorContext)
+void DeviceTransport::Run(const error_message::ErrorManagerContext& errorContext)
 {
     MsprofErrorManager::instance()->SetErrorContext(errorContext);
     if (!dataInitialized_) {
         MSPROF_LOGE("Device(%s) data channel is not inited", devIndexIdStr_.c_str());
-        MSPROF_INNER_ERROR("EK9999", "Device(%s) data channel is not inited", devIndexIdStr_.c_str());
         return;
     }
 
@@ -243,7 +226,6 @@ void DeviceTransport::Run(const struct error_message::Context &errorContext)
         ret = Analysis::Dvvp::Msprof::HdcTransportDataHandle::ReceiveStreamData(packet->value, packet->len);
         if (ret != PROFILING_SUCCESS) {
             MSPROF_LOGE("Device(%s) ReceiveStreamData failed", devIndexIdStr_.c_str());
-            MSPROF_INNER_ERROR("EK9999", "Device(%s) ReceiveStreamData failed", devIndexIdStr_.c_str());
         }
         dataTran_->DestroyPacket(packet);
         packet = nullptr;
@@ -286,13 +268,12 @@ void DeviceTransport::Uinit()
             success return PROFILING_SUCCESS
             failed return PROFILING_FAILED
  */
-int32_t DeviceTransport::SendMsgAndRecvResponse(const std::string &msg, TLV_REQ_2PTR packet)
+int32_t DeviceTransport::SendMsgAndRecvResponse(const std::string& msg, TLV_REQ_2PTR packet)
 {
     int32_t ret = PROFILING_FAILED;
     do {
         if (packet == nullptr) {
             MSPROF_LOGE("invalid parameter, packet is null");
-            MSPROF_INNER_ERROR("EK9999", "invalid parameter, packet is null");
             break;
         }
 
@@ -304,7 +285,6 @@ int32_t DeviceTransport::SendMsgAndRecvResponse(const std::string &msg, TLV_REQ_
 
         if (ctrlTran_ == nullptr) {
             MSPROF_LOGE("Device(%s) ctrl tran is null", devIndexIdStr_.c_str());
-            MSPROF_INNER_ERROR("EK9999", "Device(%s) ctrl tran is null", devIndexIdStr_.c_str());
             break;
         }
 
@@ -312,7 +292,6 @@ int32_t DeviceTransport::SendMsgAndRecvResponse(const std::string &msg, TLV_REQ_
         if (sentLen < 0) {
             ctrlInitialized_ = false;
             MSPROF_LOGE("Device(%s) send message failed", devIndexIdStr_.c_str());
-            MSPROF_INNER_ERROR("EK9999", "Device(%s) send message failed", devIndexIdStr_.c_str());
             break;
         }
 
@@ -321,7 +300,6 @@ int32_t DeviceTransport::SendMsgAndRecvResponse(const std::string &msg, TLV_REQ_
         if (recvLen < 0 || packet == nullptr) {
             ctrlInitialized_ = false;
             MSPROF_LOGE("Device(%s) the ack of the message is failed", devIndexIdStr_.c_str());
-            MSPROF_INNER_ERROR("EK9999", "Device(%s) the ack of the message is failed", devIndexIdStr_.c_str());
             break;
         }
         ret = PROFILING_SUCCESS;
@@ -340,7 +318,6 @@ int32_t DevTransMgr::Init(std::string jobId, int32_t devId, std::string mode, ui
     HDC_CLIENT client = Analysis::Dvvp::Adx::AdxHdcClientCreate(HDC_SERVICE_TYPE_IDE2);
     if (client == nullptr) {
         MSPROF_LOGE("HDC client is invalid");
-        MSPROF_INNER_ERROR("EK9999", "HDC client is invalid");
         return PROFILING_FAILED;
     }
     MSPROF_LOGI("Device(%d) begin init, jobId: %s, mode: %s", devId, jobId.c_str(), mode.c_str());
@@ -367,7 +344,6 @@ int32_t DevTransMgr::Init(std::string jobId, int32_t devId, std::string mode, ui
         if (ret != PROFILING_SUCCESS) {
             if (ret != PROFILING_NOTSUPPORT) {
                 MSPROF_LOGE("Init device(%d) trans failed", devId);
-                MSPROF_INNER_ERROR("EK9999", "Init device(%d) trans failed", devId);
             }
             return ret;
         }
@@ -377,8 +353,6 @@ int32_t DevTransMgr::Init(std::string jobId, int32_t devId, std::string mode, ui
         ret = devTran->Start();
         if (ret != PROFILING_SUCCESS) {
             MSPROF_LOGE("Device(%d) start devTran thread failed, error:%d", devId, static_cast<int32_t>(errno));
-            MSPROF_INNER_ERROR("EK9999", "Device(%d) start devTran thread failed, error:%d",
-                devId, static_cast<int32_t>(errno));
         } else {
             MSPROF_LOGI("Device(%d) init success", devId);
         }
@@ -393,8 +367,7 @@ SHARED_PTR_ALIA<DeviceTransport> DevTransMgr::GetDevTransport(std::string jobId,
 {
     std::lock_guard<std::mutex> lk(devTarnsMtx_);
     if (devTransMap_.find(jobId) != devTransMap_.end() &&
-        devTransMap_[jobId].find(devId) != devTransMap_[jobId].end() &&
-        devTransMap_[jobId][devId]->IsInitialized()) {
+        devTransMap_[jobId].find(devId) != devTransMap_[jobId].end() && devTransMap_[jobId][devId]->IsInitialized()) {
         return devTransMap_[jobId][devId];
     }
 
@@ -440,6 +413,6 @@ int32_t DevTransMgr::UnInit()
 
     return PROFILING_SUCCESS;
 }
-}  // namespace host
-}  // namespace dvvp
-}  // namespace analysis
+} // namespace transport
+} // namespace dvvp
+} // namespace analysis

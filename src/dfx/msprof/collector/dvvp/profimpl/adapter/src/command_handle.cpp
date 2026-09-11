@@ -27,22 +27,16 @@ using namespace analysis::dvvp::common::utils;
 using namespace Analysis::Dvvp::Common::Platform;
 using namespace Msprofiler::Parser;
 
-ProfModuleReprotMgr::~ProfModuleReprotMgr()
-{
-}
+ProfModuleReprotMgr::~ProfModuleReprotMgr() {}
 
 int32_t ProfRegisterCallback(uint32_t moduleId, ProfCommandHandle callback)
 {
     return ProfModuleReprotMgr::GetInstance().ModuleRegisterCallback(moduleId, callback);
 }
 
-int32_t CommandHandleProfInit()
-{
-    return ProfModuleReprotMgr::GetInstance().ModuleReportInit();
-}
+int32_t CommandHandleProfInit() { return ProfModuleReprotMgr::GetInstance().ModuleReportInit(); }
 
-int32_t CommandHandleProfStart(const uint32_t devIdList[], uint32_t devNums, uint64_t profSwitch,
-    uint64_t profSwitchHi)
+int32_t CommandHandleProfStart(const uint32_t devIdList[], uint32_t devNums, uint64_t profSwitch, uint64_t profSwitchHi)
 {
     return ProfModuleReprotMgr::GetInstance().ModuleReportStart(devIdList, devNums, profSwitch, profSwitchHi);
 }
@@ -52,73 +46,91 @@ int32_t CommandHandleProfStop(const uint32_t devIdList[], uint32_t devNums, uint
     return ProfModuleReprotMgr::GetInstance().ModuleReportStop(devIdList, devNums, profSwitch, profSwitchHi);
 }
 
-int32_t CommandHandleProfFinalize()
-{
-    return ProfModuleReprotMgr::GetInstance().ModuleReportFinalize();
-}
+int32_t CommandHandleProfFinalize() { return ProfModuleReprotMgr::GetInstance().ModuleReportFinalize(); }
 
 int32_t CommandHandleProfUnSubscribe(uint32_t modelId)
 {
     return ProfModuleReprotMgr::GetInstance().ModuleReportUnSubscribe(modelId);
 }
 
-void CommandHandleFinalizeGuard()
+void CommandHandleFinalizeGuard() { ProfModuleReprotMgr::GetInstance().ProfSetFinalizeGuard(); }
+
+int32_t ProfSetProfCommand(ProfCommand& command)
 {
-    ProfModuleReprotMgr::GetInstance().ProfSetFinalizeGuard();
+    return ProfModuleReprotMgr::GetInstance().ProfSetProCommand(command);
 }
 
-void ProfModuleReprotMgr::ProfSetFinalizeGuard()
-{
-    finalizeGuard_ = true;
-}
+void ProfModuleReprotMgr::ProfSetFinalizeGuard() { finalizeGuard_ = true; }
 
-int32_t ProfModuleReprotMgr::ProfSetProCommand(ProfCommand &command)
+int32_t ProfModuleReprotMgr::ProfSetProCommand(ProfCommand& command)
 {
-    std::unique_lock<std::mutex> lock(regCallback_, std::defer_lock);
-    lock.lock();
+    std::map<uint32_t, std::set<ProfCommandHandle>> callbackSnapshot;
+    {
+        std::lock_guard<std::mutex> lock(regCallback_);
+        callbackSnapshot = moduleCallbacks_;
+        // Keep the original command for callbacks registered after profiling starts.
+        command_ = command;
+    }
     std::vector<uint32_t> origOrder;
-    std::for_each(moduleCallbacks_.cbegin(), moduleCallbacks_.cend(),
-        [&origOrder](const std::pair<uint32_t, std::set<ProfCommandHandle>> &kv) {
+    std::for_each(
+        callbackSnapshot.cbegin(), callbackSnapshot.cend(),
+        [&origOrder](const std::pair<uint32_t, std::set<ProfCommandHandle>>& kv) {
             if (kv.first != RUNTIME && kv.first != ASCENDCL && kv.first != GE) {
                 origOrder.push_back(kv.first);
             }
         });
-    lock.unlock();
     std::vector<uint32_t> callbackOrder;
     if (command.type == PROF_COMMANDHANDLE_TYPE_INIT || command.type == PROF_COMMANDHANDLE_TYPE_START ||
         command.type == PROF_COMMANDHANDLE_TYPE_MODEL_SUBSCRIBE) {
-        callbackOrder = { RUNTIME, ASCENDCL, GE };
-    } else if (command.type == PROF_COMMANDHANDLE_TYPE_STOP || command.type == PROF_COMMANDHANDLE_TYPE_FINALIZE ||
+        callbackOrder = {RUNTIME, ASCENDCL, GE};
+    } else if (
+        command.type == PROF_COMMANDHANDLE_TYPE_STOP || command.type == PROF_COMMANDHANDLE_TYPE_FINALIZE ||
         command.type == PROF_COMMANDHANDLE_TYPE_MODEL_UNSUBSCRIBE) {
-        callbackOrder = { GE, ASCENDCL, RUNTIME };
+        callbackOrder = {GE, ASCENDCL, RUNTIME};
     }
     callbackOrder.insert(callbackOrder.cend(), origOrder.cbegin(), origOrder.cend());
-    for (const auto &k : callbackOrder) {
-        lock.lock();
-        auto it = moduleCallbacks_.find(k);
-        if (it == moduleCallbacks_.cend() || it->second.empty() ||
+    for (const auto& k : callbackOrder) {
+        auto it = callbackSnapshot.find(k);
+        if (it == callbackSnapshot.cend() || it->second.empty() ||
             !JsonParser::instance()->GetJsonModuleProfSwitch(k)) {
-            lock.unlock();
             continue;
         }
-        lock.unlock();
         if (finalizeGuard_ && k != RUNTIME) {
             continue;
         }
-        MSPROF_LOGI("call %u callback, type:%u, switch:%" PRIu64 ", switchHi:%" PRIu64 ", model:%u, devNums:%u, "
-            "dev:%u, cache: %u, finalizeGuard: %u",
-            k, command.type, command.profSwitch, command.profSwitchHi, command.modelId, command.devNums,
-            command.devIdList[0], command.cacheFlag, finalizeGuard_);
+        ProfCommand moduleCommand = BuildModuleCommand(k, command);
+        MSPROF_LOGI(
+            "call %s(%u) callback, type:%s(%u), switch:0x%016" PRIx64 ", switchHi:0x%016" PRIx64
+            ", model:%u, devNums:%u, dev:%u, cache: %u, finalizeGuard: %u",
+            ProfGetModuleName(k), k, ProfGetCommandTypeName(command.type), command.type, moduleCommand.profSwitch,
+            command.profSwitchHi, command.modelId, command.devNums, command.devIdList[0], command.cacheFlag,
+            finalizeGuard_);
         for (auto& handle : it->second) {
-            handle(static_cast<uint32_t>(PROF_CTRL_SWITCH), Utils::ReinterpretCast<VOID, ProfCommand>(&command),
-                    sizeof(ProfCommand));
+            handle(
+                static_cast<uint32_t>(PROF_CTRL_SWITCH), Utils::ReinterpretCast<VOID, ProfCommand>(&moduleCommand),
+                sizeof(ProfCommand));
         }
     }
-    command_ = command;
     return ACL_SUCCESS;
 }
 
-int32_t ProfModuleReprotMgr::SetCommandHandleProf(ProfCommand &command) const
+ProfCommand ProfModuleReprotMgr::BuildModuleCommand(uint32_t moduleId, const ProfCommand& sourceCommand) const
+{
+    ProfCommand moduleCommand = sourceCommand;
+    const bool requestShape = (sourceCommand.profSwitch & PROF_AICORE_SHAPE_MASK) != 0ULL;
+    const uint64_t upperLevelMask = PROF_TASK_TIME_L1_MASK | PROF_TASK_TIME_L2_MASK | PROF_TASK_TIME_L3_MASK;
+    const bool isStrictLevel0 =
+        (sourceCommand.profSwitch & PROF_TASK_TIME_MASK) != 0ULL && (sourceCommand.profSwitch & upperLevelMask) == 0ULL;
+
+    // AICORE_SHAPE is an internal request bit and must never be sent to component callbacks.
+    moduleCommand.profSwitch &= ~PROF_AICORE_SHAPE_MASK;
+    if (requestShape && isStrictLevel0 && (moduleId == GE || moduleId == HSS)) {
+        moduleCommand.profSwitch |= PROF_TASK_TIME_L1_MASK;
+    }
+    return moduleCommand;
+}
+
+int32_t ProfModuleReprotMgr::SetCommandHandleProf(ProfCommand& command) const
 {
     // msprof param
     std::string msprofParams = Msprofiler::Api::ProfAclMgr::instance()->GetParamJsonStr();
@@ -137,7 +149,7 @@ int32_t ProfModuleReprotMgr::SetCommandHandleProf(ProfCommand &command) const
     return ACL_SUCCESS;
 }
 
-void ProfModuleReprotMgr::ProcessDeviceList(ProfCommand &command, const uint32_t devIdList[], uint32_t devNums) const
+void ProfModuleReprotMgr::ProcessDeviceList(ProfCommand& command, const uint32_t devIdList[], uint32_t devNums) const
 {
     for (uint32_t j = 0; j < devNums && j < MSVP_MAX_DEV_NUM; j++) {
         if (devIdList[j] == DEFAULT_HOST_ID) {
@@ -154,40 +166,47 @@ int32_t ProfModuleReprotMgr::ModuleRegisterCallback(uint32_t moduleId, ProfComma
     if (callback == nullptr) {
         return PROFILING_FAILED;
     }
-    MSPROF_LOGI("Module[%u] register callback of ctrl handle.", moduleId);
+    MSPROF_LOGI("Module[%s(%u)] register callback of ctrl handle.", ProfGetModuleName(moduleId), moduleId);
     auto it = moduleCallbacks_.find(moduleId);
     if (it != moduleCallbacks_.cend() && it->second.count(callback) > 0) {
         MSPROF_LOGW("Callback has already registered.");
         return PROFILING_SUCCESS;
     }
     moduleCallbacks_[moduleId].insert(callback);
-    if (command_.type != PROF_COMMANDHANDLE_TYPE_MAX) {
-        auto callbackBind = std::bind(&ProfModuleReprotMgr::DoCallbackHandle, this, callback);
+    ProfCommand command = command_;
+    lock.unlock();
+    if (command.type != PROF_COMMANDHANDLE_TYPE_MAX) {
+        auto callbackBind = std::bind(&ProfModuleReprotMgr::DoCallbackHandle, this, moduleId, callback, command);
         std::thread callbackThread(callbackBind);
         callbackThread.detach();
     }
     return ACL_SUCCESS;
 }
 
-void ProfModuleReprotMgr::DoCallbackHandle(ProfCommandHandle callback)
+void ProfModuleReprotMgr::DoCallbackHandle(uint32_t moduleId, ProfCommandHandle callback, ProfCommand command)
 {
+    ProfCommand moduleCommand = BuildModuleCommand(moduleId, command);
     ProfCommand commandInit;
-    switch (command_.type) {
+    switch (moduleCommand.type) {
         case PROF_COMMANDHANDLE_TYPE_INIT:
-            callback(static_cast<uint32_t>(PROF_CTRL_SWITCH),
-                Utils::ReinterpretCast<VOID_PTR, ProfCommand>(&command_), sizeof(command_));
-                break;
+            callback(
+                static_cast<uint32_t>(PROF_CTRL_SWITCH), Utils::ReinterpretCast<VOID_PTR, ProfCommand>(&moduleCommand),
+                sizeof(moduleCommand));
+            break;
         case PROF_COMMANDHANDLE_TYPE_START:
-            commandInit = command_;
+            commandInit = moduleCommand;
             commandInit.type = PROF_COMMANDHANDLE_TYPE_INIT;
-            callback(static_cast<uint32_t>(PROF_CTRL_SWITCH),
-                Utils::ReinterpretCast<VOID_PTR, ProfCommand>(&commandInit), sizeof(commandInit));
-            callback(static_cast<uint32_t>(PROF_CTRL_SWITCH),
-                Utils::ReinterpretCast<VOID_PTR, ProfCommand>(&command_), sizeof(command_));
+            callback(
+                static_cast<uint32_t>(PROF_CTRL_SWITCH), Utils::ReinterpretCast<VOID_PTR, ProfCommand>(&commandInit),
+                sizeof(commandInit));
+            callback(
+                static_cast<uint32_t>(PROF_CTRL_SWITCH), Utils::ReinterpretCast<VOID_PTR, ProfCommand>(&moduleCommand),
+                sizeof(moduleCommand));
             break;
         case PROF_COMMANDHANDLE_TYPE_MODEL_SUBSCRIBE:
-            callback(static_cast<uint32_t>(PROF_CTRL_SWITCH),
-                Utils::ReinterpretCast<VOID_PTR, ProfCommand>(&command_), sizeof(command_));
+            callback(
+                static_cast<uint32_t>(PROF_CTRL_SWITCH), Utils::ReinterpretCast<VOID_PTR, ProfCommand>(&moduleCommand),
+                sizeof(moduleCommand));
             break;
         default:
             MSPROF_LOGD("Register callback success, waiting for the operation."); // regist, stop, finalize, unsubscribe
@@ -202,14 +221,13 @@ int32_t ProfModuleReprotMgr::ModuleReportInit()
     command.type = PROF_COMMANDHANDLE_TYPE_INIT;
     if (SetCommandHandleProf(command) != ACL_SUCCESS) {
         MSPROF_LOGE("ProfInit CommandHandle set failed");
-        MSPROF_INNER_ERROR("EK9999", "ProfInit CommandHandle set failed");
         return ACL_ERROR;
     }
     return ProfSetProCommand(command);
 }
 
-int32_t ProfModuleReprotMgr::ModuleReportStart(const uint32_t devIdList[], uint32_t devNums, uint64_t profSwitch,
-    uint64_t profSwitchHi)
+int32_t ProfModuleReprotMgr::ModuleReportStart(
+    const uint32_t devIdList[], uint32_t devNums, uint64_t profSwitch, uint64_t profSwitchHi)
 {
     ProfCommand command;
     const auto ret = memset_s(&command, sizeof(command), 0, sizeof(command));
@@ -229,15 +247,14 @@ int32_t ProfModuleReprotMgr::ModuleReportStart(const uint32_t devIdList[], uint3
     }
     if (SetCommandHandleProf(command) != ACL_SUCCESS) {
         MSPROF_LOGE("ProfStart CommandHandle set failed");
-        MSPROF_INNER_ERROR("EK9999", "ProfStart CommandHandle set failed");
         return ACL_ERROR;
     }
 
     return ProfSetProCommand(command);
 }
 
-int32_t ProfModuleReprotMgr::ModuleReportStop(const uint32_t devIdList[], uint32_t devNums, uint64_t profSwitch,
-    uint64_t profSwitchHi)
+int32_t ProfModuleReprotMgr::ModuleReportStop(
+    const uint32_t devIdList[], uint32_t devNums, uint64_t profSwitch, uint64_t profSwitchHi)
 {
     ProfCommand command;
     const auto ret = memset_s(&command, sizeof(command), 0, sizeof(command));
@@ -249,14 +266,12 @@ int32_t ProfModuleReprotMgr::ModuleReportStop(const uint32_t devIdList[], uint32
     command.modelId = PROF_INVALID_MODE_ID;
     ProcessDeviceList(command, devIdList, devNums);
     if (command.devNums == 0 && (profSwitch & PROF_PURE_CPU) == 0) {
-        if (!Platform::instance()->PlatformIsHelperHostSide() ||
-            Platform::instance()->PlatformIsNeedHelperServer()) {
+        if (!Platform::instance()->PlatformIsHelperHostSide() || Platform::instance()->PlatformIsNeedHelperServer()) {
             return ACL_SUCCESS;
         }
     }
     if (SetCommandHandleProf(command) != ACL_SUCCESS) {
         MSPROF_LOGE("ProfStop CommandHandle set failed");
-        MSPROF_INNER_ERROR("EK9999", "ProfStop CommandHandle set failed");
         return ACL_ERROR;
     }
 
@@ -277,7 +292,6 @@ int32_t ProfModuleReprotMgr::ModuleReportFinalize()
     command.type = PROF_COMMANDHANDLE_TYPE_FINALIZE;
     if (SetCommandHandleProf(command) != ACL_SUCCESS) {
         MSPROF_LOGE("ProfFinalize CommandHandle set failed");
-        MSPROF_INNER_ERROR("EK9999", "ProfFinalize CommandHandle set failed");
         return ACL_ERROR;
     }
 
@@ -297,11 +311,10 @@ int32_t ProfModuleReprotMgr::ModuleReportUnSubscribe(uint32_t modelId)
     command.type = PROF_COMMANDHANDLE_TYPE_MODEL_UNSUBSCRIBE;
     if (SetCommandHandleProf(command) != ACL_SUCCESS) {
         MSPROF_LOGE("ProfUnSubscribe Set params failed!");
-        MSPROF_INNER_ERROR("EK9999", "ProfUnSubscribe Set params failed!");
         return ACL_ERROR;
     }
     return ProfSetProCommand(command);
 }
-}  // namespace ProfilerCommon
-}  // namespace Dvvp
-}  // namespace Analysis
+} // namespace ProfilerCommon
+} // namespace Dvvp
+} // namespace Analysis

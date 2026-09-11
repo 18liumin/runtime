@@ -1,0 +1,36 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+#ifndef __CCE_RUNTIME_COND_C_HPP__
+#define __CCE_RUNTIME_COND_C_HPP__
+
+#include "stream.hpp"
+#include "label.hpp"
+#include "context.hpp"
+#include "cond_handle.hpp"
+
+namespace cce {
+namespace runtime {
+
+rtError_t CondStreamActive(
+    const Stream* const activeStream, Stream* const stm, Context* const ctx = nullptr,
+    const bool alreadyCascaded = false);
+rtError_t CondStreamSwitchEx(
+    const void* const ptr, const rtCondition_t condition, const void* const valuePtr, const Stream* const trueStream,
+    Stream* const stm, const rtSwitchDataType_t dataType, Context* const ctx = nullptr);
+rtError_t CondStreamSwitchN(
+    const void* const ptr, const uint32_t size, const void* const valuePtr, Stream** const trueStreamPtr,
+    const uint32_t elementSize, Stream* const stm, const rtSwitchDataType_t dataType, Context* const ctx = nullptr);
+rtError_t CondMemWaitValue(const void* const devAddr, const uint64_t value, const uint32_t flag, Stream* const stm);
+rtError_t StreamAddCondTask(CondHandle* condHandle, rtCondTaskParams params, Stream* const stm, uint32_t flags);
+rtError_t SubmitCaptureConditionTask(CondHandle* condHandle, Stream* const stm);
+} // namespace runtime
+} // namespace cce
+
+#endif

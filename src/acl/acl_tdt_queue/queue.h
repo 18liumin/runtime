@@ -14,8 +14,7 @@
 #include <vector>
 #include "acl/acl_base.h"
 #include "acl/acl_tdt_queue.h"
-#include "acl/acl_rt_impl.h"
-#include "acl/acl_rt_impl.h"
+#include "acl_rt_impl.h"
 
 struct acltdtQueueRouteList {
     std::vector<acltdtQueueRoute> routeList;
@@ -36,6 +35,6 @@ struct acltdtQueueRoute {
     int32_t status;
 };
 namespace acl {
-    aclError CheckQueueRouteQueryInfo(const acltdtQueueRouteQueryInfo *const queryInfo);
+aclError CheckQueueRouteQueryInfo(const acltdtQueueRouteQueryInfo* const queryInfo);
 }
 #endif // ACL_QUEUE_H

@@ -48,9 +48,9 @@ target_include_directories(asc_dumper PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stacktrace_dumper
     ${CMAKE_CURRENT_SOURCE_DIR}/../../utils
     ${LIBC_SEC_HEADER}
-    ${ATRACE_DIR}/inc/toolchain
-    ${ATRACE_DIR}/../../mmpa/inc/mmpa
+    ${ATRACE_DIR}/../../../pkg_inc/mmpa
     ${ATRACE_DIR}/../../../pkg_inc/trace
+    ${ATRACE_DIR}/inc/toolchain
 )
 
 target_compile_options(asc_dumper PRIVATE
@@ -71,7 +71,6 @@ target_compile_options(asc_dumper PRIVATE
 target_compile_definitions(asc_dumper PRIVATE
     OS_TYPE=0
     _GNU_SOURCE
-    ENABLE_SCD
 )
 
 target_link_options(asc_dumper PRIVATE
@@ -79,6 +78,8 @@ target_link_options(asc_dumper PRIVATE
     -Wl,--exclude-libs=ALL
     -ldl
     -lstdc++
+    $<$<CONFIG:Release>:-s>
+    -pie
 )
 
 target_link_libraries(asc_dumper PRIVATE

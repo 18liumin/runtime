@@ -9,14 +9,9 @@
  */
 
 #include "kernel_operator.h"
+#include "kernel_ops.h"
 
 // 核函数，会报错，用于遇错即停的情况
-extern "C" __global__ __aicore__ void ErrorOPf()
-{
-    asm("trap");
-}
+extern "C" __global__ __aicore__ void ErrorOPf() { asm("trap"); }
 
-void ErrorOP(uint32_t blockDim, void *stream)
-{
-    ErrorOPf<<<blockDim, nullptr, stream>>>();
-}
+void ErrorOP(uint32_t blockDim, void* stream) { ErrorOPf<<<blockDim, nullptr, stream>>>(); }

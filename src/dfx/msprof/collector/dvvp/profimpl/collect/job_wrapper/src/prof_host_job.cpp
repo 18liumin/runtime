@@ -75,12 +75,11 @@ int32_t ProfHostDataBase::Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg)
     analysis::dvvp::transport::UploaderMgr::instance()->GetUploader(cfg->comParams->params->job_id, upLoader_);
     if (upLoader_ == nullptr) {
         MSPROF_LOGE("Failed to get host upLoader, job_id=%s", cfg->comParams->params->job_id.c_str());
-        MSPROF_INNER_ERROR("EK9999", "Failed to get host upLoader, job_id=%s", cfg->comParams->params->job_id.c_str());
         return PROFILING_FAILED;
     }
     // default 20ms collecttion interval
-    const uint32_t profStatIntervalMs = 20;  // 20 MS
-    const uint32_t profMsToNs = 1000000;     // 1000000 NS
+    const uint32_t profStatIntervalMs = 20; // 20 MS
+    const uint32_t profMsToNs = 1000000;    // 1000000 NS
     sampleIntervalNs_ = (static_cast<unsigned long long>(profStatIntervalMs) * profMsToNs);
     return PROFILING_SUCCESS;
 }
@@ -116,14 +115,15 @@ int32_t ProfHostCpuJob::Process()
 
     SHARED_PTR_ALIA<ProcHostCpuHandler> cpuHandler;
     SHARED_PTR_ALIA<TimerAttr> attr = nullptr;
-    MSVP_MAKE_SHARED4(attr, TimerAttr, PROF_HOST_PROC_CPU, 0, PROC_HOST_PROC_DATA_BUF_SIZE,
-        sampleIntervalNs_, return PROFILING_FAILED);
+    MSVP_MAKE_SHARED4(
+        attr, TimerAttr, PROF_HOST_PROC_CPU, 0, PROC_HOST_PROC_DATA_BUF_SIZE, sampleIntervalNs_,
+        return PROFILING_FAILED);
     attr->retFileName = PROF_HOST_PROC_CPU_USAGE_FILE;
-    MSVP_MAKE_SHARED4(cpuHandler, ProcHostCpuHandler, attr, collectionJobCfg_->comParams->params,
+    MSVP_MAKE_SHARED4(
+        cpuHandler, ProcHostCpuHandler, attr, collectionJobCfg_->comParams->params,
         collectionJobCfg_->comParams->jobCtx, upLoader_, return PROFILING_FAILED);
     if (cpuHandler->Init() != PROFILING_SUCCESS) {
         MSPROF_LOGE("HostCpuHandler Init Failed");
-        MSPROF_INNER_ERROR("EK9999", "HostCpuHandler Init Failed");
         return PROFILING_FAILED;
     }
     MSPROF_LOGI("HostCpuHandler Init succ, sampleIntervalNs_:%" PRIu64, sampleIntervalNs_);
@@ -164,14 +164,15 @@ int32_t ProfHostMemJob::Process()
 
     SHARED_PTR_ALIA<ProcHostMemHandler> memHandler;
     SHARED_PTR_ALIA<TimerAttr> attr = nullptr;
-    MSVP_MAKE_SHARED4(attr, TimerAttr, PROF_HOST_PROC_MEM, 0, PROC_HOST_PROC_DATA_BUF_SIZE,
-        sampleIntervalNs_, return PROFILING_FAILED);
+    MSVP_MAKE_SHARED4(
+        attr, TimerAttr, PROF_HOST_PROC_MEM, 0, PROC_HOST_PROC_DATA_BUF_SIZE, sampleIntervalNs_,
+        return PROFILING_FAILED);
     attr->retFileName = PROF_HOST_PROC_MEM_USAGE_FILE;
-    MSVP_MAKE_SHARED4(memHandler, ProcHostMemHandler, attr, collectionJobCfg_->comParams->params,
+    MSVP_MAKE_SHARED4(
+        memHandler, ProcHostMemHandler, attr, collectionJobCfg_->comParams->params,
         collectionJobCfg_->comParams->jobCtx, upLoader_, return PROFILING_FAILED);
     if (memHandler->Init() != PROFILING_SUCCESS) {
         MSPROF_LOGE("HostMemHandler Init Failed");
-        MSPROF_INNER_ERROR("EK9999", "HostMemHandler Init Failed");
         return PROFILING_FAILED;
     }
     MSPROF_LOGI("HostMemHandler Init succ, sampleIntervalNs_:%" PRIu64, sampleIntervalNs_);
@@ -221,13 +222,13 @@ int32_t ProfHostAllPidJob::Process()
 
     SHARED_PTR_ALIA<ProcAllPidsFileHandler> pidsHandler;
     SHARED_PTR_ALIA<TimerAttr> attr = nullptr;
-    MSVP_MAKE_SHARED4(attr, TimerAttr, tag_, collectionJobCfg_->comParams->devId, 0,
-        sampleIntervalNs_, return PROFILING_FAILED);
-    MSVP_MAKE_SHARED4(pidsHandler, ProcAllPidsFileHandler, attr, collectionJobCfg_->comParams->params,
+    MSVP_MAKE_SHARED4(
+        attr, TimerAttr, tag_, collectionJobCfg_->comParams->devId, 0, sampleIntervalNs_, return PROFILING_FAILED);
+    MSVP_MAKE_SHARED4(
+        pidsHandler, ProcAllPidsFileHandler, attr, collectionJobCfg_->comParams->params,
         collectionJobCfg_->comParams->jobCtx, upLoader_, return PROFILING_FAILED);
     if (pidsHandler->Init() != PROFILING_SUCCESS) {
         MSPROF_LOGE("All pids handler cpu init fail");
-        MSPROF_INNER_ERROR("EK9999", "pidsHandler Init Failed");
         return PROFILING_FAILED;
     }
     MSPROF_LOGI("All pids handler cpu init success, sampleIntervalNs_:%llu", sampleIntervalNs_);
@@ -268,14 +269,15 @@ int32_t ProfHostNetworkJob::Process()
 
     SHARED_PTR_ALIA<ProcHostNetworkHandler> networkHandler;
     SHARED_PTR_ALIA<TimerAttr> attr = nullptr;
-    MSVP_MAKE_SHARED4(attr, TimerAttr, PROF_HOST_SYS_NETWORK, 0, PROC_HOST_PROC_DATA_BUF_SIZE,
-        sampleIntervalNs_, return PROFILING_FAILED);
+    MSVP_MAKE_SHARED4(
+        attr, TimerAttr, PROF_HOST_SYS_NETWORK, 0, PROC_HOST_PROC_DATA_BUF_SIZE, sampleIntervalNs_,
+        return PROFILING_FAILED);
     attr->retFileName = PROF_HOST_SYS_NETWORK_USAGE_FILE;
-    MSVP_MAKE_SHARED4(networkHandler, ProcHostNetworkHandler, attr, collectionJobCfg_->comParams->params,
+    MSVP_MAKE_SHARED4(
+        networkHandler, ProcHostNetworkHandler, attr, collectionJobCfg_->comParams->params,
         collectionJobCfg_->comParams->jobCtx, upLoader_, return PROFILING_FAILED);
     if (networkHandler->Init() != PROFILING_SUCCESS) {
         MSPROF_LOGE("HostNetworkHandler Init Failed");
-        MSPROF_INNER_ERROR("EK9999", "HostNetworkHandler Init Failed");
         return PROFILING_FAILED;
     }
     MSPROF_LOGI("HostNetworkHandler Init succ, sampleIntervalNs_:%" PRIu64, sampleIntervalNs_);
@@ -319,14 +321,12 @@ int32_t ProfHostSysCallsJob::Process()
     int32_t ret = profHostService_->Init(collectionJobCfg_, PROF_HOST_SYS_CALL);
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("[ProfHostSysCallsJob]Failed Init profHostService_");
-        MSPROF_INNER_ERROR("EK9999", "Failed Init profHostService_");
         return ret;
     }
 
     ret = profHostService_->Start();
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("[ProfHostSysCallsJob]Failed Start profHostService_");
-        MSPROF_INNER_ERROR("EK9999", "Failed Start profHostService_");
         return ret;
     }
     return ret;
@@ -337,14 +337,70 @@ int32_t ProfHostSysCallsJob::Uninit()
     MSPROF_LOGI("Start ProfHostSysCallsJob Uninit");
     if (profHostService_ == nullptr) {
         MSPROF_LOGE("ProfHostSysCallsJob profHostService_ is null");
-        MSPROF_INNER_ERROR("EK9999", "ProfHostSysCallsJob profHostService_ is null");
         return PROFILING_FAILED;
     }
     profHostService_->WakeupTimeoutEnd();
     int32_t ret = profHostService_->Stop();
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("[HostSysCalls]Failed Stop profHostService_");
-        MSPROF_INNER_ERROR("EK9999", "[HostSysCalls]Failed Stop profHostService_");
+    }
+    return ret;
+}
+
+ProfHostCcaMsJob::ProfHostCcaMsJob() : ProfHostDataBase() {}
+
+ProfHostCcaMsJob::~ProfHostCcaMsJob() {}
+
+int32_t ProfHostCcaMsJob::Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg)
+{
+    CHECK_JOB_CONTEXT_PARAM_RET(cfg, return PROFILING_FAILED);
+    int32_t ret = ProfHostDataBase::CheckHostProfiling(cfg);
+    if (ret != PROFILING_SUCCESS) {
+        return ret;
+    }
+
+    collectionJobCfg_ = cfg;
+    if (collectionJobCfg_->comParams->params->host_numa_profiling.compare(MSVP_PROF_ON) != 0) {
+        MSPROF_LOGI("Host_CcaMS_profiling not enabled");
+        return PROFILING_FAILED;
+    }
+    return PROFILING_SUCCESS;
+}
+
+int32_t ProfHostCcaMsJob::Process()
+{
+    CHECK_JOB_COMMON_PARAM_RET(collectionJobCfg_, return PROFILING_FAILED);
+    MSVP_MAKE_SHARED0(profHostService_, ProfHostService, return PROFILING_FAILED);
+
+    int32_t ret = profHostService_->Init(collectionJobCfg_, PROF_HOST_CCA_MS);
+    if (ret == PROFILING_FAILED) {
+        MSPROF_LOGE("[ProfHostCcaMsJob]Failed Init profHostService_");
+        MSPROF_INNER_ERROR("EK9999", "Failed Init profHostService_");
+        return ret;
+    }
+
+    ret = profHostService_->Start();
+    if (ret == PROFILING_FAILED) {
+        MSPROF_LOGE("[ProfHostCcaMsJob]Failed Start profHostService_");
+        MSPROF_INNER_ERROR("EK9999", "Failed Start profHostService_");
+        return ret;
+    }
+    return ret;
+}
+
+int32_t ProfHostCcaMsJob::Uninit()
+{
+    MSPROF_LOGI("Start ProfHostCcaMsJob Uninit");
+    if (profHostService_ == nullptr) {
+        MSPROF_LOGE("ProfHostCcaMsJob profHostService_ is null");
+        MSPROF_INNER_ERROR("EK9999", "ProfHostCcaMsJob profHostService_ is null");
+        return PROFILING_FAILED;
+    }
+    profHostService_->WakeupTimeoutEnd();
+    int32_t ret = profHostService_->Stop();
+    if (ret == PROFILING_FAILED) {
+        MSPROF_LOGE("[HostCcaMs]Failed Stop profHostService_");
+        MSPROF_INNER_ERROR("EK9999", "[HostCcaMs]Failed Stop profHostService_");
     }
     return ret;
 }
@@ -377,14 +433,12 @@ int32_t ProfHostPthreadJob::Process()
     int32_t ret = profHostService_->Init(collectionJobCfg_, PROF_HOST_SYS_PTHREAD);
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("[ProfHostPthreadJob]Failed Init profHostService_");
-        MSPROF_INNER_ERROR("EK9999", "Failed Init profHostService_");
         return ret;
     }
 
     ret = profHostService_->Start();
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("[ProfHostPthreadJob]Failed Start profHostService_");
-        MSPROF_INNER_ERROR("EK9999", "Failed Start profHostService_");
         return ret;
     }
     return ret;
@@ -395,14 +449,12 @@ int32_t ProfHostPthreadJob::Uninit()
     MSPROF_LOGI("Start ProfHostPthreadJob Uninit");
     if (profHostService_ == nullptr) {
         MSPROF_LOGE("ProfHostPthreadJob profHostService_ is null");
-        MSPROF_INNER_ERROR("EK9999", "ProfHostPthreadJob profHostService_ is null");
         return PROFILING_FAILED;
     }
     profHostService_->WakeupTimeoutEnd();
     int32_t ret = profHostService_->Stop();
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("[HostPthread]Failed Stop profHostService_");
-        MSPROF_INNER_ERROR("EK9999", "[HostPthread]Failed Stop profHostService_");
     }
     return ret;
 }
@@ -435,14 +487,12 @@ int32_t ProfHostDiskJob::Process()
     int32_t ret = profHostService_->Init(collectionJobCfg_, PROF_HOST_SYS_DISK);
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("[ProfHostDiskJob]Failed Init profHostService_");
-        MSPROF_INNER_ERROR("EK9999", "Failed Init profHostService_");
         return ret;
     }
 
     ret = profHostService_->Start();
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("[ProfHostDiskJob]Failed Start profHostService_");
-        MSPROF_INNER_ERROR("EK9999", "Failed Start profHostService_");
         return ret;
     }
     return ret;
@@ -453,14 +503,12 @@ int32_t ProfHostDiskJob::Uninit()
     MSPROF_LOGI("Start ProfHostDiskJob Uninit");
     if (profHostService_ == nullptr) {
         MSPROF_LOGE("ProfHostDiskJob profHostService_ is null");
-        MSPROF_INNER_ERROR("EK9999", "ProfHostDiskJob profHostService_ is null");
         return PROFILING_FAILED;
     }
     profHostService_->WakeupTimeoutEnd();
     int32_t ret = profHostService_->Stop();
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("[HostDisk]Failed Stop profHostService_");
-        MSPROF_INNER_ERROR("EK9999", "[HostDisk]Failed Stop profHostService_");
     }
     return ret;
 }
@@ -469,7 +517,7 @@ ProfHostService::ProfHostService() : hostTimerTag_(PROF_HOST_MAX_TAG), hostProce
 
 ProfHostService::~ProfHostService() {}
 
-int32_t ProfHostService::GetCmdStr(int32_t hostSysPid, std::string &profHostCmd)
+int32_t ProfHostService::GetCmdStr(int32_t hostSysPid, std::string& profHostCmd)
 {
     int32_t ret = PROFILING_FAILED;
     switch (hostTimerTag_) {
@@ -481,6 +529,9 @@ int32_t ProfHostService::GetCmdStr(int32_t hostSysPid, std::string &profHostCmd)
             break;
         case PROF_HOST_SYS_DISK:
             ret = GetCollectIOTopCmd(hostSysPid, profHostCmd);
+            break;
+        case PROF_HOST_CCA_MS:
+            ret = GetCollectCcaMSCmd(hostSysPid, profHostCmd);
             break;
         default:
             break;
@@ -498,7 +549,6 @@ int32_t ProfHostService::Process()
     int32_t ret = GetCmdStr(hostSysPid, profHostCmd);
     if (ret != PROFILING_SUCCESS) {
         MSPROF_LOGE("Get profHostCmd failed,toolName:%s", toolName_.c_str());
-        MSPROF_INNER_ERROR("EK9999", "Get profHostCmd failed,toolName:%s", toolName_.c_str());
         return PROFILING_FAILED;
     }
     if (profHostCmd.size() > 0) {
@@ -506,7 +556,6 @@ int32_t ProfHostService::Process()
         std::vector<std::string> params = analysis::dvvp::common::utils::Utils::Split(profHostCmd.c_str());
         if (params.empty()) {
             MSPROF_LOGE("profHostCmd:%s empty", toolName_.c_str());
-            MSPROF_INNER_ERROR("EK9999", "profHostCmd:%s empty", toolName_.c_str());
             return PROFILING_FAILED;
         }
         std::string cmd = params[0];
@@ -515,7 +564,7 @@ int32_t ProfHostService::Process()
         if (params.size() > 1) {
             argsV.assign(params.begin() + 1, params.end());
         }
-        envsV.push_back("PATH=/usr/bin/:/usr/sbin:/var");
+        envsV.push_back("PATH=/usr/bin/:/usr/sbin:/var:$PATH");
         hostProcess_ = MSVP_PROCESS;
         int32_t exitCode = analysis::dvvp::common::utils::INVALID_EXIT_CODE;
         std::string redirectionPath = profHostOutDir_ + MSVP_PROF_PERF_RET_FILE_SUFFIX;
@@ -531,13 +580,13 @@ int32_t ProfHostService::Process()
 
 int32_t ProfHostService::KillToolAndWaitHostProcess() const
 {
-    static const std::string ENV_PATH = "PATH=/usr/bin:/usr/sbin";
+    static const std::string ENV_PATH = "PATH=/usr/bin:/usr/sbin:$PATH";
     std::vector<std::string> envV;
     envV.push_back(ENV_PATH);
     std::vector<std::string> argsV;
     argsV.push_back(PROF_SCRIPT_FILE_PATH);
-    argsV.push_back("pkill");
-    argsV.push_back(toolName_);
+    argsV.push_back("kill");
+    argsV.push_back(std::to_string(hostProcess_));
     int32_t exitCode = analysis::dvvp::common::utils::VALID_EXIT_CODE;
     static const std::string CMD = "sudo";
     OsalProcess appProcess = MSVP_PROCESS;
@@ -545,22 +594,22 @@ int32_t ProfHostService::KillToolAndWaitHostProcess() const
     int32_t ret = analysis::dvvp::common::utils::Utils::ExecCmd(execCmdParams, argsV, envV, exitCode, appProcess);
     if (ret != PROFILING_SUCCESS) {
         MSPROF_LOGE("Failed to kill process %s, ret=%d, exitCode=%d", toolName_.c_str(), ret, exitCode);
-        MSPROF_INNER_ERROR("EK9999", "Failed to kill process %s, ret=%d, exitCode=%d", toolName_.c_str(), ret,
-                           exitCode);
+        MSPROF_INNER_ERROR(
+            "EK9999", "Failed to kill process %s, ret=%d, exitCode=%d", toolName_.c_str(), ret, exitCode);
         return ret;
     }
     if (hostProcess_ > 0) {
         bool isExited = false;
         ret = analysis::dvvp::common::utils::Utils::WaitProcess(hostProcess_, isExited, exitCode, true);
         if (ret != PROFILING_SUCCESS) {
-            MSPROF_LOGE("Failed to wait process %d, ret=%d,  exitCode=%d", hostProcess_, ret, exitCode);
+            MSPROF_LOGE("Failed to wait process %d, ret=%d, exitCode=%d", hostProcess_, ret, exitCode);
             MSPROF_INNER_ERROR("EK9999", "Failed to wait process %d, ret=%d, exitCode=%d", hostProcess_, ret, exitCode);
             return ret;
         } else {
             MSPROF_LOGI("Process %d exited, exitcode=%d", hostProcess_, exitCode);
             if (exitCode != 0) {
-                MSPROF_LOGE("An error has occurred in process %s, error info: %s.", toolName_.c_str(),
-                            strerror(exitCode));
+                MSPROF_LOGE(
+                    "An error has occurred in process %s, error info: %s.", toolName_.c_str(), strerror(exitCode));
             }
         }
     }
@@ -574,7 +623,7 @@ int32_t ProfHostService::Uninit()
 {
     int32_t ret = KillToolAndWaitHostProcess();
     if (ret != PROFILING_SUCCESS) {
-        MSPROF_LOGI("Failed to kill process %s, ", toolName_.c_str());
+        MSPROF_LOGI("Kill process %s was not completed", toolName_.c_str());
         return ret;
     }
     MSPROF_LOGI("Succeeded to kill process %s", toolName_.c_str());
@@ -589,21 +638,24 @@ int32_t ProfHostService::Uninit()
         in.open(fileName, std::ios::app);
         if (!in.is_open()) {
             MSPROF_LOGE("Failed to open %s", fileName.c_str());
-            MSPROF_INNER_ERROR("EK9999", "Failed to open %s", fileName.c_str());
+            return PROFILING_FAILED;
+        }
+        if (OsalChmod(fileName.c_str(), 0640) != OSAL_EN_OK) {
+            in.close();
+            MSPROF_LOGE("Failed to change file mode for %s", fileName.c_str());
             return PROFILING_FAILED;
         }
         in << diskIoStartTime;
         in.close();
     }
-    StoreData();  // upload collect data
+    StoreData(); // upload collect data
     return PROFILING_SUCCESS;
 }
 
-int32_t ProfHostService::GetCollectSysCallsCmd(int32_t pid, std::string &profHostCmd)
+int32_t ProfHostService::GetCollectSysCallsCmd(int32_t pid, std::string& profHostCmd)
 {
     if (pid < 0) {
         MSPROF_LOGE("ProfHostSysCallsJob pid: %d is invalid.", pid);
-        MSPROF_INNER_ERROR("EK9999", "ProfHostSysCallsJob pid: %d is invalid.", pid);
         return PROFILING_FAILED;
     }
 
@@ -614,15 +666,35 @@ int32_t ProfHostService::GetCollectSysCallsCmd(int32_t pid, std::string &profHos
     ssPerfHostCmd << pid;
 
     profHostCmd = ssPerfHostCmd.str();
-    startProcessCmd_ = "perf trace -T --syscalls";
     return PROFILING_SUCCESS;
 }
 
-int32_t ProfHostService::GetCollectPthreadsCmd(int32_t pid, std::string &profHostCmd)
+int32_t ProfHostService::GetCollectCcaMSCmd(int32_t pid, std::string& profHostCmd)
+{
+    if (pid < 0) {
+        MSPROF_LOGE("ProfHostCcaMsJob pid: %d is invalid.", pid);
+        MSPROF_INNER_ERROR("EK9999", "ProfHostCcaMsJob pid: %d is invalid.", pid);
+        return PROFILING_FAILED;
+    }
+
+    std::stringstream ssPerfHostCmd;
+    ssPerfHostCmd << "cca-ms-collector ";
+    ssPerfHostCmd << "-freq ";
+    ssPerfHostCmd << collectionJobCfg_->comParams->params->hostProfilingSamplingInterval << " ";
+    if (!collectionJobCfg_->comParams->tmpResultDir.empty()) {
+        ssPerfHostCmd << "-result-dir ";
+        ssPerfHostCmd << profHostOutDir_ << " ";
+    }
+    ssPerfHostCmd << pid;
+
+    profHostCmd = ssPerfHostCmd.str();
+    return PROFILING_SUCCESS;
+}
+
+int32_t ProfHostService::GetCollectPthreadsCmd(int32_t pid, std::string& profHostCmd)
 {
     if (pid < 0) {
         MSPROF_LOGE("ProfHostPthreadJob pid: %d is invalid.", pid);
-        MSPROF_INNER_ERROR("EK9999", "ProfHostPthreadJob pid: %d is invalid.", pid);
         return PROFILING_FAILED;
     }
 
@@ -633,15 +705,13 @@ int32_t ProfHostService::GetCollectPthreadsCmd(int32_t pid, std::string &profHos
     ssPerfHostCmd << pid;
 
     profHostCmd = ssPerfHostCmd.str();
-    startProcessCmd_ = "ltrace -ttt -T -e pthread_";
     return PROFILING_SUCCESS;
 }
 
-int32_t ProfHostService::GetCollectIOTopCmd(int32_t pid, std::string &profHostCmd)
+int32_t ProfHostService::GetCollectIOTopCmd(int32_t pid, std::string& profHostCmd)
 {
     if (pid < 0) {
         MSPROF_LOGE("ProfHostDiskJob pid: %d is invalid.", pid);
-        MSPROF_INNER_ERROR("EK9999", "ProfHostDiskJob pid: %d is invalid.", pid);
         return PROFILING_FAILED;
     }
     std::stringstream ssPerfHostCmd;
@@ -651,7 +721,6 @@ int32_t ProfHostService::GetCollectIOTopCmd(int32_t pid, std::string &profHostCm
     ssPerfHostCmd << pid;
 
     profHostCmd = ssPerfHostCmd.str();
-    startProcessCmd_ = "iotop -b -d";
     return PROFILING_SUCCESS;
 }
 
@@ -667,6 +736,7 @@ int32_t ProfHostService::Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg, const
     collectionJobCfg_ = cfg;
     hostTimerTag_ = hostTimerTag;
     toolName_ = PROF_HOST_TOOL_NAME[hostTimerTag_];
+    startProcessCmd_ = PROF_HOST_PROCESS_CMD[hostTimerTag_];
     profHostOutDir_ = collectionJobCfg_->comParams->tmpResultDir + PROF_HOST_OUTDATA[hostTimerTag_];
     isStarted_ = true;
     MSPROF_LOGI("Init ProfHostService success, profHostOutDir: %s", profHostOutDir_.c_str());
@@ -678,7 +748,6 @@ int32_t ProfHostService::Start()
     MSPROF_LOGI("Start ProfHostService begin, toolName:%s", toolName_.c_str());
     if (!isStarted_) {
         MSPROF_LOGE("ProfHostService not started, toolName:%s", toolName_.c_str());
-        MSPROF_INNER_ERROR("EK9999", "ProfHostService not started, toolName:%s", toolName_.c_str());
         return PROFILING_FAILED;
     }
     std::string threadName = "MSVP_PORF_HOST_TOOL_TIMER";
@@ -687,7 +756,6 @@ int32_t ProfHostService::Start()
     if (ret != PROFILING_SUCCESS) {
         isStarted_ = false;
         MSPROF_LOGE("Thread start failed, toolName:%s", toolName_.c_str());
-        MSPROF_INNER_ERROR("EK9999", "Thread start failed, toolName:%s", toolName_.c_str());
         return PROFILING_FAILED;
     }
 
@@ -700,7 +768,6 @@ int32_t ProfHostService::Stop()
     MSPROF_LOGI("Stop ProfHostService begin, toolName:%s", toolName_.c_str());
     if (!isStarted_) {
         MSPROF_LOGE("ProfHostService not started, toolName:%s", toolName_.c_str());
-        MSPROF_INNER_ERROR("EK9999", "ProfHostService not started, toolName:%s", toolName_.c_str());
         return PROFILING_FAILED;
     }
     isStarted_ = false;
@@ -708,7 +775,6 @@ int32_t ProfHostService::Stop()
     int32_t ret = analysis::dvvp::common::thread::Thread::Stop();
     if (ret != PROFILING_SUCCESS) {
         MSPROF_LOGE("Thread stop failed, toolName:%s", toolName_.c_str());
-        MSPROF_INNER_ERROR("EK9999", "Thread stop failed, toolName:%s", toolName_.c_str());
         return PROFILING_FAILED;
     }
     MSPROF_LOGI("Stop ProfHostService success, toolName:%s", toolName_.c_str());
@@ -716,13 +782,12 @@ int32_t ProfHostService::Stop()
     return PROFILING_SUCCESS;
 }
 
-void ProfHostService::Run(const struct error_message::Context &errorContext)
+void ProfHostService::Run(const error_message::ErrorManagerContext& errorContext)
 {
     MsprofErrorManager::instance()->SetErrorContext(errorContext);
     int32_t ret = Process();
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("The run toolName:%s process failed.", toolName_.c_str());
-        MSPROF_INNER_ERROR("EK9999", "The run toolName:%s process failed.", toolName_.c_str());
         return;
     }
     std::string fileName = profHostOutDir_ + MSVP_PROF_PERF_RET_FILE_SUFFIX;
@@ -752,7 +817,6 @@ int32_t ProfHostService::Handler()
     ret = Process();
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("The toolName:%s process failed.", toolName_.c_str());
-        MSPROF_INNER_ERROR("EK9999", "The toolName:%s process failed.", toolName_.c_str());
     }
     return ret;
 }
@@ -762,8 +826,8 @@ void ProfHostService::StoreData() const
     std::string txtFileName = profHostOutDir_ + MSVP_PROF_PERF_RET_FILE_SUFFIX;
     std::string uploadFileName = PROF_HOST_OUTDATA[hostTimerTag_];
     txtFileName = Utils::CanonicalizePath(txtFileName);
-    FUNRET_CHECK_EXPR_ACTION(txtFileName.empty(), return,
-        "The txtFileName: %s does not exist or permission denied.", txtFileName.c_str());
+    FUNRET_CHECK_EXPR_ACTION(
+        txtFileName.empty(), return, "The txtFileName: %s does not exist or permission denied.", txtFileName.c_str());
     std::ifstream ifs(txtFileName, std::ifstream::in);
     if (!ifs.is_open()) {
         return;
@@ -772,7 +836,7 @@ void ProfHostService::StoreData() const
     SHARED_PTR_ALIA<analysis::dvvp::message::JobContext> jobCtx = collectionJobCfg_->comParams->jobCtx;
     SHARED_PTR_ALIA<analysis::dvvp::message::ProfileParams> params = collectionJobCfg_->comParams->params;
     SHARED_PTR_ALIA<analysis::dvvp::ProfileFileChunk> fileChunk;
-    MSVP_MAKE_SHARED0(fileChunk, analysis::dvvp::ProfileFileChunk, return );
+    MSVP_MAKE_SHARED0(fileChunk, analysis::dvvp::ProfileFileChunk, return);
     fileChunk->fileName = Utils::PackDotInfo(uploadFileName, jobCtx->tag);
     fileChunk->offset = -1;
     fileChunk->chunk = std::string(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
@@ -783,10 +847,9 @@ void ProfHostService::StoreData() const
     if (fileChunk->chunkSize != 0) {
         if (analysis::dvvp::transport::UploaderMgr::instance()->UploadData(params->job_id, fileChunk) !=
             PROFILING_SUCCESS) {
-            MSPROF_LOGE("Upload host server data failed , jobId: %s, fileName: %s", params->job_id.c_str(),
-                        uploadFileName.c_str());
-            MSPROF_INNER_ERROR("EK9999", "Upload host server data failed , jobId: %s, fileName: %s",
-                               params->job_id.c_str(), uploadFileName.c_str());
+            MSPROF_LOGE(
+                "Upload host server data failed , jobId: %s, fileName: %s", params->job_id.c_str(),
+                uploadFileName.c_str());
         }
     }
 
@@ -800,8 +863,8 @@ void ProfHostService::PrintFileContent(const std::string filePath) const
     std::string context;
     std::ifstream psFile;
     std::string canonicalizedPath = Utils::CanonicalizePath(filePath);
-    FUNRET_CHECK_EXPR_ACTION(canonicalizedPath.empty(), return,
-        "The filePath: %s does not exist or permission denied.", filePath.c_str());
+    FUNRET_CHECK_EXPR_ACTION(
+        canonicalizedPath.empty(), return, "The filePath: %s does not exist or permission denied.", filePath.c_str());
     psFile.open(canonicalizedPath, std::ifstream::in);
     if (psFile.is_open()) {
         while (getline(psFile, context)) {
@@ -819,7 +882,7 @@ int32_t ProfHostService::CollectToolIsRun()
     std::string checkToolRunCmd =
         "ps -ef | grep \"" + startProcessCmd_ + "\" | grep -v grep | grep " + std::to_string(hostSysPid);
     std::vector<std::string> envV;
-    envV.push_back("PATH=/usr/bin:/usr/sbin");
+    envV.push_back("PATH=/usr/bin:/usr/sbin:$PATH");
     std::vector<std::string> argsV;
     argsV.push_back("-c");
     argsV.push_back(checkToolRunCmd);
@@ -835,7 +898,7 @@ int32_t ProfHostService::CollectToolIsRun()
     }
     for (int32_t i = 0; i < FILE_FIND_REPLAY; ++i) {
         if (!(Utils::IsFileExist(redirectionPath))) {
-            OsalSleep(1);  // If the file is not found, the delay is 1 ms.
+            OsalSleep(1); // If the file is not found, the delay is 1 ms.
             continue;
         } else {
             break;
@@ -843,7 +906,6 @@ int32_t ProfHostService::CollectToolIsRun()
     }
     if (!(Utils::IsFileExist(redirectionPath))) {
         MSPROF_LOGE("The file:%s is not exist", redirectionPath.c_str());
-        MSPROF_INNER_ERROR("EK9999", "The file:%s is not exist", redirectionPath.c_str());
         return PROFILING_FAILED;
     }
     PrintFileContent(redirectionPath);
@@ -869,7 +931,6 @@ int32_t ProfHostService::WaitCollectToolStart()
     }
     if (ret == PROFILING_FAILED) {
         MSPROF_LOGE("Failed to start the process: %s", toolName_.c_str());
-        MSPROF_INNER_ERROR("EK9999", "Failed to start the process: %s", toolName_.c_str());
     }
     return ret;
 }
@@ -904,13 +965,13 @@ void ProfHostService::WaitTimeoutEnd()
 {
     MSPROF_LOGI("Wakeup Unint start");
     std::unique_lock<std::mutex> lk(needUnintMtx_);
-    static const int32_t CHECK_FILE_SIZE_INTERVAL_US = 500000;  // 500000 means 500 ms
+    static const int32_t CHECK_FILE_SIZE_INTERVAL_US = 500000; // 500000 means 500 ms
     const auto res = isJobUnint_.wait_for(lk, std::chrono::microseconds(CHECK_FILE_SIZE_INTERVAL_US));
     if (res == std::cv_status::timeout) {
         MSPROF_LOGI("Wakeup Unint timeout");
         return;
     }
 }
-}
-}
-}
+} // namespace JobWrapper
+} // namespace Dvvp
+} // namespace Analysis

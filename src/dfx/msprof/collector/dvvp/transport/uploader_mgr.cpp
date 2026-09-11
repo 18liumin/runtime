@@ -18,9 +18,7 @@ namespace transport {
 using namespace analysis::dvvp::common::error;
 using namespace analysis::dvvp::common::utils;
 
-UploaderMgr::UploaderMgr()
-{
-}
+UploaderMgr::UploaderMgr() {}
 
 UploaderMgr::~UploaderMgr()
 {
@@ -33,10 +31,7 @@ UploaderMgr::~UploaderMgr()
     MSPROF_LOGI("End to destroy UploaderMgr.");
 }
 
-int32_t UploaderMgr::Init() const
-{
-    return PROFILING_SUCCESS;
-}
+int32_t UploaderMgr::Init() const { return PROFILING_SUCCESS; }
 
 int32_t UploaderMgr::Uninit()
 {
@@ -46,7 +41,7 @@ int32_t UploaderMgr::Uninit()
     return PROFILING_SUCCESS;
 }
 
-void UploaderMgr::AddMapByDevIdMode(int32_t devId, const std::string &mode, const std::string &jobId)
+void UploaderMgr::AddMapByDevIdMode(int32_t devId, const std::string& mode, const std::string& jobId)
 {
     std::string devModeKey = std::to_string(devId) + "_" + mode;
     if (mode.empty()) {
@@ -63,7 +58,7 @@ void UploaderMgr::AddMapByDevIdMode(int32_t devId, const std::string &mode, cons
     devModeJobMap_[devModeKey] = jobId;
 }
 
-std::string UploaderMgr::GetJobId(int32_t devId, const std::string &mode)
+std::string UploaderMgr::GetJobId(int32_t devId, const std::string& mode)
 {
     std::string devModeKey = std::to_string(devId) + "_" + mode;
     if (mode.empty()) {
@@ -79,7 +74,7 @@ std::string UploaderMgr::GetJobId(int32_t devId, const std::string &mode)
     }
 }
 
-int32_t UploaderMgr::CreateUploader(const std::string &id, SHARED_PTR_ALIA<ITransport> transport, size_t queueSize)
+int32_t UploaderMgr::CreateUploader(const std::string& id, SHARED_PTR_ALIA<ITransport> transport, size_t queueSize)
 {
     if (transport == nullptr) {
         MSPROF_LOGE("Transport is invalid!");
@@ -90,7 +85,9 @@ int32_t UploaderMgr::CreateUploader(const std::string &id, SHARED_PTR_ALIA<ITran
     int32_t ret = uploader->Init(queueSize);
     if (ret != PROFILING_SUCCESS) {
         MSPROF_LOGE("Failed to init uploader");
-        MSPROF_INNER_ERROR("EK9999", "Failed to init uploader");
+        MSPROF_ENV_ERROR(
+            "EK0201", std::vector<std::string>({"buf_size"}),
+            std::vector<std::string>({std::to_string(queueSize) + "B"}));
         return ret;
     }
     std::string uploaderName = analysis::dvvp::common::config::MSVP_UPLOADER_THREAD_NAME;
@@ -99,14 +96,16 @@ int32_t UploaderMgr::CreateUploader(const std::string &id, SHARED_PTR_ALIA<ITran
     ret = uploader->Start();
     if (ret != PROFILING_SUCCESS) {
         MSPROF_LOGE("Failed to start uploader thread");
-        MSPROF_INNER_ERROR("EK9999", "Failed to start uploader thread");
+        MSPROF_ENV_ERROR(
+            "EK0203", std::vector<std::string>({"reason"}),
+            std::vector<std::string>({std::to_string(ret) + " returned when the pthread_create API is called"}));
         return ret;
     }
     AddUploader(id, uploader);
     return PROFILING_SUCCESS;
 }
 
-void UploaderMgr::AddUploader(const std::string &id, SHARED_PTR_ALIA<Uploader> uploader)
+void UploaderMgr::AddUploader(const std::string& id, SHARED_PTR_ALIA<Uploader> uploader)
 {
     MSPROF_LOGI("id: %s Entering AddUploader...", id.c_str());
     std::lock_guard<std::mutex> lock(uploaderMutex_);
@@ -115,7 +114,7 @@ void UploaderMgr::AddUploader(const std::string &id, SHARED_PTR_ALIA<Uploader> u
     }
 }
 
-void UploaderMgr::GetUploader(const std::string &id, SHARED_PTR_ALIA<Uploader> &uploader)
+void UploaderMgr::GetUploader(const std::string& id, SHARED_PTR_ALIA<Uploader>& uploader)
 {
     MSPROF_LOGD("Get id %s uploader...", id.c_str());
     std::lock_guard<std::mutex> lock(uploaderMutex_);
@@ -125,7 +124,7 @@ void UploaderMgr::GetUploader(const std::string &id, SHARED_PTR_ALIA<Uploader> &
     }
 }
 
-void UploaderMgr::DelUploader(const std::string &id)
+void UploaderMgr::DelUploader(const std::string& id)
 {
     MSPROF_LOGI("Del id %s uploader...", id.c_str());
     std::lock_guard<std::mutex> lock(uploaderMutex_);
@@ -191,7 +190,7 @@ void UploaderMgr::RegisterAllUploaderTransportGenHashIdFuncPtr(HashDataGenIdFunc
     }
 }
 
-int32_t UploaderMgr::UploadData(const std::string &id, CONST_VOID_PTR data, uint32_t dataLen)
+int32_t UploaderMgr::UploadData(const std::string& id, CONST_VOID_PTR data, uint32_t dataLen)
 {
     SHARED_PTR_ALIA<Uploader> uploader = nullptr;
     GetUploader(id, uploader);
@@ -200,11 +199,10 @@ int32_t UploaderMgr::UploadData(const std::string &id, CONST_VOID_PTR data, uint
     }
 
     MSPROF_LOGE("Get id[%s] uploader failed, dataLen:%d bytes", id.c_str(), dataLen);
-    MSPROF_INNER_ERROR("EK9999", "Get id[%s] uploader failed, dataLen:%u bytes", id.c_str(), dataLen);
     return PROFILING_FAILED;
 }
 
-int32_t UploaderMgr::UploadData(const std::string &id, SHARED_PTR_ALIA<analysis::dvvp::ProfileFileChunk> fileChunkReq)
+int32_t UploaderMgr::UploadData(const std::string& id, SHARED_PTR_ALIA<analysis::dvvp::ProfileFileChunk> fileChunkReq)
 {
     MSPROF_LOGD("UploadData id[%s] uploader start", id.c_str());
     if (!IsUploadDataStart(id, fileChunkReq->fileName)) {
@@ -218,25 +216,21 @@ int32_t UploaderMgr::UploadData(const std::string &id, SHARED_PTR_ALIA<analysis:
     }
 
     MSPROF_LOGE("Get id[%s] uploader failed", id.c_str());
-    MSPROF_INNER_ERROR("EK9999", "Get id[%s] uploader failed", id.c_str());
     return PROFILING_FAILED;
 }
 
-int32_t UploaderMgr::UploadCtrlFileData(const std::string &id,
-    const std::string &data,
-    const struct FileDataParams &fileDataParams,
+int32_t UploaderMgr::UploadCtrlFileData(
+    const std::string& id, const std::string& data, const struct FileDataParams& fileDataParams,
     SHARED_PTR_ALIA<analysis::dvvp::message::JobContext> jobCtx) const
 {
     MSPROF_LOGI("UploadCtrlFileData id[%s] uploader start", id.c_str());
     if (data.empty()) {
         MSPROF_LOGE("data is empty");
-        MSPROF_INNER_ERROR("EK9999", "data is empty");
         return PROFILING_FAILED;
     }
 
     if (jobCtx == nullptr) {
         MSPROF_LOGE("jobCtx is null");
-        MSPROF_INNER_ERROR("EK9999", "jobCtx is null");
         return PROFILING_FAILED;
     }
 
@@ -253,12 +247,9 @@ int32_t UploaderMgr::UploadCtrlFileData(const std::string &id,
     return analysis::dvvp::transport::UploaderMgr::instance()->UploadData(id, fileChunk);
 }
 
-void UploaderMgr::SetUploadDataIfStart(bool ifStart)
-{
-    isUploadStart_.store(ifStart);
-}
+void UploaderMgr::SetUploadDataIfStart(bool ifStart) { isUploadStart_.store(ifStart); }
 
-bool UploaderMgr::IsUploadDataStart(const std::string &dataDeviceId, const std::string &dataFileName)
+bool UploaderMgr::IsUploadDataStart(const std::string& dataDeviceId, const std::string& dataFileName)
 {
     // only return false when data is from device except flip data and upload not started
     if (isUploadStart_.load()) {
@@ -278,7 +269,6 @@ bool UploaderMgr::IsUploadDataStart(const std::string &dataDeviceId, const std::
     }
     return true;
 }
-}
-}
-}
-
+} // namespace transport
+} // namespace dvvp
+} // namespace analysis

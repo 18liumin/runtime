@@ -18,6 +18,7 @@
 #include "stars_engine.hpp"
 #include "raw_device.hpp"
 #include "engine.hpp"
+#include "scheduler.hpp"
 #include "task_info.hpp"
 #include "runtime.hpp"
 #include "context.hpp"
@@ -29,89 +30,84 @@
 #include "thread_local_container.hpp"
 #include "api_impl.hpp"
 #include "memory_task.h"
+#include "../../common/rt_utest_context_reset_helper.hpp"
 using namespace testing;
 using namespace cce::runtime;
 
 class IpcEventTest910B : public testing::Test {
 public:
-    Device *device_ = nullptr;
+    Device* device_ = nullptr;
     rtChipType_t oldChipType;
-protected:
-    static void SetUpTestCase()
-    {
-    }
 
-    static void TearDownTestCase()
-    {
-    }
+protected:
+    static void SetUpTestCase() {}
+
+    static void TearDownTestCase() {}
 
     virtual void SetUp()
     {
         (void)rtSetSocVersion("Ascend910B1");
-        ((Runtime *)Runtime::Instance())->SetIsUserSetSocVersion(false);
-        ((Runtime *)Runtime::Instance())->SetDisableThread(true);
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
         (void)rtSetDevice(0);
-        device_ = ((Runtime *)Runtime::Instance())->DeviceRetain(0, 0);
+        ut::ClearCurrentContextStatusForReset();
+        ut::ClearCurrentDefaultStreamPending();
+        device_ = ((Runtime*)Runtime::Instance())->DeviceRetain(0, 0);
     }
 
     virtual void TearDown()
     {
-        RawDevice *rd = (RawDevice *)device_;
-        while (rd->IsNeedFreeEventId()) {rd->PopNextPoolFreeEventId();}
-        rtDeviceReset(0);
-        ((Runtime *)Runtime::Instance())->SetDisableThread(false);
+        RawDevice* rd = (RawDevice*)device_;
+        while (rd->IsNeedFreeEventId()) {
+            rd->PopNextPoolFreeEventId();
+        }
+        ut::ResetPrimaryDeviceIfActiveWithDeviceDown();
         (void)rtSetSocVersion("");
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
         GlobalMockObject::verify();
     }
 };
 
-drvError_t halMemExportToShareableHandleStub(drv_mem_handle_t *handle, drv_mem_handle_type handle_type,
-    uint64_t flags, uint64_t *shareable_handle)
+drvError_t halMemExportToShareableHandleStub(
+    drv_mem_handle_t* handle, drv_mem_handle_type handle_type, uint64_t flags, uint64_t* shareable_handle)
 {
     *shareable_handle = 1;
     return DRV_ERROR_NONE;
 }
 
-IpcHandleVa eventAddr = {1, RtValueToPtr<void*>(1), 0, 0};
-drvError_t halMemAddressReserveStub(void **ptr, size_t size, size_t alignment, void *addr, uint64_t flag)
+IpcHandleVa eventAddr = {0, RtValueToPtr<void*>(1), 0, 0};
+drvError_t halMemAddressReserveStub(void** ptr, size_t size, size_t alignment, void* addr, uint64_t flag)
 {
     *ptr = &eventAddr;
     return DRV_ERROR_NONE;
 }
 
-drvError_t halMemAddressReserveStub1(void **ptr, size_t size, size_t alignment, void *addr, uint64_t flag)
+drvError_t halMemAddressReserveStub1(void** ptr, size_t size, size_t alignment, void* addr, uint64_t flag)
 {
     return DRV_ERROR_NOT_SUPPORT;
 }
 
 int tmp[6] = {1, 2, 3, 4, 5, 6};
-drvError_t halMemCreateStub(drv_mem_handle_t **handle, size_t size, const struct drv_mem_prop *prop, uint64_t flag)
+drvError_t halMemCreateStub(drv_mem_handle_t** handle, size_t size, const struct drv_mem_prop* prop, uint64_t flag)
 {
     *handle = reinterpret_cast<drv_mem_handle_t*>(&tmp);
     return DRV_ERROR_NONE;
 }
 
-drvError_t halMemCreateStub1(drv_mem_handle_t **handle, size_t size, const struct drv_mem_prop *prop, uint64_t flag)
+drvError_t halMemCreateStub1(drv_mem_handle_t** handle, size_t size, const struct drv_mem_prop* prop, uint64_t flag)
 {
     return DRV_ERROR_NOT_SUPPORT;
 }
 
-void IpcVaLockStub()
-{
-}
+void IpcVaLockStub() {}
 
-void IpcVaUnLockStub()
-{
-}
+void IpcVaUnLockStub() {}
 
-void IpcVaLockInitStub()
-{
-}
+void IpcVaLockInitStub() {}
 
-uint16_t* GetCurrentHostMemStub()
+uint8_t value = 0U;
+uint8_t* GetCurrentHostMemStub()
 {
-    uint16_t value = 0U;
-    uint16_t* ptr = &value;
+    uint8_t* ptr = &value;
     return ptr;
 }
 
@@ -186,46 +182,6 @@ TEST_F(IpcEventTest910B, ipcEventCreate2)
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 }
 
-TEST_F(IpcEventTest910B, query)
-{
-    rtError_t error;
-    rtEvent_t event;
-    rtStream_t stream;
-    rtEventStatus_t status;
-
-    error = rtStreamCreate(&stream, 0);
-    EXPECT_EQ(error, ACL_RT_SUCCESS);
-
-    error = rtEventCreateWithFlag(&event, RT_EVENT_WITH_FLAG);
-    EXPECT_EQ(error, ACL_RT_SUCCESS);
-
-    error = rtEventQueryStatus(event, &status);
-    EXPECT_EQ(error, ACL_RT_SUCCESS);
-    EXPECT_EQ(status, RT_EVENT_INIT);
-
-
-    error = rtEventRecord(event, stream);
-    EXPECT_EQ(error, ACL_RT_SUCCESS);
-
-    error = rtEventQuery(event);
-    if (error == RT_ERROR_EVENT_NOT_COMPLETE) {
-        EXPECT_EQ(error, RT_ERROR_NONE);
-    }
-
-    error = rtStreamSynchronize(stream);
-    EXPECT_EQ(error, ACL_RT_SUCCESS);
-
-    error = rtEventQueryStatus(event, &status);
-    EXPECT_EQ(error, ACL_RT_SUCCESS);
-    EXPECT_EQ(status, RT_EVENT_RECORDED);
-
-    error = rtEventDestroy(event);
-    EXPECT_EQ(error, ACL_RT_SUCCESS);
-
-    error = rtStreamDestroy(stream);
-    EXPECT_EQ(error, ACL_RT_SUCCESS);
-}
-
 TEST_F(IpcEventTest910B, ipcEventBase)
 {
     rtError_t error;
@@ -292,7 +248,6 @@ TEST_F(IpcEventTest910B, ipcEventBase2)
     error = rtEventCreateExWithFlag(&event, RT_EVENT_IPC);
     EXPECT_EQ(error, ACL_ERROR_RT_FEATURE_NOT_SUPPORT);
 }
-
 
 TEST_F(IpcEventTest910B, ipcEventBase3)
 {

@@ -9,6 +9,7 @@
  */
 #include "msprofiler_impl.h"
 #include "sys/sysinfo.h"
+#include "compute_profiling_manager.h"
 #include "errno/error_code.h"
 #include "msprof_reporter.h"
 #include "command_handle.h"
@@ -39,7 +40,7 @@ std::map<const uint32_t, const uint32_t> g_modelDeviceMap; // key: geModelId, va
 std::mutex g_mapMutex;
 std::mutex g_envMutex;
 
-bool CheckMsprofBin(std::string &envValue)
+bool CheckMsprofBin(std::string& envValue)
 {
     MSPROF_GET_ENV(MM_ENV_PROFILER_SAMPLECONFIG, envValue);
     if (!envValue.empty()) {
@@ -53,7 +54,6 @@ int32_t ProfInitProc(uint32_t type)
 {
     if (ProfAclMgr::instance()->Init() != PROFILING_SUCCESS) {
         MSPROF_LOGE("Failed to init acl manager");
-        MSPROF_INNER_ERROR("EK9999", "Failed to init acl manager");
         ProfAclMgr::instance()->SetModeToOff();
         return MSPROF_ERROR;
     }
@@ -70,7 +70,7 @@ int32_t ProfInitProc(uint32_t type)
         };
         if (Analysis::Dvvp::ProfilerCommon::CommandHandleProfInit() != ACL_SUCCESS) {
             MSPROF_LOGE("CommandHandleProfInit failed.");
-            MSPROF_INNER_ERROR("EK9999", "CommandHandleProfInit failed.");
+            MSPROF_INNER_ERROR("EK9999", "Failed to callback init.");
             return MSPROF_ERROR;
         }
         uint64_t profConfigType = ProfAclMgr::instance()->GetCmdModeDataTypeConfig();
@@ -138,10 +138,11 @@ int32_t ProfAdprofInit(VOID_PTR data, uint32_t len)
 
     uint64_t startSwitch = 1U;
     static bool adprofStarted = false;
-    AicpuStartPara *para = static_cast<AicpuStartPara *>(data);
+    AicpuStartPara* para = static_cast<AicpuStartPara*>(data);
     uint32_t devicePid = static_cast<uint32_t>(OsalGetPid());
-    MSPROF_LOGI("ProfAdprofInit get prof config: 0x%x, host pid: %u, device pid: %u.", para->profConfig,
-        para->hostPid, devicePid);
+    MSPROF_LOGI(
+        "ProfAdprofInit get prof config: 0x%x, host pid: %u, device pid: %u.", para->profConfig, para->hostPid,
+        devicePid);
     if ((para->profConfig & startSwitch) != 0 && para->hostPid == devicePid) {
         if (ProfAclMgr::instance()->StartAdprofDumper() != PROFILING_SUCCESS) {
             return MSPROF_ERROR;
@@ -188,7 +189,21 @@ int32_t MsptiUnSubscribeRawData()
     return ret;
 }
 
-int32_t ProfConfigStart(uint32_t dataType, const void *data, uint32_t length)
+int32_t ProfSetInjectionFunc(uint32_t type, void* func)
+{
+    return ComputeProfilingManager::instance()->RegisterInjectionFunc(type, func);
+}
+
+int32_t ProfInjectionInitialize() { return ComputeProfilingManager::instance()->InitializeInjection(); }
+
+void* ProfGetInjectionFunc(uint32_t type) { return ComputeProfilingManager::instance()->GetInjectionFunc(type); }
+
+int32_t ProfRegisterDataCallback(uint32_t type, void* callback)
+{
+    return ComputeProfilingManager::instance()->RegisterDataCallback(type, callback);
+}
+
+int32_t ProfConfigStart(uint32_t dataType, const void* data, uint32_t length)
 {
     if (data == nullptr || length != sizeof(MsprofConfig)) {
         MSPROF_LOGE("Invalid prof start config, length: %u.", length);
@@ -196,38 +211,37 @@ int32_t ProfConfigStart(uint32_t dataType, const void *data, uint32_t length)
     }
     // Init
     int32_t ret = MSPROF_ERROR_NONE;
-    auto config = static_cast<const MsprofConfig *>(data);
+    auto config = static_cast<const MsprofConfig*>(data);
     ProfConfigType type = static_cast<ProfConfigType>(dataType);
     // start
     (void)ProfAclMgr::instance()->Init();
     switch (type) {
         case ProfConfigType::PROF_CONFIG_PURE_CPU:
             ret = ProfAclMgr::instance()->ProfStartPureCpu(config);
-            FUNRET_CHECK_EXPR_ACTION(ret != MSPROF_ERROR_NONE, return MSPROF_ERROR,
-                "Failed to start pure cpu prof tasks.");
+            FUNRET_CHECK_EXPR_ACTION(
+                ret != MSPROF_ERROR_NONE, return MSPROF_ERROR, "Failed to start pure cpu prof tasks.");
             break;
         case ProfConfigType::PROF_CONFIG_COMMAND_LINE:
         case ProfConfigType::PROF_CONFIG_ACL_JSON:
         case ProfConfigType::PROF_CONFIG_GE_OPTION:
             ret = ProfAclMgr::instance()->ProfStartCommon(config->devIdList, config->devNums);
-            FUNRET_CHECK_EXPR_ACTION(ret != MSPROF_ERROR_NONE && ret != MSPROF_ERROR_UNINITIALIZE, return MSPROF_ERROR,
+            FUNRET_CHECK_EXPR_ACTION(
+                ret != MSPROF_ERROR_NONE && ret != MSPROF_ERROR_UNINITIALIZE, return MSPROF_ERROR,
                 "Failed to start common prof tasks.");
             break;
         case ProfConfigType::PROF_CONFIG_ACL_API:
             ret = ProfAclMgr::instance()->PrepareStartAclApi(config);
-            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret,
-                "Failed to prepare acl api prof tasks.");
+            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret, "Failed to prepare acl api prof tasks.");
             ret = ProfAclMgr::instance()->ProfStartCommon(config->devIdList, config->devNums);
-            FUNRET_CHECK_EXPR_ACTION(ret != MSPROF_ERROR_NONE && ret != MSPROF_ERROR_UNINITIALIZE, return MSPROF_ERROR,
+            FUNRET_CHECK_EXPR_ACTION(
+                ret != MSPROF_ERROR_NONE && ret != MSPROF_ERROR_UNINITIALIZE, return MSPROF_ERROR,
                 "Failed to start acl api prof tasks.");
             break;
         case ProfConfigType::PROF_CONFIG_ACL_SUBSCRIBE:
             ret = ProfAclMgr::instance()->PrepareStartAclSubscribe(config);
-            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret,
-                "Failed to prepare acl subscribe prof tasks.");
+            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret, "Failed to prepare acl subscribe prof tasks.");
             ret = ProfAclMgr::instance()->ProfStartAclSubscribe(config);
-            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret,
-                "Failed to start acl subscribe prof tasks.");
+            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret, "Failed to start acl subscribe prof tasks.");
             break;
         default:
             MSPROF_LOGE("Invalid data type: %u for prof start.", dataType);
@@ -239,43 +253,38 @@ int32_t ProfConfigStart(uint32_t dataType, const void *data, uint32_t length)
     return MSPROF_ERROR_NONE;
 }
 
-int32_t ProfConfigStop(uint32_t dataType, const void *data, uint32_t length)
+int32_t ProfConfigStop(uint32_t dataType, const void* data, uint32_t length)
 {
     if (data == nullptr || length != sizeof(MsprofConfig)) {
         MSPROF_LOGE("Invalid prof stop config, length: %u.", length);
         return MSPROF_ERROR;
     }
     int32_t ret = MSPROF_ERROR_NONE;
-    auto config = static_cast<const MsprofConfig *>(data);
+    auto config = static_cast<const MsprofConfig*>(data);
     ProfConfigType type = static_cast<ProfConfigType>(dataType);
     switch (type) {
         case ProfConfigType::PROF_CONFIG_PURE_CPU:
             ret = ProfAclMgr::instance()->ProfStopPureCpu();
-            FUNRET_CHECK_EXPR_ACTION(ret != MSPROF_ERROR_NONE, return MSPROF_ERROR,
-                "Failed to stop pure cpu prof tasks.");
+            FUNRET_CHECK_EXPR_ACTION(
+                ret != MSPROF_ERROR_NONE, return MSPROF_ERROR, "Failed to stop pure cpu prof tasks.");
             break;
         case ProfConfigType::PROF_CONFIG_COMMAND_LINE:
         case ProfConfigType::PROF_CONFIG_ACL_JSON:
         case ProfConfigType::PROF_CONFIG_GE_OPTION:
             ret = ProfAclMgr::instance()->ProfStopCommon(config);
-            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret,
-                "Failed to stop common prof tasks.");
+            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret, "Failed to stop common prof tasks.");
             break;
         case ProfConfigType::PROF_CONFIG_ACL_API:
             ret = ProfAclMgr::instance()->PrepareStopAclApi(config);
-            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret,
-                "Failed to prepare acl api prof tasks.");
+            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret, "Failed to prepare acl api prof tasks.");
             ret = ProfAclMgr::instance()->ProfStopCommon(config);
-            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret,
-                "Failed to stop acl api prof tasks.");
+            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret, "Failed to stop acl api prof tasks.");
             break;
         case ProfConfigType::PROF_CONFIG_ACL_SUBSCRIBE:
             ret = ProfAclMgr::instance()->PrepareStopAclSubscribe(config);
-            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret,
-                "Failed to prepare acl subscribe prof tasks.");
-            ret = ProfAclMgr::instance()->ProfStopAclSubscribe(config); 
-            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret,
-                "Failed to stop acl subscribe prof tasks.");
+            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret, "Failed to prepare acl subscribe prof tasks.");
+            ret = ProfAclMgr::instance()->ProfStopAclSubscribe(config);
+            FUNRET_CHECK_EXPR_ACTION(ret != ACL_SUCCESS, return ret, "Failed to stop acl subscribe prof tasks.");
             break;
         default:
             MSPROF_LOGE("Invalid data type: %u for prof start.", dataType);
@@ -284,11 +293,13 @@ int32_t ProfConfigStop(uint32_t dataType, const void *data, uint32_t length)
     return MSPROF_ERROR_NONE;
 }
 
-int32_t ProfSetConfig(uint32_t configType, const char *config, size_t configLength)
+int32_t ProfSetConfig(uint32_t configType, const char* config, size_t configLength)
 {
     if (configType == MSPROF_CONFIG_HELPER_HOST) {
-        Platform::instance()->SetPlatformHelperHostSide();
-        return ProfAclMgr::instance()->ProcessHelperHostConfig(config, configLength);
+        UNUSED(config);
+        UNUSED(configLength);
+        MSPROF_LOGI("Prof helper host config is deprecated.");
+        return PROFILING_SUCCESS;
     }
 
     return MSPROF_ERROR_NONE;
@@ -337,9 +348,22 @@ int32_t ProfInitIfCommandLine()
 
 int32_t ProfNotifySetDevice(uint32_t chipId, uint32_t devId, bool isOpenDevice)
 {
+    // 通用服务器场景约定：devId 最高位为 1 时直接返回，不启动 device 侧采集 task。
+    constexpr uint32_t kGeneralServerScenarioMask = 0x80000000U;
+    if ((devId & kGeneralServerScenarioMask) != 0) {
+        MSPROF_LOGI(
+            "ProfNotifySetDevice, general server scenario (devId high bit set), skip device task, devId=%u.", devId);
+        return MSPROF_ERROR_NONE;
+    }
     if (Utils::IsDynProfMode()) {
         DynProfMgr::instance()->SaveDevicesInfo(chipId, devId, isOpenDevice);
     } else {
+        if (isOpenDevice && ProfAclMgr::instance()->IsSigintShutdownInProgress()) {
+            MSPROF_LOGW(
+                "Skip command-line profiling re-init/start on device %u because SIGINT shutdown is in progress.",
+                devId);
+            return MSPROF_ERROR_NONE;
+        }
         if (isOpenDevice && ProfInitIfCommandLine() != PROFILING_SUCCESS) {
             return MSPROF_ERROR;
         }
@@ -358,12 +382,12 @@ int32_t ProfNotifySetDevice(uint32_t chipId, uint32_t devId, bool isOpenDevice)
         return MSPROF_ERROR_NONE;
     }
     MSPROF_LOGI("ProfNotifySetDevice called, is open: %d, devId: %u", isOpenDevice, devId);
+    uint32_t dataType = static_cast<uint32_t>(ProfConfigType::PROF_CONFIG_COMMAND_LINE);
     if (isOpenDevice) {
         struct MsprofConfig cfg;
         cfg.devNums = 1;
         cfg.devIdList[0] = {devId};
-        return ProfConfigStart(static_cast<uint32_t>(ProfConfigType::PROF_CONFIG_COMMAND_LINE), &cfg,
-            sizeof(MsprofConfig));
+        return ProfConfigStart(dataType, &cfg, sizeof(MsprofConfig));
     } else {
         return ProfAclMgr::instance()->MsprofResetDeviceHandle(devId);
     }
@@ -389,7 +413,6 @@ int32_t ProfReportData(uint32_t moduleId, uint32_t type, VOID_PTR data, uint32_t
                 Msprof::Engine::MsprofReporter::reporters_[moduleId].HandleReportRequest(type, data, len));
         default:
             MSPROF_LOGE("Invalid reporter callback moduleId: %u", moduleId);
-            MSPROF_INNER_ERROR("EK9999", "Invalid reporter callback moduleId: %u", moduleId);
     }
     return ACL_ERROR_PROFILING_FAILURE;
 }
@@ -436,8 +459,8 @@ void ProfGetImplInfo(ProfImplInfo& info)
 {
     std::string envStr;
     MSPROF_GET_ENV(MM_ENV_PROFILER_SAMPLECONFIG, envStr);
-    if ((info.profType == MSPROF_CTRL_INIT_DYNA) && (envStr.empty() ||
-        !ProfAclMgr::instance()->IsModeOff()) && !Utils::IsDynProfMode()) {
+    if ((info.profType == MSPROF_CTRL_INIT_DYNA) && (envStr.empty() || !ProfAclMgr::instance()->IsModeOff()) &&
+        !Utils::IsDynProfMode()) {
         info.profInitFlag = false;
         MSPROF_LOGI("Profiling Init useless");
         return;
@@ -448,7 +471,7 @@ void ProfGetImplInfo(ProfImplInfo& info)
         struct sysinfo linuxInfo;
         sysinfo(&linuxInfo);
         info.sysFreeRam = static_cast<size_t>(linuxInfo.freeram);
-    } catch (const std::runtime_error &e) {
+    } catch (const std::runtime_error& e) {
         MSPROF_LOGW("Failed to get system free ram, reason: %s", e.what());
         info.sysFreeRam = 0;
     }
@@ -459,7 +482,8 @@ FinalizeGuard::~FinalizeGuard()
 {
     MSPROF_EVENT("Start to execute FinalizeGuard.");
     Analysis::Dvvp::ProfilerCommon::CommandHandleFinalizeGuard();
-    FUNRET_CHECK_EXPR_PRINT(ProfAclMgr::instance()->MsprofFinalizeHandle() != MSPROF_ERROR_NONE,
+    FUNRET_CHECK_EXPR_PRINT(
+        ProfAclMgr::instance()->MsprofFinalizeHandle() != MSPROF_ERROR_NONE,
         "Failed to execute Finalize in the destructor phase.");
 }
 
@@ -467,10 +491,26 @@ FinalizeGuard::~FinalizeGuard()
  * @name  InstanceFinalizeGuard
  * @brief Ensure that the collection exits completely.
  */
-void InstanceFinalizeGuard()
+void InstanceFinalizeGuard() { static FinalizeGuard guard; }
+
+bool ProfCheckOpSwitch(uint32_t type, const char* op, size_t len)
 {
-    static FinalizeGuard guard;
+    if (type != 0U || op == nullptr || len == 0U) {
+        return false;
+    }
+    std::string opType(op, len);
+    std::string opTypeConfig = ProfAclMgr::instance()->GetOpTypeConfig();
+    if (opTypeConfig.empty()) {
+        return false;
+    }
+    std::vector<std::string> opList = Utils::Split(opTypeConfig, false, "", ",");
+    for (const auto& item : opList) {
+        if (item == opType) {
+            return true;
+        }
+    }
+    return false;
 }
-}
-}
-}
+} // namespace ProfilerCommon
+} // namespace Dvvp
+} // namespace Analysis

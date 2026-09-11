@@ -1,0 +1,977 @@
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+include_guard(GLOBAL)
+include(${RUNTIME_DIR}/pkg_inc/runtime/runtime/runtime_headers.cmake)
+
+set(libruntime_v100_task_src_files
+    ${RUNTIME_CORE_DIR}/src/task/task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_submit/v100/task_submit.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_res_manage/task_res.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/task_manager.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/model_execute_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/model_execute_task_func_call.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/model_execute_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/davinci/davinci_kernel_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/davinci/davinci_kernel_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/davinci/davinci_multiple_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/davinci/davinci_multiple_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/event/event_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/event/event_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/memory/memory_memcpy_async_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/memory/memory_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/memory/memory_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/tiny/memory_task_v100_external_event_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/reduce/reduce_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/reduce/reduce_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/cond_op/cond_op_stream_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/cond_op/cond_op_stream_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/cond_op/cond_op_manager.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/cond_op/cond_op_stream_task_base.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/cond_op/cond_op_label_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/cond_op/cond_op_label_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/profiling/profiling_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/profiling/profiling_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/dump/dump_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/dump/dump_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/stream/stream_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/stream/stream_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/stream/stream_task_active.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_execute_time.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/common/common_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/common/common_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/random_num_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/barrier/barrier_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/barrier/barrier_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/cmo/cmo_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/cmo/cmo_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/model_maintaince_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/model_maintaince_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/event/notify_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/event/notify_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/timeout_set/timeout_set_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/timeout_set/timeout_set_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/ringbuffer_maintain/ringbuffer_maintain_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/ringbuffer_maintain/ringbuffer_maintain_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/model_update_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/model_update_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/model_graph_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/model_graph_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/model_to_aicpu_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/model_to_aicpu_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/kernel_fusion_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/model/kernel_fusion_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/maintenance/maintenance_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/maintenance/maintenance_task_v100.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/maintenance/float_status_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/maintenance/float_status_task_v100.cc
+
+    ${RUNTIME_CORE_DIR}/src/task/v100/task_checker.cc
+    ${RUNTIME_CORE_DIR}/src/task/v100/task_adapter.cc
+    ${RUNTIME_CORE_DIR}/src/task/v100/memory_corruption_checker.cc
+)
+
+set(libruntime_api_src_files
+    ${RUNTIME_API_ENUM_DESC_SRC_FILES}
+    ${RUNTIME_DIR}/src/runtime/api/api_c.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_context.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_device.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_kernel.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_memory.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_stream.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_model.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_event.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_mbuf.cc
+    ${RUNTIME_DIR}/src/runtime/api/inner.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_handle_guard.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_global_err.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_soc.cc
+)
+
+set(common_src_files
+    ${RUNTIME_CORE_DIR}/src/common/error_code.cc
+    ${RUNTIME_CORE_DIR}/src/common/thread_local_container.cc
+    ${RUNTIME_CORE_DIR}/src/common/args_buffer_guard.cc
+    ${RUNTIME_CORE_DIR}/src/common/utils.cc
+    ${RUNTIME_CORE_DIR}/src/common/heterogenous.cc
+    ${RUNTIME_CORE_DIR}/src/common/soc_info.cc
+    ${RUNTIME_CORE_DIR}/src/common/context_data_manage.cc
+    ${RUNTIME_CORE_DIR}/src/common/profiling_agent.cc
+    ${RUNTIME_CORE_DIR}/src/common/errcode_manage.cc
+    ${RUNTIME_CORE_DIR}/src/common/error_message_manage.cc
+    ${RUNTIME_CORE_DIR}/src/common/task_fail_callback_data_manager.cc
+    ${RUNTIME_FEATURE_DIR}/xpu/xpu_task_fail_callback_data_manager_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/common/performance_record.cc
+    ${RUNTIME_CORE_DIR}/src/common/prof_ctrl_callback_manager.cc
+    ${RUNTIME_CORE_DIR}/src/common/rt_log.cc
+    ${RUNTIME_CORE_DIR}/src/common/dev_info_manage.cc
+    ${RUNTIME_CORE_DIR}/src/common/global_state_manager.cc
+    ${RUNTIME_CORE_DIR}/src/common/runtime_handle_guard.cc
+    ${RUNTIME_CORE_DIR}/src/common/register_memory.cc
+)
+
+set(libruntime_context_src_files
+    ${RUNTIME_CORE_DIR}/src/context/context.cc
+    ${RUNTIME_CORE_DIR}/src/context/context_manage.cc
+)
+
+set(libruntime_stream_common_src_files
+    ${RUNTIME_CORE_DIR}/src/stream/stream_sqcq_manage.cc
+    ${RUNTIME_CORE_DIR}/src/stream/engine_stream_observer.cc
+    ${RUNTIME_CORE_DIR}/src/stream/stream.cc
+    ${RUNTIME_CORE_DIR}/src/stream/ctrl_stream.cc
+    ${RUNTIME_CORE_DIR}/src/stream/coprocessor_stream.cc
+    ${RUNTIME_CORE_DIR}/src/stream/stream_factory.cc
+)
+
+# v100
+set(libruntime_stream_src_files
+    ${libruntime_stream_common_src_files}
+
+    ${RUNTIME_CORE_DIR}/src/stream/v100/stream_creator_c.cc
+)
+
+set(libruntime_profile_src_files
+    ${RUNTIME_CORE_DIR}/src/profiler/profiler.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/api_profile_decorator.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/api_profile_log_decorator.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/prof_map_ge_model_device.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/profile_log_record.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/npu_driver_record.cc
+)
+set(libruntime_arg_loader_files
+    ${RUNTIME_CORE_DIR}/src/kernel/arg_loader/uma_arg_loader.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/arg_loader/load_policy.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/arg_loader/stars_arg_manager.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/arg_loader/arg_manage_pcie.cc
+)
+
+set(libruntime_callback_files
+    ${RUNTIME_CORE_DIR}/src/device/device_state_callback_manager.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_fail_callback_manager.cc
+    ${RUNTIME_CORE_DIR}/src/stream/stream_state_callback_manager.cc
+    ${RUNTIME_CORE_DIR}/src/event/event_state_callback_manager.cc
+)
+
+set(libruntime_src_files_include_for_tiny
+    ${RUNTIME_API_DIR}/impl/api_error_tiny_stub.cc
+    ${RUNTIME_API_DIR}/impl/api_impl_stub.cc
+    ${RUNTIME_API_DIR}/impl/api_impl_tiny.cc
+    ${RUNTIME_API_DIR}/impl/v100/api_impl_v100.cc
+    ${RUNTIME_CORE_DIR}/src/context/context_tiny_stub.cc
+    ${RUNTIME_FEATURE_DIR}/ffts/context_ffts_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/dfx/printf_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/event/ipc_event_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/pool/event_pool_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/pool/event_expanding_tiny_stub.cc
+    ${RUNTIME_DIR}/src/runtime/driver/npu_driver_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/engine/engine_factory_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/binary_loader.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/json_parse.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/symbol_table_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/task/tiny/rdma_task_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/funcsymbol_table_tiny_stub.cc
+    ${RUNTIME_FEATURE_DIR}/ffts/ffts_task_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/task/tiny/task_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/api_profile_decorator_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/api_profile_log_decorator_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/launch/xpu_aicpu_c_stub.cc
+    ${RUNTIME_FEATURE_DIR}/snapshot/tiny/device_snapshot_tiny_stub.cc
+    ${RUNTIME_FEATURE_DIR}/snapshot/tiny/snapshot_process_helper_tiny_stub.cc
+    ${RUNTIME_FEATURE_DIR}/snapshot/tiny/snapshot_callback_manager_tiny_stub.cc
+    ${RUNTIME_FEATURE_DIR}/aclgraph/tiny/capture_model_utils_tiny_stub.cc
+    ${RUNTIME_FEATURE_DIR}/aclgraph/tiny/capture_model_tiny_stub.cc
+    ${RUNTIME_FEATURE_DIR}/aclgraph/tiny/context_tiny_stub_aclgraph.cc
+    ${RUNTIME_FEATURE_DIR}/aclgraph/tiny/event_capture_tiny_stub.cc
+    ${RUNTIME_FEATURE_DIR}/aclgraph/tiny/capture_adapt_tiny_stub.cc
+    ${RUNTIME_API_DIR}/impl/api_decorator_tiny_stub.cc
+    ${RUNTIME_FEATURE_DIR}/model/tiny/model_aclgraph_tiny_stub.cc
+    ${RUNTIME_FEATURE_DIR}/aclgraph/tiny/stream_capture_tiny_stub.cc
+    ${RUNTIME_FEATURE_DIR}/jetty/jetty_stub.cc
+)
+
+set(libruntime_event_src_files_include_for_tiny
+    ${RUNTIME_API_DIR}/impl/api_impl_event_tiny_stub.cc
+)
+
+set(libruntime_api_src_files_exclude_for_tiny
+    ${RUNTIME_DIR}/src/runtime/api/api_c_snapshot.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_standard_soc.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_soma.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_preload_task.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_dqs.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_david.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_uvm.cc
+)
+
+set(libruntime_api_src_files_include_for_tiny
+    ${RUNTIME_DIR}/src/runtime/api/api_c_tiny.cc
+    ${RUNTIME_DIR}/src/runtime/api/api_c_stub.cc
+)
+
+set(libruntime_common_src_files
+    ${RUNTIME_CORE_ENUM_DESC_SRC_FILES}
+    ${RUNTIME_CORE_DIR}/src/common/inner_thread_local.cpp
+    ${RUNTIME_DIR}/src/runtime/api/api.cc
+    ${RUNTIME_API_DIR}/impl/api_decorator.cc
+    ${RUNTIME_API_DIR}/impl/api_error.cc
+    ${RUNTIME_API_DIR}/impl/api_impl.cc
+    ${RUNTIME_API_DIR}/impl/api_impl_kernel_args.cc
+    ${RUNTIME_API_DIR}/impl/api_impl_memory.cc
+    ${RUNTIME_API_DIR}/impl/api_impl_mbuf.cc
+    ${RUNTIME_API_DIR}/impl/api_impl_esched.cc
+    ${RUNTIME_CORE_DIR}/src/launch/cond_stars.cc
+    ${RUNTIME_CORE_DIR}/src/launch/label_common.cc
+    ${RUNTIME_CORE_DIR}/src/launch/label_stars.cc
+    ${RUNTIME_CORE_DIR}/src/launch/cmo_barrier_common.cc
+    ${RUNTIME_CORE_DIR}/src/launch/cmo_barrier_stars.cc
+    ${RUNTIME_CORE_DIR}/src/uvm/uvm_callback.cc
+
+    # for V100
+    ${RUNTIME_API_DIR}/impl/api_impl_creator.cc
+    ${RUNTIME_API_DIR}/impl/v100/api_impl_creator_c.cc
+    ${RUNTIME_CORE_DIR}/src/device/ctrl_msg.cc
+    ${RUNTIME_CORE_DIR}/src/device/ctrl_sq.cc
+
+    ${RUNTIME_CORE_DIR}/src/device/device.cc
+    ${RUNTIME_CORE_DIR}/src/device/raw_device.cc
+    ${RUNTIME_CORE_DIR}/src/device/raw_device_res.cc
+    ${RUNTIME_CORE_DIR}/src/device/raw_device_adpt_comm.cc
+    ${RUNTIME_CORE_DIR}/src/device/dev_simt_stack_checker.cc
+    ${RUNTIME_DIR}/src/runtime/driver/driver.cc
+    ${RUNTIME_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${RUNTIME_CORE_DIR}/src/pool/bitmap.cc
+    ${RUNTIME_CORE_DIR}/src/pool/buffer_allocator.cc
+    ${RUNTIME_CORE_DIR}/src/pool/task_allocator.cc
+    ${RUNTIME_CORE_DIR}/src/pool/spm_pool.cc
+    ${RUNTIME_CORE_DIR}/src/pool/h2d_copy_mgr.cc
+    ${RUNTIME_CORE_DIR}/src/pool/memory_list.cc
+    ${RUNTIME_CORE_DIR}/src/pool/memory_pool.cc
+    ${RUNTIME_CORE_DIR}/src/pool/memory_pool_manager.cc
+    ${RUNTIME_FEATURE_DIR}/model/model.cc
+    ${RUNTIME_FEATURE_DIR}/model/model_rebuild.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/args/args_handle_allocator.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/args/para_convertor.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/v100/kernel.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/elf.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/kernel.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/module.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/program.cc
+    ${RUNTIME_CORE_DIR}/src/dfx/aicpu_dfx_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/program_common.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/kernel_utils.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/v100/program_plat.cc
+    ${RUNTIME_CORE_DIR}/src/launch/label.cc
+    ${RUNTIME_CORE_DIR}/src/event/event.cc
+    ${RUNTIME_CORE_DIR}/src/notify/notify.cc
+    ${RUNTIME_CORE_DIR}/src/engine/logger.cc
+    ${RUNTIME_CORE_DIR}/src/runtime.cc
+    ${RUNTIME_CORE_DIR}/src/runtime_v100/runtime_adapt.cc
+    ${RUNTIME_CORE_DIR}/src/plugin_manage/runtime_keeper.cc
+    ${RUNTIME_CORE_DIR}/src/utils/capability.cc
+    ${RUNTIME_CORE_DIR}/src/utils/osal.cc
+    ${RUNTIME_CORE_DIR}/src/engine/hwts/scheduler.cc
+    ${RUNTIME_CORE_DIR}/src/dfx/atrace_log.cc
+    ${RUNTIME_CORE_DIR}/src/dfx/fast_recover.cc
+    ${RUNTIME_CORE_DIR}/src/utils/subscribe.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/onlineprof.cc
+    ${RUNTIME_CORE_DIR}/src/ttlv/ttlv_decoder_utils.cc
+    ${RUNTIME_CORE_DIR}/src/ttlv/ttlv.cc
+    ${RUNTIME_CORE_DIR}/src/ttlv/ttlv_word_decoder.cc
+    ${RUNTIME_CORE_DIR}/src/ttlv/ttlv_sentence_decoder.cc
+    ${RUNTIME_CORE_DIR}/src/ttlv/ttlv_paragraph_decoder.cc
+    ${RUNTIME_CORE_DIR}/src/device/device_error_core_proc.cc
+    ${RUNTIME_CORE_DIR}/src/device/device_error_proc.cc
+    ${RUNTIME_CORE_DIR}/src/device/v100/device_error_proc.cc
+    ${RUNTIME_CORE_DIR}/src/device/device_sq_cq_pool.cc
+    ${RUNTIME_CORE_DIR}/src/device/sq_addr_memory_pool.cc
+    ${RUNTIME_CORE_DIR}/src/utils/aicpu_scheduler_agent.cc
+    ${RUNTIME_CORE_DIR}/src/device/device_msg_handler.cc
+    ${RUNTIME_CORE_DIR}/src/device/aicpu_err_msg.cc
+    ${RUNTIME_CORE_DIR}/src/aicpu_timeout/aicpu_timeout_manager.cc
+    ${RUNTIME_CORE_DIR}/src/aicpu_timeout/aicpu_timeout_control.cc
+    ${RUNTIME_CORE_DIR}/src/device/ini_parse_utils.cc
+    ${RUNTIME_CORE_DIR}/src/stream/dvpp_grp.cc
+    ${RUNTIME_CORE_DIR}/src/engine/engine.cc
+    ${RUNTIME_CORE_DIR}/src/engine/hwts/package_rebuilder.cc
+    ${RUNTIME_CORE_DIR}/src/engine/stars/stars_engine.cc
+    ${RUNTIME_CORE_DIR}/src/task/ctrl_res_pool.cpp
+    ${RUNTIME_CORE_DIR}/src/task/host_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/stars_cond_isa_helper.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/cond_op/stars_cond_isa_construct_common.cc
+    ${RUNTIME_CORE_DIR}/src/task/v100/stub_task.cc
+    ${RUNTIME_CORE_DIR}/src/memory/mem_type.cc
+    ${libruntime_v100_task_src_files}
+    ${libruntime_api_src_files}
+    ${libruntime_context_src_files}
+    ${libruntime_stream_src_files}
+    ${libruntime_profile_src_files}
+    ${libruntime_arg_loader_files}
+    ${libruntime_callback_files}
+    ${common_src_files}
+    $<$<STREQUAL:${PRODUCT},ascend031>:${libruntime_api_src_files_include_for_tiny}>
+    $<$<STREQUAL:${PRODUCT},ascend031>:${libruntime_src_files_include_for_tiny}>
+    $<$<STREQUAL:${PRODUCT},ascend031>:${libruntime_event_src_files_include_for_tiny}>
+)
+
+set(libruntime_dev_info_src_files
+)
+
+set(libruntime_aclrt_impl_src_files
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/acl.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/log.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/device.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/dfx.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/event.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/stream.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/memory.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/context.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/callback.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/group.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/kernel.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/notify.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/label.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/acl_rt_impl_base.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/model_ri.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/data_buffer.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/allocator.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/callback_api.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/init_callback_manager.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/snapshot.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/types/fp16.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/types/fp16_impl.cpp
+    ${RUNTIME_DIR}/src/acl/common/log_inner.cpp
+    ${RUNTIME_DIR}/src/acl/common/prof_reporter.cpp
+    ${RUNTIME_DIR}/src/acl/common/resource_statistics.cpp
+    ${RUNTIME_DIR}/src/acl/common/json_parser.cpp
+    ${RUNTIME_DIR}/src/acl/utils/string_utils.cpp
+    ${RUNTIME_DIR}/src/acl/utils/cann_info_utils.cpp
+    ${RUNTIME_DIR}/src/acl/utils/hash_utils.cpp
+    ${RUNTIME_DIR}/src/acl/utils/file_utils.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/toolchain/dump.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/toolchain/profiling.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/toolchain/profiling_manager.cpp
+    ${RUNTIME_DIR}/src/acl/aclrt_impl/toolchain/dump_shim.cpp
+)
+
+set_source_files_properties(${libruntime_aclrt_impl_src_files}
+    PROPERTIES
+        COMPILE_OPTIONS "-O2;-ftrapv"
+        COMPILE_DEFINITIONS "OS_TYPE=0;FUNC_VISIBILITY"
+)
+
+#------------------------- runtime v100 -------------------------
+set(libruntime_v100_src_files
+    ${RUNTIME_CORE_ENUM_DESC_SRC_FILES}
+    ${RUNTIME_CORE_DIR}/src/common/inner_thread_local.cpp
+    ${RUNTIME_API_DIR}/impl/api_decorator.cc
+    ${RUNTIME_API_DIR}/impl/api_impl.cc
+    ${RUNTIME_API_DIR}/impl/api_impl_kernel_args.cc
+    ${RUNTIME_API_DIR}/impl/api_impl_memory.cc
+    ${RUNTIME_API_DIR}/impl/api_error.cc
+    ${RUNTIME_API_DIR}/impl/api_impl_creator.cc
+    ${RUNTIME_API_DIR}/impl/api_impl_mbuf.cc
+    ${RUNTIME_API_DIR}/impl/api_impl_esched.cc
+    ${RUNTIME_CORE_DIR}/src/dfx/kernel_dfx_info.cc
+    ${RUNTIME_CORE_DIR}/src/dfx/aicpu_dfx_tiny_stub.cc
+    ${RUNTIME_CORE_DIR}/src/uvm/uvm_callback.cc
+
+    # for V100
+    ${RUNTIME_API_DIR}/impl/v100/api_impl_creator_c.cc
+
+    ${RUNTIME_CORE_DIR}/src/device/device.cc
+    ${RUNTIME_CORE_DIR}/src/device/raw_device.cc
+    ${RUNTIME_CORE_DIR}/src/device/raw_device_res.cc
+    ${RUNTIME_CORE_DIR}/src/device/raw_device_adpt_comm.cc
+    ${RUNTIME_CORE_DIR}/src/device/dev_simt_stack_checker.cc
+    ${RUNTIME_CORE_DIR}/src/device/ctrl_msg.cc
+    ${RUNTIME_CORE_DIR}/src/device/ctrl_sq.cc
+    ${RUNTIME_DIR}/src/runtime/driver/driver.cc
+    ${RUNTIME_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${RUNTIME_CORE_DIR}/src/pool/bitmap.cc
+    ${RUNTIME_CORE_DIR}/src/pool/buffer_allocator.cc
+    ${RUNTIME_CORE_DIR}/src/pool/task_allocator.cc
+    ${RUNTIME_CORE_DIR}/src/pool/spm_pool.cc
+    ${RUNTIME_CORE_DIR}/src/pool/h2d_copy_mgr.cc
+    ${RUNTIME_CORE_DIR}/src/pool/memory_list.cc
+    ${RUNTIME_CORE_DIR}/src/pool/memory_pool.cc
+    ${RUNTIME_CORE_DIR}/src/pool/memory_pool_manager.cc
+    ${RUNTIME_FEATURE_DIR}/model/model.cc
+    ${RUNTIME_FEATURE_DIR}/model/model_rebuild.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/args/args_handle_allocator.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/args/para_convertor.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/v100/kernel.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/elf.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/kernel.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/module.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/program.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/program_common.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/kernel_utils.cc
+    ${RUNTIME_CORE_DIR}/src/launch/memory_common.cc
+    ${RUNTIME_CORE_DIR}/src/launch/memcpy_stars.cc
+    ${RUNTIME_CORE_DIR}/src/kernel/v100/program_plat.cc
+    ${RUNTIME_CORE_DIR}/src/launch/cmo_barrier_common.cc
+    ${RUNTIME_CORE_DIR}/src/launch/cmo_barrier_stars.cc
+    ${RUNTIME_CORE_DIR}/src/launch/memcpy_stars.cc
+    ${RUNTIME_CORE_DIR}/src/launch/memory_stars.cc
+    ${RUNTIME_CORE_DIR}/src/launch/label.cc
+    ${RUNTIME_CORE_DIR}/src/launch/cond_stars.cc
+    ${RUNTIME_CORE_DIR}/src/launch/label_common.cc
+    ${RUNTIME_CORE_DIR}/src/launch/label_stars.cc
+    ${RUNTIME_CORE_DIR}/src/launch/aix_stars.cc
+    ${RUNTIME_CORE_DIR}/src/launch/aicpu_stars.cc
+    ${RUNTIME_CORE_DIR}/src/launch/dvpp_stars.cc
+    ${RUNTIME_CORE_DIR}/src/event/event.cc
+    ${RUNTIME_CORE_DIR}/src/notify/notify.cc
+    ${RUNTIME_CORE_DIR}/src/engine/logger.cc
+    ${RUNTIME_CORE_DIR}/src/runtime.cc
+    ${RUNTIME_CORE_DIR}/src/runtime_v100/runtime_adapt.cc
+    ${RUNTIME_CORE_DIR}/src/utils/capability.cc
+    ${RUNTIME_CORE_DIR}/src/utils/osal.cc
+    ${RUNTIME_CORE_DIR}/src/engine/hwts/scheduler.cc
+    ${RUNTIME_CORE_DIR}/src/dfx/atrace_log.cc
+    ${RUNTIME_CORE_DIR}/src/dfx/fast_recover.cc
+    ${RUNTIME_CORE_DIR}/src/utils/subscribe.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/onlineprof.cc
+    ${RUNTIME_CORE_DIR}/src/ttlv/ttlv_decoder_utils.cc
+    ${RUNTIME_CORE_DIR}/src/ttlv/ttlv.cc
+    ${RUNTIME_CORE_DIR}/src/ttlv/ttlv_word_decoder.cc
+    ${RUNTIME_CORE_DIR}/src/ttlv/ttlv_sentence_decoder.cc
+    ${RUNTIME_CORE_DIR}/src/ttlv/ttlv_paragraph_decoder.cc
+    ${RUNTIME_CORE_DIR}/src/device/device_error_core_proc.cc
+    ${RUNTIME_CORE_DIR}/src/device/device_error_proc.cc
+    ${RUNTIME_CORE_DIR}/src/device/v100/device_error_proc.cc
+    ${RUNTIME_CORE_DIR}/src/device/device_sq_cq_pool.cc
+    ${RUNTIME_CORE_DIR}/src/device/sq_addr_memory_pool.cc
+    ${RUNTIME_CORE_DIR}/src/utils/aicpu_scheduler_agent.cc
+    ${RUNTIME_CORE_DIR}/src/device/device_msg_handler.cc
+    ${RUNTIME_CORE_DIR}/src/device/aicpu_err_msg.cc
+    ${RUNTIME_CORE_DIR}/src/aicpu_timeout/aicpu_timeout_manager.cc
+    ${RUNTIME_CORE_DIR}/src/aicpu_timeout/aicpu_timeout_control.cc
+    ${RUNTIME_CORE_DIR}/src/device/ini_parse_utils.cc
+    ${RUNTIME_CORE_DIR}/src/stream/dvpp_grp.cc
+    ${RUNTIME_CORE_DIR}/src/engine/engine.cc
+    ${RUNTIME_CORE_DIR}/src/engine/hwts/package_rebuilder.cc
+    ${RUNTIME_CORE_DIR}/src/engine/stars/stars_engine.cc
+    ${RUNTIME_CORE_DIR}/src/task/ctrl_res_pool.cpp
+    ${RUNTIME_CORE_DIR}/src/task/host_task.cc
+    ${RUNTIME_CORE_DIR}/src/task/stars_cond_isa_helper.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_info/cond_op/stars_cond_isa_construct_common.cc
+    ${RUNTIME_CORE_DIR}/src/task/task_fail_callback_manager.cc
+    ${RUNTIME_CORE_DIR}/src/task/v100/stub_task.cc
+    ${RUNTIME_CORE_DIR}/src/memory/mem_type.cc
+    ${RUNTIME_FEATURE_DIR}/soma/stream_mem_pool.cc
+    ${libruntime_v100_task_src_files}
+    ${libruntime_context_src_files}
+    ${libruntime_stream_src_files}
+    ${RUNTIME_CORE_DIR}/src/profiler/profiler.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/api_profile_decorator.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/api_profile_log_decorator.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/profile_log_record.cc
+    ${RUNTIME_CORE_DIR}/src/profiler/npu_driver_record.cc
+    ${libruntime_arg_loader_files}
+    ${RUNTIME_CORE_DIR}/src/device/device_state_callback_manager.cc
+    ${RUNTIME_CORE_DIR}/src/stream/stream_state_callback_manager.cc
+     ${RUNTIME_CORE_DIR}/src/event/event_state_callback_manager.cc
+    ${RUNTIME_CORE_DIR}/src/plugin_manage/v100/plugin_old_arch.cc
+    ${RUNTIME_CORE_DIR}/src/task/v200/task_david_stub.cc
+    ${libruntime_dev_info_src_files}
+    ${libruntime_src_files_include_for_tiny}
+    ${libruntime_event_src_files_include_for_tiny}
+)
+
+set(RUNTIME_INC_DIR_TINY
+    ${RUNTIME_DIR}/src/runtime/core/inc
+    ${RUNTIME_DIR}/src/runtime/core/inc/args
+    ${RUNTIME_DIR}/src/runtime/core/inc/arg_loader
+    ${RUNTIME_DIR}/src/runtime/inc/common
+    ${RUNTIME_DIR}/src/runtime/core/inc/common
+    ${RUNTIME_DIR}/src/runtime/core/inc/cond_handle
+    ${RUNTIME_DIR}/src/runtime/core/inc/context
+    ${RUNTIME_DIR}/src/runtime/core/inc/device
+    ${RUNTIME_DIR}/src/runtime/core/inc/dfx
+    ${RUNTIME_DIR}/src/runtime/core/inc/drv
+    ${RUNTIME_DIR}/src/runtime/core/inc/engine
+    ${RUNTIME_DIR}/src/runtime/core/inc/engine/hwts
+    ${RUNTIME_DIR}/src/runtime/core/inc/event
+    ${RUNTIME_DIR}/src/runtime/core/inc/kernel
+    ${RUNTIME_DIR}/src/runtime/core/inc/launch
+    ${RUNTIME_DIR}/src/runtime/core/inc/model
+    ${RUNTIME_DIR}/src/runtime/feature/jetty
+    ${RUNTIME_DIR}/src/runtime/core/inc/notify
+    ${RUNTIME_DIR}/src/runtime/core/inc/profiler
+    ${RUNTIME_DIR}/src/runtime/core/inc/soc
+    ${RUNTIME_DIR}/src/runtime/core/inc/spec
+    ${RUNTIME_DIR}/src/runtime/core/inc/sqe
+    ${RUNTIME_DIR}/src/runtime/inc/device
+    ${RUNTIME_DIR}/src/runtime/inc/sqe
+    ${RUNTIME_DIR}/src/runtime/core/inc/sqe/v100
+    ${RUNTIME_DIR}/src/runtime/core/inc/stars
+    ${RUNTIME_DIR}/src/runtime/core/inc/stream
+    ${RUNTIME_DIR}/src/runtime/core/inc/task
+    ${RUNTIME_DIR}/src/runtime/core/inc/utils
+    ${RUNTIME_DIR}/src/runtime/api
+    ${RUNTIME_API_DIR}/impl
+    ${RUNTIME_CORE_DIR}/src/engine
+    ${RUNTIME_CORE_DIR}/src/engine/hwts
+    ${RUNTIME_CORE_DIR}/src/engine/stars
+    ${RUNTIME_CORE_DIR}/src/stream
+    ${RUNTIME_CORE_DIR}/src/task/inc
+    ${RUNTIME_FEATURE_DIR}/ffts
+    ${RUNTIME_CORE_DIR}/src/profiler
+    ${RUNTIME_CORE_DIR}/src/pool
+    ${RUNTIME_CORE_DIR}/src/ttlv
+    ${RUNTIME_CORE_DIR}/src/device
+    ${RUNTIME_CORE_DIR}/src/aicpu_timeout
+    ${RUNTIME_DIR}/src/runtime/driver
+    ${RUNTIME_CORE_DIR}/src/common
+    ${RUNTIME_FEATURE_DIR}/ffts
+    ${RUNTIME_CORE_DIR}/src/plugin_manage
+    ${RUNTIME_CORE_DIR}/src/kernel
+    ${RUNTIME_CORE_DIR}/src/kernel/arg_loader
+    ${RUNTIME_CORE_DIR}/src/kernel/args
+    ${RUNTIME_CORE_DIR}/inc_c
+    ${RUNTIME_FEATURE_DIR}/ccu
+    ${RUNTIME_CORE_DIR}/src/memory
+    ${RUNTIME_FEATURE_DIR}/soma
+    ${RUNTIME_FEATURE_DIR}/cntnotify
+    ${RUNTIME_FEATURE_DIR}/snapshot
+    ${RUNTIME_FEATURE_DIR}/aclgraph
+    ${RUNTIME_FEATURE_DIR}/ccu
+    ${RUNTIME_FEATURE_DIR}/xpu
+    ${RUNTIME_CORE_DIR}/src/uvm
+    ${RUNTIME_CORE_DIR}/src/event
+    ${RUNTIME_DIR}/src/runtime/core/inc/cond_isa/v100
+    ## not open
+    ${RUNTIME_DIR}/src/runtime/core/inc/dqs
+    ${RUNTIME_DIR}/src/runtime/core/inc/sqe/v200
+    ${RUNTIME_DIR}/src/runtime/core/inc/sqe/v200_base
+    ${RUNTIME_DIR}/src/inc
+    ${RUNTIME_DIR}/pkg_inc/tsd/
+    ${RUNTIME_DIR}/pkg_inc/aicpu_sched/
+    ${RUNTIME_DIR}/pkg_inc/aicpu_sched/common
+    ${RUNTIME_DIR}/src/queue_schedule/dgwclient/inc/
+    ${RUNTIME_DIR}/src/dfx/error_manager
+    ${LIBC_SEC_HEADER}
+    ${RUNTIME_DIR}/src/runtime/dfx/include/trace/awatchdog/
+    ${RUNTIME_DIR}/pkg_inc/driver
+    ${RUNTIME_DIR}/include/trace/utrace
+    ${RUNTIME_DIR}/pkg_inc
+    ${RUNTIME_DIR}/include/external/acl
+    ${RUNTIME_DIR}/include/trace/awatchdog
+    ${RUNTIME_DIR}/include
+    ${RUNTIME_DIR}/src/dfx/adump/inc/metadef
+    ${RUNTIME_DIR}/src/platform
+)
+
+#------------------------- runtime common -------------------------
+macro(add_runtime_common_library target_name)
+    add_library(${target_name} SHARED
+        ${common_src_files}
+    )
+
+    target_compile_definitions(${target_name} PRIVATE
+        -DSTATIC_RT_LIB=0
+        -DRUNTIME_API=0
+    )
+
+    target_compile_options(${target_name} PRIVATE
+        -O3
+        -fno-common
+        -fno-strict-aliasing
+        -Werror
+        -Werror=missing-field-initializers
+        -Wextra
+        $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:-Wfloat-equal>
+    )
+
+    target_include_directories(${target_name} PRIVATE
+        ${RUNTIME_INC_DIR_TINY}
+        ${RUNTIME_DIR}/include
+    )
+
+    target_link_libraries(${target_name}
+        PRIVATE
+            $<BUILD_INTERFACE:intf_pub>
+            $<BUILD_INTERFACE:runtime_warning_options>
+            $<BUILD_INTERFACE:mmpa_headers>
+            $<BUILD_INTERFACE:msprof_headers>
+            $<BUILD_INTERFACE:slog_headers>
+            $<BUILD_INTERFACE:npu_runtime_headers>
+            $<BUILD_INTERFACE:npu_runtime_inner_headers>
+            $<BUILD_INTERFACE:awatchdog_headers>
+            $<BUILD_INTERFACE:platform_headers>
+            $<BUILD_INTERFACE:atrace_headers>
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:dl>
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:rt>
+            -Wl,--no-as-needed
+            mmpa
+            c_sec
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:profapi_share>
+            # error_manager仅在windows形态暂不需要
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:error_manager>
+            # ascend_hal仅在windows形态需要,小海思形态不需要链接ascend_hal，其他形态均链接ascend_hal_stub
+            $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:ascend_hal>
+            $<$<AND:$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>,$<NOT:$<STREQUAL:${ENABLE_TSD},true>>>:ascend_hal_stub>
+            awatchdog_share
+            unified_dlog
+            $<$<AND:$<NOT:$<STREQUAL:${PRODUCT},ascend031>>,$<NOT:$<STREQUAL:${PRODUCT},ascend610>>,$<NOT:$<STREQUAL:${PRODUCT},ascend610Lite>>>:atrace_share>
+            json
+            platform
+            -Wl,--as-needed
+            -Wl,-Bsymbolic
+        PUBLIC
+            npu_runtime_headers
+    )
+    if("${ENABLE_TSD}" STREQUAL "true")
+        if("${TARGET_LINUX_DISTRIBUTOR_ID}" STREQUAL lhisilinux)
+            if("${TARGET_LINUX_DISTRIBUTOR_RELEASE}" STREQUAL 100)
+                target_link_libraries(${target_name} PRIVATE -L${RUNTIME_DIR}/vendor/sdk/hi3796/drv)
+            elseif("${TARGET_LINUX_DISTRIBUTOR_RELEASE}" STREQUAL 200)
+                target_link_libraries(${target_name} PRIVATE -L${RUNTIME_DIR}/vendor/sdk/hi3559dv100/drv)
+            endif()
+        endif()
+
+        target_link_libraries(${target_name} PRIVATE drvdevdrv aicpu_scheduler_so)
+    endif()
+
+    if(ENABLE_ASAN)
+        target_compile_definitions(${target_name} PRIVATE
+                __RT_ENABLE_ASAN__)
+    endif()
+endmacro()
+
+#------------------------- runtime only api -------------------------
+macro(add_runtime_api_library target_name)
+    if(${TARGET_SYSTEM_NAME} STREQUAL "Windows")
+        add_library(${target_name} SHARED
+            ${libruntime_api_src_files}
+            $<$<NOT:$<STREQUAL:${PRODUCT},ascend031>>:${libruntime_api_src_files_exclude_for_tiny}>
+            $<$<STREQUAL:${PRODUCT},ascend031>:${libruntime_api_src_files_include_for_tiny}>
+            ${RUNTIME_DIR}/src/runtime/api/api.cc
+            ${RUNTIME_CORE_DIR}/src/profiler/prof_map_ge_model_device.cc
+            ${RUNTIME_CORE_DIR}/src/plugin_manage/runtime_keeper.cc
+            ${libruntime_aclrt_impl_src_files}
+            $<TARGET_OBJECTS:profapi_stub>
+            $<$<STREQUAL:${PRODUCT},ascend031>:$<TARGET_OBJECTS:runtime_platform_tiny>>
+        )
+    else()
+        add_library(${target_name} SHARED
+            ${libruntime_api_src_files}
+            $<$<NOT:$<STREQUAL:${PRODUCT},ascend031>>:${libruntime_api_src_files_exclude_for_tiny}>
+            $<$<STREQUAL:${PRODUCT},ascend031>:${libruntime_api_src_files_include_for_tiny}>
+            ${RUNTIME_DIR}/src/runtime/api/api.cc
+            ${RUNTIME_CORE_DIR}/src/profiler/prof_map_ge_model_device.cc
+            ${RUNTIME_CORE_DIR}/src/plugin_manage/runtime_keeper.cc
+            ${libruntime_aclrt_impl_src_files}
+            $<$<STREQUAL:${PRODUCT},ascend031>:$<TARGET_OBJECTS:runtime_platform_tiny>>
+        )
+    endif()
+
+    target_compile_definitions(${target_name} PRIVATE
+        -DSTATIC_RT_LIB=0  # set 1 when not split so
+        -DRUNTIME_API=1  # set 1 when split so and in libruntime.so
+    )
+
+    set_target_properties(${target_name}
+        PROPERTIES
+        WINDOWS_EXPORT_ALL_SYMBOLS TRUE
+        OUTPUT_NAME $<IF:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>,lib${target_name},${target_name}>
+    )
+
+    target_compile_options(${target_name} PRIVATE
+        -O3
+        -fvisibility=hidden
+        -fno-common
+        -fno-strict-aliasing
+        -Werror
+        -Werror=missing-field-initializers
+        -Wextra
+        $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:-Wfloat-equal>
+    )
+
+    target_include_directories(${target_name} PRIVATE
+        ${RUNTIME_INC_DIR_TINY}
+        ${RUNTIME_DIR}/include
+        ${RUNTIME_DIR}/src/acl/aclrt_impl
+        ${RUNTIME_DIR}/src/acl/common
+        ${RUNTIME_DIR}/src/acl/utils
+        ${RUNTIME_DIR}/src/acl
+        ${RUNTIME_DIR}/include/external
+        ${RUNTIME_DIR}/pkg_inc
+        ${RUNTIME_DIR}/pkg_inc/runtime
+        ${RUNTIME_DIR}/pkg_inc/runtime/runtime
+        ${RUNTIME_DIR}/pkg_inc/dump
+        ${RUNTIME_DIR}/src/dfx/error_manager
+        ${RUNTIME_DIR}/src/dfx/adump/inc/metadef/external
+        ${RUNTIME_DIR}/include/dfx
+    )
+
+    target_link_libraries(${target_name}
+        PRIVATE
+            $<BUILD_INTERFACE:intf_pub>
+            $<BUILD_INTERFACE:runtime_warning_options>
+            $<BUILD_INTERFACE:platform_headers>
+            $<BUILD_INTERFACE:mmpa_headers>
+            $<BUILD_INTERFACE:msprof_headers>
+            $<BUILD_INTERFACE:slog_headers>
+            $<BUILD_INTERFACE:awatchdog_headers>
+            $<BUILD_INTERFACE:npu_runtime_headers>
+            $<BUILD_INTERFACE:npu_runtime_inner_headers>
+            $<BUILD_INTERFACE:atrace_headers>
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:dl>
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:rt>
+            -Wl,--no-as-needed
+            mmpa
+            c_sec
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:profapi_share>
+            # error_manager仅在windows形态暂不需要
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:error_manager>
+            # ascend_hal仅在windows形态需要,小海思形态不需要链接ascend_hal，其他形态均链接ascend_hal_stub
+            $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:ascend_hal>
+            $<$<AND:$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>,$<NOT:$<STREQUAL:${ENABLE_TSD},true>>>:ascend_hal_stub>
+            awatchdog_share
+            unified_dlog
+            $<$<AND:$<NOT:$<STREQUAL:${PRODUCT},ascend031>>,$<NOT:$<STREQUAL:${PRODUCT},ascend610>>,$<NOT:$<STREQUAL:${PRODUCT},ascend610Lite>>>:atrace_share>
+            json
+            platform
+            runtime_common
+            -Wl,--as-needed
+            -Wl,-Bsymbolic
+        PUBLIC
+            npu_runtime_headers
+    )
+    if("${ENABLE_TSD}" STREQUAL "true")
+        if("${TARGET_LINUX_DISTRIBUTOR_ID}" STREQUAL lhisilinux)
+            if("${TARGET_LINUX_DISTRIBUTOR_RELEASE}" STREQUAL 100)
+                target_link_libraries(${target_name} PRIVATE -L${RUNTIME_DIR}/vendor/sdk/hi3796/drv)
+            elseif("${TARGET_LINUX_DISTRIBUTOR_RELEASE}" STREQUAL 200)
+                target_link_libraries(${target_name} PRIVATE -L${RUNTIME_DIR}/vendor/sdk/hi3559dv100/drv)
+            endif()
+        endif()
+
+        target_link_libraries(${target_name} PRIVATE drvdevdrv aicpu_scheduler_so)
+    endif()
+
+    if("${hostchip}" STREQUAL "hi3559a")
+        target_compile_definitions(${target_name} PRIVATE
+                __RT_CFG_HOST_CHIP_HI3559A__)
+    endif()
+
+    if(ENABLE_ASAN)
+        target_compile_definitions(${target_name} PRIVATE
+                __RT_ENABLE_ASAN__)
+    endif()
+endmacro()
+
+
+macro(add_runtime_v100_library target_name)
+    add_library(${target_name} SHARED
+        ${libruntime_v100_src_files}
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_mem.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_queue.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_esched.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_res.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_tiny.cpp
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_dcache_lock_common.cpp
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    )
+
+    target_compile_definitions(${target_name} PRIVATE
+        -DSTATIC_RT_LIB=0
+        -DRUNTIME_API=0
+    )
+
+    target_compile_options(${target_name} PRIVATE
+        -O3
+        -fvisibility=hidden
+        -fno-common
+        -fno-strict-aliasing
+        $<$<STREQUAL:${CMAKE_CXX_COMPILER_VERSION},7.3.0>:-Werror>
+        -Werror=missing-field-initializers
+        $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:-Wextra>
+        $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:-Wfloat-equal>
+    )
+
+    target_include_directories(${target_name} PRIVATE
+        ${RUNTIME_INC_DIR_TINY}
+        ${RUNTIME_DIR}/include
+    )
+
+    target_link_libraries(${target_name}
+        PRIVATE
+            $<BUILD_INTERFACE:intf_pub>
+            $<BUILD_INTERFACE:runtime_warning_options>
+            $<BUILD_INTERFACE:mmpa_headers>
+            $<BUILD_INTERFACE:msprof_headers>
+            $<BUILD_INTERFACE:slog_headers>
+            $<BUILD_INTERFACE:npu_runtime_headers>
+            $<BUILD_INTERFACE:npu_runtime_inner_headers>
+            $<BUILD_INTERFACE:atrace_headers>
+            $<BUILD_INTERFACE:awatchdog_headers>
+            $<BUILD_INTERFACE:platform_headers>
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:dl>
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:rt>
+            -Wl,--no-as-needed
+            mmpa
+            c_sec
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:profapi_share>
+            # error_manager仅在windows形态暂不需要
+            $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:error_manager>
+            # ascend_hal仅在windows形态需要,小海思形态不需要链接ascend_hal，其他形态均链接ascend_hal_stub
+            $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:ascend_hal>
+            $<$<AND:$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>,$<NOT:$<STREQUAL:${ENABLE_TSD},true>>>:ascend_hal_stub>
+            awatchdog_share
+            unified_dlog
+            $<$<AND:$<NOT:$<STREQUAL:${PRODUCT},ascend031>>,$<NOT:$<STREQUAL:${PRODUCT},ascend610>>,$<NOT:$<STREQUAL:${PRODUCT},ascend610Lite>>>:atrace_share>
+            json
+            platform
+            runtime_common
+            -Wl,--as-needed
+            -Wl,-Bsymbolic
+        PUBLIC
+            npu_runtime_headers
+    )
+    if("${ENABLE_TSD}" STREQUAL "true")
+        if("${TARGET_LINUX_DISTRIBUTOR_ID}" STREQUAL lhisilinux)
+            if("${TARGET_LINUX_DISTRIBUTOR_RELEASE}" STREQUAL 100)
+                target_link_libraries(${target_name} PRIVATE -L${RUNTIME_DIR}/vendor/sdk/hi3796/drv)
+            elseif("${TARGET_LINUX_DISTRIBUTOR_RELEASE}" STREQUAL 200)
+                target_link_libraries(${target_name} PRIVATE -L${RUNTIME_DIR}/vendor/sdk/hi3559dv100/drv)
+            endif()
+        endif()
+
+        target_link_libraries(${target_name} PRIVATE drvdevdrv aicpu_scheduler_so)
+    endif()
+
+    if(ENABLE_ASAN)
+        target_compile_definitions(${target_name} PRIVATE
+                __RT_ENABLE_ASAN__)
+    endif()
+endmacro()
+
+add_runtime_api_library(runtime)
+add_runtime_common_library(runtime_common)
+add_runtime_v100_library(runtime_v100)
+add_dependencies(runtime runtime_v100)
+
+
+if(${TARGET_SYSTEM_NAME} STREQUAL "Windows")
+    add_library(static_runtime STATIC
+        ${libruntime_common_src_files}
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_win.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_tiny.cpp
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_dcache_lock_common.cpp
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+        $<TARGET_OBJECTS:profapi_stub>
+        $<$<STREQUAL:${PRODUCT},ascend031>:$<TARGET_OBJECTS:runtime_platform_tiny>>
+    )
+else()
+    add_library(static_runtime STATIC
+        ${libruntime_common_src_files}
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_mem.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_queue.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_esched.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_res.cc
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_tiny.cpp
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_dcache_lock_common.cpp
+        ${RUNTIME_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+        $<$<STREQUAL:${PRODUCT},ascend031>:$<TARGET_OBJECTS:runtime_platform_tiny>>
+    )
+endif()
+
+target_compile_definitions(static_runtime PRIVATE
+    -DSTATIC_RT_LIB=1
+    -DRUNTIME_API=0
+)
+
+set_target_properties(static_runtime
+    PROPERTIES
+    WINDOWS_EXPORT_ALL_SYMBOLS TRUE
+    OUTPUT_NAME $<IF:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>,libruntime,runtime>
+)
+
+target_compile_options(static_runtime PRIVATE
+        -O3
+        -fvisibility=hidden
+        -fno-common
+        -fno-strict-aliasing
+        -ffunction-sections
+        -fdata-sections
+        $<$<STREQUAL:${CMAKE_CXX_COMPILER_VERSION},7.3.0>:-Werror>
+        -Werror=missing-field-initializers
+        $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:-Wextra>
+    )
+
+target_include_directories(static_runtime PRIVATE
+    ${RUNTIME_INC_DIR_TINY}
+    ${RUNTIME_DIR}/include
+)
+
+if("${ENABLE_TSD}" STREQUAL "true")
+    if("${TARGET_LINUX_DISTRIBUTOR_ID}" STREQUAL lhisilinux)
+        if("${TARGET_LINUX_DISTRIBUTOR_RELEASE}" STREQUAL 100)
+            target_link_libraries(static_runtime PRIVATE -L${RUNTIME_DIR}/vendor/sdk/hi3796/drv)
+        elseif("${TARGET_LINUX_DISTRIBUTOR_RELEASE}" STREQUAL 200)
+            target_link_libraries(static_runtime PRIVATE -L${RUNTIME_DIR}/vendor/sdk/hi3559dv100/drv)
+        endif()
+    endif()
+
+    target_link_libraries(static_runtime PRIVATE drvdevdrv aicpu_scheduler_so)
+endif()
+
+if("${hostchip}" STREQUAL "hi3559a")
+    target_compile_definitions(static_runtime PRIVATE
+            __RT_CFG_HOST_CHIP_HI3559A__)
+endif()
+
+target_link_libraries(static_runtime
+    PRIVATE
+        $<BUILD_INTERFACE:intf_pub>
+        $<BUILD_INTERFACE:runtime_warning_options>
+        $<BUILD_INTERFACE:mmpa_headers>
+        $<BUILD_INTERFACE:msprof_headers>
+        $<BUILD_INTERFACE:slog_headers>
+        $<BUILD_INTERFACE:tsch_headers>
+        $<BUILD_INTERFACE:npu_runtime_headers>
+        $<BUILD_INTERFACE:npu_runtime_inner_headers>
+        $<BUILD_INTERFACE:atrace_headers>
+        $<BUILD_INTERFACE:awatchdog_headers>
+        $<BUILD_INTERFACE:platform_headers>
+        $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:dl>
+        $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:rt>
+        -Wl,--no-as-needed
+        mmpa
+        c_sec
+        $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:profapi_share>
+        # error_manager仅在windows形态暂不需要
+        $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>:error_manager>
+        # ascend_hal仅在windows形态需要,小海思形态不需要链接ascend_hal，其他形态均链接ascend_hal_stub
+        $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:ascend_hal>
+        $<$<AND:$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>>,$<NOT:$<STREQUAL:${ENABLE_TSD},true>>>:ascend_hal_stub>
+        unified_dlog
+        json
+        -Wl,--as-needed
+    PUBLIC
+        json
+        npu_runtime_headers
+)
+
+install(TARGETS static_runtime
+    ARCHIVE DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL
+)
+
+install(TARGETS runtime DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL)
+install(TARGETS runtime_common DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL)
+install(TARGETS runtime_v100 DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL)

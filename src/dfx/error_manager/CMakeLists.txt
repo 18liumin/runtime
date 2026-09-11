@@ -9,13 +9,15 @@
 
 cmake_minimum_required(VERSION 3.14.1)
 
-include(${BASE_DIR}/cmake/common_funcs.cmake)
+include(${RUNTIME_DIR}/cmake/common_funcs.cmake)
 
 set(ERRMGR_DIR ${CMAKE_CURRENT_LIST_DIR})
 
 set(SRC_LIST
     "error_manager.cc"
 )
+
+include(error_manager_headers.cmake)
 
 ############ liberror_manager.so ############
 add_library(error_manager SHARED ${SRC_LIST})
@@ -28,14 +30,12 @@ target_compile_options(error_manager PRIVATE
 
 target_include_directories(error_manager PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
-    ${LIBC_SEC_HEADER}
-    ${BASE_DIR}/include/log
-    ${BASE_DIR}/include/dfx
 )
 
-target_link_libraries(error_manager
-    PRIVATE
+target_link_libraries(error_manager PRIVATE
         $<BUILD_INTERFACE:intf_pub>
+        $<BUILD_INTERFACE:c_sec_headers>
+        $<BUILD_INTERFACE:slog_headers>
         static_mmpa
         -Wl,--no-as-needed
         c_sec
@@ -44,6 +44,8 @@ target_link_libraries(error_manager
         json
         $<$<NOT:$<STREQUAL:${TARGET_SYSTEM_NAME},Android>>:-lrt>
         -ldl
+    PUBLIC
+        $<BUILD_INTERFACE:error_manager_headers>
 )
 
 set_target_properties(error_manager PROPERTIES
@@ -79,8 +81,8 @@ add_custom_command(
     OUTPUT ${STUB_SRC_LIST}
     COMMAND echo "Generating stub files."
             && ${RUNTIME_PYTHON} ${ERRMGR_DIR}/stub/gen_stubapi.py ${ERRMGR_DIR} ${CMAKE_CURRENT_BINARY_DIR}
-            && ${RUNTIME_PYTHON} ${ERRMGR_DIR}/stub/gen_stubapi.py ${BASE_DIR}/include/dfx ${CMAKE_CURRENT_BINARY_DIR}
-            && ${RUNTIME_PYTHON} ${ERRMGR_DIR}/stub/gen_stubapi.py ${BASE_DIR}/pkg_inc ${CMAKE_CURRENT_BINARY_DIR}
+            && ${RUNTIME_PYTHON} ${ERRMGR_DIR}/stub/gen_stubapi.py ${RUNTIME_DIR}/include/dfx ${CMAKE_CURRENT_BINARY_DIR}
+            && ${RUNTIME_PYTHON} ${ERRMGR_DIR}/stub/gen_stubapi.py ${RUNTIME_DIR}/pkg_inc ${CMAKE_CURRENT_BINARY_DIR}
             && echo "Generating stub files end."
 )
 
@@ -93,8 +95,8 @@ add_dependencies(stub_error_manager error_manager_stub)
 
 target_include_directories(stub_error_manager PRIVATE
     ${ERRMGR_DIR}
-    ${BASE_DIR}/include/dfx
-    ${BASE_DIR}/pkg_inc
+    ${RUNTIME_DIR}/include/dfx
+    ${RUNTIME_DIR}/pkg_inc
 )
 
 target_compile_options(stub_error_manager PRIVATE
@@ -103,9 +105,9 @@ target_compile_options(stub_error_manager PRIVATE
     -Werror=return-type
 )
 
-target_link_libraries(stub_error_manager
-    PRIVATE
+target_link_libraries(stub_error_manager PRIVATE
         $<BUILD_INTERFACE:intf_pub>
+        $<BUILD_INTERFACE:c_sec_headers>
         c_sec
         unified_dlog
         json

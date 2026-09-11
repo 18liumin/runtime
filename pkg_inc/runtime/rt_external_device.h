@@ -22,32 +22,32 @@ extern "C" {
  * @brief set chipType
  * @return RT_ERROR_NONE for ok
  */
-RTS_API rtError_t rtSetSocVersion(const char_t *ver);
+RTS_API rtError_t rtSetSocVersion(const char_t* ver);
 
 /**
-* @ingroup
-* @brief set debug dump mode
-* @param [in] mode    : dump mode
-* @return RT_ERROR_NONE for ok
-* @return RT_ERROR_INVALID_VALUE for error input
-*/
+ * @ingroup
+ * @brief set debug dump mode
+ * @param [in] mode    : dump mode
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ */
 RTS_API rtError_t rtDebugSetDumpMode(const uint64_t mode);
 
 typedef struct tagRtDbgCoreInfo {
-	uint64_t aicBitmap0;
+    uint64_t aicBitmap0;
     uint64_t aicBitmap1;
-	uint64_t aivBitmap0;
-	uint64_t aivBitmap1;
+    uint64_t aivBitmap0;
+    uint64_t aivBitmap1;
 } rtDbgCoreInfo_t;
 
 /**
-* @ingroup
-* @brief get stalled core id in current process
-* @param [out] coreInfo    : physics core id used
-* @return RT_ERROR_NONE for ok
-* @return RT_ERROR_INVALID_VALUE for error input
-*/
-RTS_API rtError_t rtDebugGetStalledCore(rtDbgCoreInfo_t *const coreInfo);
+ * @ingroup
+ * @brief get stalled core id in current process
+ * @param [out] coreInfo    : physics core id used
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ */
+RTS_API rtError_t rtDebugGetStalledCore(rtDbgCoreInfo_t* const coreInfo);
 
 /**
  * @ingroup dvrt_dev
@@ -80,12 +80,12 @@ typedef enum {
 } rtDevResType_t;
 
 typedef enum {
-    RT_PROCESS_CP1 = 0,    /* aicpu_scheduler */
-    RT_PROCESS_CP2,        /* custom_process */
-    RT_PROCESS_DEV_ONLY,   /* TDT */
-    RT_PROCESS_QS,         /* queue_scheduler */
-    RT_PROCESS_HCCP,       /* hccp server */
-    RT_PROCESS_USER,       /* user proc, can bind many on host or device. not surport quert from host pid */
+    RT_PROCESS_CP1 = 0,  /* aicpu_scheduler */
+    RT_PROCESS_CP2,      /* custom_process */
+    RT_PROCESS_DEV_ONLY, /* TDT */
+    RT_PROCESS_QS,       /* queue_scheduler */
+    RT_PROCESS_HCCP,     /* hccp server */
+    RT_PROCESS_USER,     /* user proc, can bind many on host or device. not surport quert from host pid */
     RT_PROCESS_CPTYPE_MAX
 } rtDevResProcType_t;
 
@@ -98,8 +98,23 @@ typedef enum {
     RT_DEV_STATUS_RESERVED
 } rtDevStatus_t;
 
+typedef enum tagRtFeatureType {
+    FEATURE_TYPE_MEMCPY = 0,
+    FEATURE_TYPE_MEMORY,
+    FEATURE_TYPE_UPDATE_SQE,
+    FEATURE_TYPE_PERSISTENT_STREAM_UNLIMITED_DEPTH,
+    FEATURE_TYPE_AICPU_OVERFLOW_DUMP, // check new dump process for GE.
+    FEATURE_TYPE_RSV
+} rtFeatureType_t;
+
+typedef enum tagMemcpyInfo { MEMCPY_INFO_SUPPORT_ZEROCOPY = 0, MEMCPY_INFO_RSV } rtMemcpyInfo_t;
+
+typedef enum tagMemoryInfo { MEMORY_INFO_TS_LIMITED = 0, MEMORY_INFO_RSV } rtMemoryInfo_t;
+
+typedef enum tagUpdateSQEInfo { UPDATE_SQE_SUPPORT_DSA = 0 } rtUpdateSQEInfo_t;
+
 typedef struct {
-    uint32_t dieId;  // for ccu res need set devId, for others set 0
+    uint32_t dieId; // for ccu res need set devId, for others set 0
     rtDevResProcType_t procType;
     rtDevResType_t resType;
     uint32_t resId;
@@ -107,8 +122,8 @@ typedef struct {
 } rtDevResInfo;
 
 typedef struct {
-    uint64_t *resAddress;
-    uint32_t *len;
+    uint64_t* resAddress;
+    uint32_t* len;
 } rtDevResAddrInfo;
 
 /**
@@ -119,7 +134,7 @@ typedef struct {
  * @return RT_ERROR_NONE for ok, errno for failed
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtGetDevResAddress(rtDevResInfo * const resInfo, rtDevResAddrInfo * const addrInfo);
+RTS_API rtError_t rtGetDevResAddress(rtDevResInfo* const resInfo, rtDevResAddrInfo* const addrInfo);
 
 /**
  * @ingroup
@@ -129,12 +144,9 @@ RTS_API rtError_t rtGetDevResAddress(rtDevResInfo * const resInfo, rtDevResAddrI
  * @return RT_ERROR_NONE for ok, errno for failed
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtReleaseDevResAddress(rtDevResInfo * const resInfo);
+RTS_API rtError_t rtReleaseDevResAddress(rtDevResInfo* const resInfo);
 
-typedef enum {
-    QUERY_PROCESS_TOKEN,
-    QUERY_TYPE_BUFF
-} rtUbDevQueryCmd;
+typedef enum { QUERY_PROCESS_TOKEN, QUERY_TYPE_BUFF } rtUbDevQueryCmd;
 
 /**
  * @ingroup
@@ -144,20 +156,20 @@ typedef enum {
  * @return RT_ERROR_NONE for ok, errno for failed
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtUbDevQueryInfo(rtUbDevQueryCmd cmd, void *devInfo);
+RTS_API rtError_t rtUbDevQueryInfo(rtUbDevQueryCmd cmd, void* devInfo);
 
 // 拉起HCCP进程
-struct rtProcExtParam {
-    const char  *paramInfo;
-    uint64_t    paramLen;
-};
+typedef struct rtProcExtParam {
+    const char* paramInfo;
+    uint64_t paramLen;
+} rtProcExtParam;
 
-struct rtNetServiceOpenArgs {
-    rtProcExtParam *extParamList;   // 拉起服务的参数列表
-    uint64_t     extParamCnt;    // 拉起服务的参数列表长度
-};
+typedef struct rtNetServiceOpenArgs {
+    rtProcExtParam* extParamList; // 拉起服务的参数列表
+    uint64_t extParamCnt;         // 拉起服务的参数列表长度
+} rtNetServiceOpenArgs;
 
-#define RT_EXT_PARAM_CNT_MAX  127U
+#define RT_EXT_PARAM_CNT_MAX 127U
 
 /**
  * @ingroup
@@ -165,7 +177,7 @@ struct rtNetServiceOpenArgs {
  * @param [in] args   service args
  * @return RT_ERROR_NONE for ok, errno for failed
  */
-RTS_API rtError_t rtOpenNetService(const rtNetServiceOpenArgs *args);
+RTS_API rtError_t rtOpenNetService(const rtNetServiceOpenArgs* args);
 
 /**
  * @ingroup
@@ -184,7 +196,7 @@ RTS_API rtError_t rtCloseNetService();
 RTS_API rtError_t rtSetDeviceWithoutTsd(int32_t devId);
 
 // used for rtGetDevMsg callback function
-typedef void (*rtGetMsgCallback)(const char_t *msg, uint32_t len);
+typedef void (*rtGetMsgCallback)(const char_t* msg, uint32_t len);
 
 typedef enum tagGetDevMsgType {
     RT_GET_DEV_ERROR_MSG = 0,
@@ -205,7 +217,7 @@ RTS_API rtError_t rtGetDevMsg(rtGetDevMsgType_t getMsgType, rtGetMsgCallback cal
 
 /**
  * @ingroup dvrt_dev
- * @brief get device infomation.
+ * @brief get device information.
  * @param [in] device   the device id
  * @param [in] moduleType   module type
                typedef enum {
@@ -235,7 +247,7 @@ RTS_API rtError_t rtGetDevMsg(rtGetDevMsgType_t getMsgType, rtGetMsgCallback cal
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_DRV_ERR for error
  */
-RTS_API rtError_t rtGetDeviceInfo(uint32_t deviceId, int32_t moduleType, int32_t infoType, int64_t *val);
+RTS_API rtError_t rtGetDeviceInfo(uint32_t deviceId, int32_t moduleType, int32_t infoType, int64_t* val);
 
 /**
  * @ingroup rts_device
@@ -246,7 +258,7 @@ RTS_API rtError_t rtGetDeviceInfo(uint32_t deviceId, int32_t moduleType, int32_t
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtsDeviceGetCapability(int32_t deviceId, int32_t devFeatureType, int32_t *val);
+RTS_API rtError_t rtsDeviceGetCapability(int32_t deviceId, int32_t devFeatureType, int32_t* val);
 
 #define RT_DEVICE_FLAG_DEFAULT (0x0U)
 #define RT_DEVICE_FLAG_NOT_START_CPU_SCHED (0x1U)
@@ -254,8 +266,8 @@ RTS_API rtError_t rtsDeviceGetCapability(int32_t deviceId, int32_t devFeatureTyp
 /**
  * @ingroup dvrt_dev
  * @brief set device with different flags
-* @param [in] deviceId    : device id
-* @param [in] flags    : flags
+ * @param [in] deviceId    : device id
+ * @param [in] flags    : flags
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
@@ -290,7 +302,7 @@ RTS_API rtError_t rtDisableP2P(uint32_t devIdDes, uint32_t phyIdSrc);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtGetP2PStatus(uint32_t devIdDes, uint32_t phyIdSrc, uint32_t *status);
+RTS_API rtError_t rtGetP2PStatus(uint32_t devIdDes, uint32_t phyIdSrc, uint32_t* status);
 
 /**
  * @ingroup dvrt_dev
@@ -301,22 +313,154 @@ RTS_API rtError_t rtGetP2PStatus(uint32_t devIdDes, uint32_t phyIdSrc, uint32_t 
  * @param [in|out] val   pair info
  * @return RT_ERROR_NONE for ok
  */
-RTS_API rtError_t rtGetPairPhyDevicesInfo(uint32_t devId, uint32_t otherDevId, int32_t infoType, int64_t *val);
+RTS_API rtError_t rtGetPairPhyDevicesInfo(uint32_t devId, uint32_t otherDevId, int32_t infoType, int64_t* val);
 
 /**
-* @ingroup dvrt_dev
-* @brief get phy device infomation.
-* @param [int] phyId        the physic Id
-* @param [int] moduleType   module type
-* @param [int] infoType     info type
-* @param [out] val          the device info
-* @return RT_ERROR_NONE for ok
-* @return RT_ERROR_DRV_ERR for error
-*/
-RTS_API rtError_t rtGetPhyDeviceInfo(uint32_t phyId, int32_t moduleType, int32_t infoType, int64_t *val);
+ * @ingroup dvrt_dev
+ * @brief get capability information.
+ * @param [in] featureType  feature type
+ * @param [in] featureInfo  info type
+ * @param [out] val  the capability info RT_CAPABILITY_SUPPORT or RT_CAPABILITY_NOT_SUPPORT
+ * @return RT_ERROR_NONE for ok
+ */
+RTS_API rtError_t rtGetRtCapability(rtFeatureType_t featureType, int32_t featureInfo, int64_t* val);
+
+/**
+ * @ingroup dvrt_dev
+ * @brief get phy device information.
+ * @param [int] phyId        the physic Id
+ * @param [int] moduleType   module type
+ * @param [int] infoType     info type
+ * @param [out] val          the device info
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_DRV_ERR for error
+ */
+RTS_API rtError_t rtGetPhyDeviceInfo(uint32_t phyId, int32_t moduleType, int32_t infoType, int64_t* val);
+
+/**
+ * @ingroup dvrt_dev
+ * @brief get status
+ * @param [in] devId   the logical device id
+ * @param [in] otherDevId   the other logical device id
+ * @param [in] infoType   info type
+ * @param [in|out] val   pair info
+ * @return RT_ERROR_NONE for ok
+ */
+RTS_API rtError_t rtGetPairDevicesInfo(uint32_t devId, uint32_t otherDevId, int32_t infoType, int64_t* val);
+
+/**
+ * @ingroup
+ * @brief get serverid by sdid
+ * @param [int] sdid   sdid
+ * @param [out] *srvId serverid
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ */
+RTS_API rtError_t rtGetServerIDBySDID(uint32_t sdid, uint32_t* srvId);
+
+/**
+ * @ingroup dvrt_base
+ * @brief register callback for xpu task fail
+ * @param [in] devType Currently, only the DPU type is supported.
+ * @param [in] moduleName unique register name, can't be null
+ * @param [in] callback fail task callback function
+ * @param [out] NA
+ * @return RT_ERROR_NONE for ok
+ */
+RTS_API rtError_t rtXpuSetTaskFailCallback(rtXpuDevType devType, const char_t* moduleName, rtTaskFailCallback callback);
+
+/**
+ * @ingroup dvrt_dev
+ * @brief Setting Scheduling Type of Graph
+ * @param [out] tsId   the ts id
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ */
+RTS_API rtError_t rtGetTSDevice(uint32_t* tsId);
+
+typedef enum {
+    RT_FEATURE_TSCPU_TASK_UPDATE_SUPPORT_AIC_AIV = 1U,
+    RT_FEATURE_SYSTEM_MEMQ_EVENT_CROSS_DEV = 21U,
+    RT_FEATURE_AICPU_SCHEDULE_TYPE = 10001U,
+    RT_FEATURE_SYSTEM_TASKID_BIT_WIDTH = 20001U,
+    RT_DEV_FEATURE_MAX
+} rtDevFeatureType;
+
+typedef enum tagRtDeviceFeatureType {
+    FEATURE_TYPE_SCHE,
+    FEATURE_TYPE_BLOCKING_OPERATOR,
+    FEATURE_TYPE_FFTS_MODE,
+    FEATURE_TYPE_MEMQ_EVENT_CROSS_DEV,
+    FEATURE_TYPE_MODEL_TASK_UPDATE,
+    FEATURE_TYPE_END,
+} rtDeviceFeatureType_t;
+
+typedef enum tagRtDeviceModuleType {
+    RT_MODULE_TYPE_SYSTEM = 0,  /**< system info*/
+    RT_MODULE_TYPE_AICPU,       /**< aicpu info*/
+    RT_MODULE_TYPE_CCPU,        /**< ccpu_info*/
+    RT_MODULE_TYPE_DCPU,        /**< dcpu info*/
+    RT_MODULE_TYPE_AICORE,      /**< AI CORE info*/
+    RT_MODULE_TYPE_TSCPU,       /**< tscpu info*/
+    RT_MODULE_TYPE_PCIE,        /**< PCIE info*/
+    RT_MODULE_TYPE_VECTOR_CORE, /**< VECTOR CORE info*/
+    RT_MODULE_TYPE_HOST_AICPU,  /**< HOST AICPU info*/
+    RT_MODULE_TYPE_QOS,         /**<qos info>*/
+    RT_MODULE_TYPE_MEMORY       /**<memory info*/
+} rtDeviceModuleType_t;
+
+/**
+ * @ingroup
+ * @brief get device feature ability by device id, such as task schedule ability.
+ * @param [in] deviceId
+ * @param [in] moduleType
+ * @param [in] featureType
+ * @param [out] val
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ */
+RTS_API rtError_t rtGetDeviceCapability(int32_t deviceId, int32_t moduleType, int32_t featureType, int32_t* val);
+
+typedef enum tagRtMemRequestFeature {
+    MEM_REQUEST_FEATURE_DEFAULT = 0,
+    MEM_REQUEST_FEATURE_OPP,
+    MEM_REQUEST_FEATURE_RESERVED
+} rtMemRequestFeature_t;
+
+/**
+ * @ingroup dvrt_dev
+ * @brief get ts mem type
+ * @param [in] rtMemRequestFeature_t mem request feature type
+ * @param [in] mem request size
+ * @return RT_MEMORY_TS, RT_MEMORY_HBM, RT_MEMORY_TS | RT_MEMORY_POLICY_HUGE_PAGE_ONLY
+ */
+RTS_API uint32_t rtGetTsMemType(rtMemRequestFeature_t featureType, uint32_t memSize);
+
+/**
+ * @ingroup dvrt_dev
+ * @brief get PCI Bus ID (BDF) string by device id
+ * @param [in] devId      user device ID
+ * @param [out] pciBusId  buffer to receive PCI Bus ID string, format: domain:bus:device.function
+ * @param [in] len        buffer length, must be greater than or equal to 13
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ * @return ACL_ERROR_RT_FEATURE_NOT_SUPPORT for driver or device not support
+ */
+RTS_API rtError_t rtDeviceGetPCIBusId(const int32_t devId, char* pciBusId, const int32_t len);
+
+/**
+ * @ingroup dvrt_dev
+ * @brief get device id by PCI Bus ID (BDF) string
+ * @param [in] pciBusId   PCI Bus ID string, format: domain:bus:device.function
+ * @param [out] devId     user device ID
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ * @return ACL_ERROR_RT_FEATURE_NOT_SUPPORT for driver or device not support
+ */
+RTS_API rtError_t rtDeviceGetByPCIBusId(const char* pciBusId, int32_t* devId);
 
 #if defined(__cplusplus)
 }
 #endif
 
-#endif  // CCE_RUNTIME_RT_EXTERNAL_DEVICE_H
+#endif // CCE_RUNTIME_RT_EXTERNAL_DEVICE_H

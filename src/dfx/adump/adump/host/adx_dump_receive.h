@@ -9,6 +9,9 @@
  */
 #ifndef ADX_DATA_DUMP_COMPONENT_H
 #define ADX_DATA_DUMP_COMPONENT_H
+#include <atomic>
+#include <map>
+#include <vector>
 #include "adx_component.h"
 #include "adx_comm_opt_manager.h"
 #include "adx_msg_proto.h"
@@ -19,8 +22,17 @@ public:
     int32_t Init() override;
     const std::string GetInfo() override { return "DataDump"; }
     ComponentType GetType() override { return ComponentType::COMPONENT_DUMP; }
-    int32_t Process(const CommHandle &handle, const SharedPtr<MsgProto> &proto) override;
+    int32_t Process(const CommHandle& handle, const SharedPtr<MsgProto>& proto) override;
     int32_t UnInit() override;
+    int32_t Terminate() override;
+
+private:
+    int32_t Receive(const CommHandle& handle, const SharedPtr<MsgProto>& proto);
+    void StoreSession(uint32_t deviceId, AdxCommHandle handle);
+    void ReleaseSession(uint32_t deviceId, AdxCommHandle handle);
+    std::atomic<bool> init_{false};
+    std::mutex mutex_;
+    std::map<uint32_t, std::vector<AdxCommHandle>> handles_;
 };
-}
+} // namespace Adx
 #endif

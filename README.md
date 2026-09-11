@@ -2,6 +2,7 @@
 
 ## 🔥Latest News
 
+- [2026/4] 支持Ascend 950PR/Ascend 950DT芯片。持续增强AclGraph功能，优化文档结构，提升开发者体验。
 - [2025/12] runtime项目首次上线。
 
 ## 概述
@@ -9,10 +10,14 @@
 本仓提供CANN运行时组件和维测功能组件。
 - Runtime组件：提供Ascend NPU运行时用户编程接口和运行时核心实现，包括设备管理、流管理、Event管理、内存管理、任务调度等功能。 
 - 维测功能组件：包括性能数据采集、模型和算子Dump、日志、错误日志记录等功能。
-    - 性能调优（msprof）模块：进行性能调优时，可以使用性能调优工具来采集和分析运行在昇腾AI处理器SoCNPU IP加速器上的AI任务各个运行阶段的关键性能指标，用于可根据输出的性能数据，快速定位软、硬件性能瓶颈，提升AI任务性能分析的效率。
-    - 精度调试（adump）模块：提供Ascend NPU运行时用户Dump单算子或模型（每一层算子）的输入/输出数据，用于与指定算子或模型进行对比，定位精度问题；提供Ascend NPU运行异常时Dump异常算子的输入/输出数据、Workspace信息，Tiling信息，用于分析AI Core Error问题。
+    - 性能调优（msprof）模块：进行性能调优时，可以使用性能调优工具来采集和分析运行在昇腾AI处理器SoCNPU IP加速器上的AI任务各个运行阶段的关键性能指标，根据输出的性能数据，快速定位软、硬件性能瓶颈，提升AI任务性能分析的效率。
+    - 精度调试（adump）模块：提供Ascend NPU运行时用户Dump单算子或模型（每一层算子）的输入/输出数据，用于与指定算子或模型进行对比，定位精度问题；提供Ascend NPU运行异常时Dump异常算子的输入/输出数据、Workspace信息、Tiling信息，用于分析AI Core Error问题。
     - 日志（log）模块：日志提供记录进程执行过程信息的能力，在其他进程运行时，日志的接口提供进程打印和落盘日志的功能，方便系统故障的诊断分析，快速实现问题定位。该模块下的msnpureport为命令行工具，支持导出device侧日志和查询设置device侧状态等功能。
 
+## 版本配套
+
+本项目源码会跟随CANN软件版本发布，关于CANN软件版本与本项目标签的对应关系请参阅[release仓库](https://gitcode.com/cann/release-management)中的相应版本说明。
+请注意，为确保您的源码定制开发顺利进行，请选择配套的CANN版本与Gitcode标签源码，使用master分支可能存在版本不匹配的风险。
 
 ## 目录结构
 
@@ -42,94 +47,196 @@
   |   ......
   ├── stub                                           # 打桩相关目录
   ├── tests                                          # UT用例
-  ├── third_party                                    # 依赖包相关文件
   ......
   ├── CMakeLists.txt                                 # 构建编译配置文件
   ├── build.sh                                       # 项目工程编译脚本
   ```
 
+## 环境部署
 
-## 源码编译&部署
+### 环境安装
 
-### Runtime仓整包源码编译
+#### 手动安装
+对于有昇腾设备的开发者，若您想手动搭建昇腾环境，请参考下述步骤。
 
-#### 前提条件
+##### 安装基础依赖
 
-使用本项目前，请确保如下基础依赖、NPU驱动和固件已安装。
+本项目基础依赖如下，请注意版本要求。
 
-1. **安装依赖**
+- python >= 3.7.0 (python 3.7 python3.8官方已经EOL，CANN将于2027年3月停止支持，请升级到>= 3.9.0版本)
+- pip3
+- gcc >= 7.3.0, <= 13
+- cmake >= 3.16.0
+- ccache
+- autoconf
+- gperf
+- libtool
+- make
+- libc6-dev/glibc-devel
 
-    本项目源码编译用到的依赖如下，请注意版本要求。
+ Ubuntu/Debian操作系统安装命令示例如下：
+```bash
+sudo apt install python3 python3-pip python3-dev gcc-9 g++-9 libc6-dev cmake ccache autoconf gperf libtool libtool-bin make
+```
+CentOS/EulerOS操作系统安装命令示例如下：
+```bash
+sudo yum install python3 python3-pip python3-devel gcc gcc-c++ glibc-devel cmake ccache autoconf gperf libtool make
+```
 
-    - python >= 3.7.0
-    - gcc >= 7.3.0, <= 13
-    - cmake >= 3.16.0
-    - ccache
-    - autoconf
-    - gperf
-    - libtool
-    - asan （仅执行UT时依赖，请确保已安装与gcc版本对应的asan版本，例如gcc 9.5.0需要安装libasan6版本）
-    - googletest（仅执行UT时依赖，建议版本 release-1.14.0）
+##### 安装软件
 
-    上述依赖包（asan除外）可通过项目根目录下install_deps.sh安装，命令如下，若遇到不支持系统，请参考该文件自行适配：
+- **场景1：体验master版本能力或基于master版本进行开发**
+
+  1. **安装驱动与固件（可选，仅运行[样例](example/README.md)依赖）**
+   
+      若仅编译runtime包，可跳过本操作步骤。运行runtime样例时须安装驱动与固件。
+
+      下载和安装操作请参考《[CANN软件安装指南](https://www.hiascend.com/document/redirect/CannCommunityInstWizard)》中“准备软件包”和“安装NPU驱动和固件”章节。
+
+  2. **安装CANN包**
+
+      请单击[下载链接](https://ascend.devcloud.huaweicloud.com/artifactory/cann-run-mirror/software/master/)，选择最新时间版本，并根据产品型号和环境架构下载对应包。安装命令如下，更多指导参考《[CANN软件安装指南](https://www.hiascend.com/document/redirect/CannCommunityInstWizard)》。
+
+      - 安装CANN toolkit包
+
+        ```bash
+        # 确保安装包具有可执行权限
+        chmod +x Ascend-cann-toolkit_${cann_version}_linux-${arch}.run
+        # 安装命令
+        ./Ascend-cann-toolkit_${cann_version}_linux-${arch}.run --install --install-path=${install_path}
+        ```
+        - `${cann_version}`：表示CANN包版本号。
+        - `${arch}`：表示CPU架构，如`aarch64`、`x86_64`。
+        - `${install_path}`：表示指定安装路径，需要与Toolkit包安装在相同路径，root用户默认安装在`/usr/local/Ascend`目录。
+  
+      - 安装CANN ops算子包（可选，仅运行[样例](example/README.md)依赖）。
+  
+        若仅编译runtime包，可跳过本操作步骤。运行runtime样例时须安装CANN ops算子包。
+
+        ```bash
+        # 确保安装包具有可执行权限
+        chmod +x Ascend-cann-${soc_name}-ops_${cann_version}_linux-${arch}.run
+        # 安装命令
+        ./Ascend-cann-${soc_name}-ops_${cann_version}_linux-${arch}.run --install --install-path=${install_path}
+        ```
+        - `${soc_name}`表示NPU型号名称。
+
+          | 产品 | soc_name |
+          | --- | --- |
+          | Atlas A2 训练系列产品/Atlas A2 推理系列产品 | 910b |
+          | Atlas A3 训练系列产品/Atlas A3 推理系列产品 | A3 |
+          | Ascend 950PR/Ascend 950DT产品 | 950 |
+
+
+- **场景2：体验已发布版本能力或基于已发布版本进行开发**
+
+    请访问[CANN官网下载中心](https://www.hiascend.com/cann/download)，选择发布版本（仅支持CANN 8.5.0及后续版本）、产品型号和环境架构，参考CANN 快速安装指导完成安装。
+
+
+
+    
+### 环境验证
+
+安装完CANN包后，需验证环境和驱动是否正常。
+
+- **检查NPU设备**
+
     ```bash
-    bash install_deps.sh
+    # 运行npu-smi，若能正常显示设备信息，则驱动正常
+    npu-smi info
     ```
 
-2. **安装驱动与固件（运行态依赖）**
+- **检查CANN版本**
 
-    运行Runtime时必须安装驱动与固件，安装指导详见《[CANN 软件安装指南](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/softwareinst/instg/instg_0005.html?Mode=PmIns&InstallType=local&OS=openEuler&Software=cannToolKit)》。
+  ```bash
+    # 查看CANN Toolkit开发套件包的version字段提供的版本信息（默认路径安装），<arch>表示CPU架构（aarch64或x86_64）。
+    cat /usr/local/Ascend/cann/<arch>-linux/ascend_toolkit_install.info
+    # 查看CANN ops包版本信息（默认路径安装）
+    cat /usr/local/Ascend/cann/${arch}-linux/ascend_ops_install.info
+  ```
 
-#### 环境准备
 
-1. **安装CANN toolkit包**
+## 源码构建
 
-    单击[下载链接](https://ascend.devcloud.huaweicloud.com/cann/run/software/8.5.0-beta.1)，根据实际环境架构，获取对应的`Ascend-cann-toolkit_${cann_version}_linux-${arch}.run`包。
+本项目支持源码构建，编译运行前需参考以上步骤完成环境部署。
 
-    ```bash
-    # 确保安装包具有可执行权限
-    chmod +x Ascend-cann-toolkit_${cann_version}_linux-${arch}.run
-    # 安装命令
-    ./Ascend-cann-toolkit_${cann_version}_linux-${arch}.run --full --force --quiet --install-path=${install_path}
-    ```
-    - \$\{cann\_version\}：表示CANN包版本号。
-    - \$\{arch\}：表示CPU架构，如aarch64、x86_64。
-    - \$\{install\_path\}：表示指定安装路径，可选，root用户默认安装在`/usr/local/Ascend`目录，普通用户默认安装在当前目录。
+源码构建可选择如下方式：
 
-2. **配置环境变量**
-	
-	根据实际场景，选择合适的命令。
+- **本机源码构建**：参考下文“下载源码”、“环境变量配置”和“编译runtime包”章节执行构建。
+- **Docker源码构建**：参考[.devcontainer/README.md](.devcontainer/README.md)，在容器内完成源码构建。
 
-    ```bash
-    # 默认路径安装，以root用户为例（非root用户，将/usr/local替换为${HOME}）  
-    source /usr/local/Ascend/cann/set_env.sh
-    # 指定路径安装
-    # source ${install_path}/cann/set_env.sh
-    ```
-
-3. **下载源码**
-
+### 下载源码
+   
     ```bash
     # 下载项目源码，以master分支为例
     git clone https://gitcode.com/cann/runtime.git
     ```
 
-#### 编译安装
+### 环境变量配置
 
-`Runtime`提供一键式编译能力，可通过如下命令进行编译：
+按需选择合适的命令使环境变量生效。
 
 ```bash
-export CMAKE_TLS_VERIFY=0
+# 默认路径安装，以root用户为例（非root用户，将/usr/local替换为${HOME}）
+source /usr/local/Ascend/cann/set_env.sh
+# 指定路径安装
+source ${install_path}/cann/set_env.sh
+```
+
+### 编译runtime包
+
+若您的编译环境可以访问网络，编译过程中将自动下载开源第三方软件，可以使用如下命令进行编译：
+
+```bash
 bash build.sh
+```
+
+若您的编译环境无法访问网络，可以直接调用脚本获取开源组件压缩包，脚本将自动下载至当前新建的 `third_party` 目录中：
+
+```bash
+python download_3rd_party.py
+```
+
+下载完成后，可以使用如下命令进行编译：
+```bash
+bash build.sh --cann_3rd_lib_path=third_party
 ```
 更多编译参数可以通过`bash build.sh -h`查看。
 
-编译完成之后会在`build_out`目录下生产`cann-npu-runtime_<version>_linux-<arch>.run`软件包。
+编译完成之后会在`build_out`目录下生成`cann-npu-runtime_<version>_linux-<arch>.run`软件包。
 \<version>表示版本号。
 \<arch>表示操作系统架构，取值包括x86_64与aarch64。
-可执行如下命令安装编译生成的Runtime软件包：
+
+
+**开源第三方软件依赖**
+
+runtime在编译时，依赖的第三方开源软件列表如下：
+
+| 开源软件 | 版本 | 下载地址 |
+|---|---|---|
+| abseil-cpp | 20230802.1 | [abseil-cpp-20230802.1.tar.gz](https://gitcode.com/cann-src-third-party/abseil-cpp/releases/download/20230802.1/abseil-cpp-20230802.1.tar.gz) |
+| acl-compat (x86_64) | 9.1.0 | [acl-compat_9.1.0_linux-x86_64.tar.gz](https://cann-3rd.obs.cn-north-4.myhuaweicloud.com/cann/acl-compat/acl-compat_9.1.0_linux-x86_64.tar.gz) |
+| acl-compat (aarch64) | 9.1.0 | [acl-compat_9.1.0_linux-aarch64.tar.gz](https://cann-3rd.obs.cn-north-4.myhuaweicloud.com/cann/acl-compat/acl-compat_9.1.0_linux-aarch64.tar.gz) |
+| boost | 1.87.0 | [boost_1_87_0.tar.gz](https://gitcode.com/cann-src-third-party/boost/releases/download/v1.87.0/boost_1_87_0.tar.gz) |
+| eigen | 5.0.0 | [eigen-5.0.0.tar.gz](https://gitcode.com/cann-src-third-party/eigen/releases/download/5.0.0-h0.trunk/eigen-5.0.0.tar.gz) |
+| googletest | 1.14.0 | [googletest-1.14.0.tar.gz](https://gitcode.com/cann-src-third-party/googletest/releases/download/v1.14.0/googletest-1.14.0.tar.gz) |
+| json | 3.12.0 | [json-3.12.0.tar.gz](https://gitcode.com/cann-src-third-party/json/releases/download/v3.12.0/json-3.12.0.tar.gz) |
+| libboundscheck | 1.1.16 | [libboundscheck-v1.1.16.tar.gz](https://gitcode.com/cann-src-third-party/libboundscheck/releases/download/v1.1.16/libboundscheck-v1.1.16.tar.gz) |
+| libseccomp | 2.5.4 | [libseccomp-2.5.4.tar.gz](https://gitcode.com/cann-src-third-party/libseccomp/releases/download/v2.5.4/libseccomp-2.5.4.tar.gz) |
+| mockcpp | 2.7-h5 | [mockcpp-2.7.tar.gz](https://gitcode.com/cann-src-third-party/mockcpp/releases/download/v2.7-h5/mockcpp-2.7.tar.gz) |
+| mockcpp_patch | 2.7-h5 | [mockcpp-2.7-h5.patch](https://gitcode.com/cann-src-third-party/mockcpp/releases/download/v2.7-h5/mockcpp-2.7-h5.patch) |
+| protobuf | 25.1 | [protobuf-25.1.tar.gz](https://gitcode.com/cann-src-third-party/protobuf/releases/download/v25.1/protobuf-25.1.tar.gz) |
+| makeself | 2.5.0 | [makeself-release-2.5.0-patch1.tar.gz](https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz) |
+| cann-cmake | master-049 | [cmake-master-049.tar.gz](https://raw.gitcode.com/cann/cmake/archive/refs/heads/master-049.tar.gz) |
+
+> [!NOTE]注意
+> 如果您从其他地址下载，请确保版本号一致。
+
+### 安装runtime包
+执行如下命令安装编译生成的runtime软件包。
 
 ```bash
+cd build_out;
 ./cann-npu-runtime_<version>_linux-<arch>.run --full --install-path=${install_path}
 ```
 - \$\{version\}：表示run包版本号。
@@ -138,29 +245,55 @@ bash build.sh
 
 安装完成之后，用户编译生成的Runtime软件包会替换已安装CANN开发套件包中的Runtime相关软件。
                                        
+### 本地验证 
 
-## 本地验证 
-
-编译完成后，用户可以进行开发测试（DT：Development Testing），验证项目功能是否正常。
-> 说明：执行UT用例依赖googletest单元测试框架，详细介绍参见[googletest官网](https://google.github.io/googletest/advanced.html#running-a-subset-of-the-tests)，生成代码覆盖率报告需要独立安装lcov软件（如果由于lcov工具版本的原因出现报错，请根据提示修改脚本相关内容，选择合适的参数进行适配）。
+编译完成后，用户可以进行开发测试，验证项目功能是否正常，本节将介绍如何做单元测试(UT: Unit Testing)。
+> 说明：
+执行 UT 用例依赖 googletest 单元测试框架，详细介绍参见 [googletest 官网](https://google.github.io/googletest/advanced.html#running-a-subset-of-the-tests)。
 
 编译执行`UT`测试用例：
 
 ```bash
-bash tests/build_ut.sh --ut=acl --target=ascendcl_utest -c
+bash tests/build_ut.sh --ut=acl --target=ascendcl_utest -c --cann_3rd_lib_path={your_3rd_party_path}
 ```
-- `--ut`可以指定需要执行的`tests/ut`目录下的用例文件，例如`acl、runtime`等;
-- `--target`可以指定需要执行的用例文件编译出来的目标二进制文件（可能有多个），例如acl用例可以使用`tests/ut/acl/CMakeLists.txt`文件中定义的`ascendcl_utest`；runtime用例可以使用`tests/ut/runtime/runtime/CMakeLists.txt`文件中定义的`runtime_utest_task_910B`，执行runtime全量用例则需要指定target为`runtime_ut`;
-- `-c`可以获取覆盖率（如无需获取覆盖率，可省略此参数）。
+其中，`{your_3rd_party_path}`必须为绝对路径。
 
-UT测试用例编译输出目录为`build`，如果想清除历史编译记录，可以执行如下操作：
+**指定测试模块**
+
+通过`--ut`指定模块名称，上述示例中指定的模块名称为`acl`。
+
+`runtime`仓中的`UT`用例按模块分类归档在`tests/ut/`的不同目录下，所有模块名称以及和用例路径的映射关系可以查询`tests/build_ut.sh`中的`ut_path_map`，例如：`acl`模块的`UT`在`tests/ut/acl`下，`runtime`模块的`UT`在`tests/ut/runtime/runtime`下。
+
+**指定测试目标文件**
+
+通过`--target`指定待测用例编译出的具体目标文件。
+
+各个模块所包含的目标文件可以从对应模块的`CMakeLists.txt`文件中查看。例如对于`acl`，从`tests/ut/acl/CMakeLists.txt`中的`add_custom_target`可以看出将编译目标命名为`ascendcl_utest`，并且包含了`ascendcl_c_utest`和`ascendcl_cpp_utest`两个目标文件。上述示例中通过指定`target`为`ascendcl_utest`表示编译执行`acl`模块中的所有用例。也可以指定具体的目标文件进行编译执行(可以同时指定多个，用空格分隔)。
+
+**其他编译参数**
+
+通过`-c`可以获取覆盖率，如无需获取覆盖率，可省略此参数。
+> 需先安装 `lcov`(Ubuntu / Debian：`sudo apt install lcov`；openEuler：`sudo dnf install lcov`)；若因版本差异报错，请按提示调整脚本参数。
+
+通过`--asan`可以启用AddressSanitizer进行内存错误检测，如无需启用，可省略此参数。
+> AddressSanitizer通常不需要单独安装，已集成在gcc中。如需单独安装asan，请确保与gcc版本兼容，例如gcc 9.5.0匹配libasan6版本。
+
+通过`--cann_3rd_lib_path`指定第三方依赖的路径，若在联网环境中，可省略此参数。
+
+更加详细的编译命令参数可以通过`bash tests/build_ut.sh -h`查看。
+
+
+UT测试用例编译的过程件以及产物位于`output`和`build`下，如果想清除历史编译记录，可以执行如下操作：
 
 ```bash
-rm -rf build_ut/ output/ build/
+rm -rf output/ build/
 ```
-注：`tests/build_ut.sh`脚本支持的详细命令参数可以通过`bash tests/build_ut.sh -h`查看。
 
-**接下来可参考[样例运行](example/README.md)尝试运行样例**。
+**接下来可参考[example](example/README.md)目录下的样例，进一步了解本仓**。
+
+## 学习教程
+
+Runtime提供了开发指南、API参考，详细可参见 [Runtime 参考资料](./docs/zh/README.md)。
 
 ## 相关信息
 - [贡献指南](CONTRIBUTING.md)

@@ -8,17 +8,18 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
+include(acl_rt_headers.cmake)
+
 ############ libacl_rt.so ############
 add_library(acl_rt SHARED
     acl_rt.cpp
 )
 
-set(ACL_INC_EXTERNAL_DIR ${CMAKE_CURRENT_LIST_DIR}/../../../include/external)
-
 target_include_directories(acl_rt PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/..
-    ${ACL_INC_EXTERNAL_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/../aclrt_impl
+    ${CMAKE_CURRENT_LIST_DIR}/../../../pkg_inc/dump
 )
 
 target_compile_options(acl_rt PRIVATE
@@ -31,19 +32,31 @@ target_compile_definitions(acl_rt PRIVATE
     FUNC_VISIBILITY
 )
 
+# Enable aclrt api hook on all platforms except embedded (ascend031/ascend035/ascend5162a)
+# When disabled, aclrtApiInjectionSetFunc/GetFunc are compiled as error-returning
+# stubs and aclrt apis fall back to direct forwarding with zero hook overhead.
+if(NOT "${PRODUCT}" STREQUAL "ascend031" AND NOT "${PRODUCT}" STREQUAL "ascend035"
+   AND NOT "${PRODUCT}" STREQUAL "ascend5162a")
+    target_compile_definitions(acl_rt PRIVATE ACL_RT_API_HOOK_ENABLE=1)
+endif()
+
 target_link_options(acl_rt PRIVATE
     -rdynamic
     -Wl,-Bsymbolic
     -Wl,--exclude-libs,ALL
-    -Wl,--no-undefined
+    $<$<NOT:$<BOOL:${ENABLE_TSAN}>>:-Wl,--no-undefined>
 )
 
-target_link_libraries(acl_rt PRIVATE
-    $<BUILD_INTERFACE:intf_pub>
-    -Wl,--no-as-needed
-    acl_rt_impl
-    -Wl,--as-needed
-    -ldl
-    -lpthread
-    -lstdc++
+target_link_libraries(acl_rt
+    PRIVATE
+        $<BUILD_INTERFACE:intf_pub>
+        -Wl,--no-as-needed
+        runtime
+        ascend_dump
+        -lstdc++
+        -Wl,--as-needed
+        -ldl
+        -lpthread
+    PUBLIC
+        $<BUILD_INTERFACE:acl_rt_headers>
 )

@@ -11,8 +11,7 @@
 ####################### 预准备 ###########################
 set(ADUMP_ADUMP_DIR ${CMAKE_CURRENT_LIST_DIR})
 set(INSTALL_LIBRARY_DIR lib)
-
-add_subdirectory(record_config)
+set(ADUMP_CMAKE_DIR ${CMAKE_CURRENT_LIST_DIR}/adump_cmake)
 
 ####################### 预准备: 构建生成依赖的proto源码文件 ###########################
 set(adumpHostProto
@@ -21,8 +20,10 @@ set(adumpHostProto
 
 protobuf_generate(adumpHostProto adumpHostProtoSrcs adumpHostProtoHeaders ${adumpHostProto} TARGET)
 
+# op_mapping_v2.proto: 兼容性设计，不能直接在op_mapping.proto新增字段，影响其他组件运行
 set(adumpBaseProtoList
     "${ADUMP_DIR}/proto/op_mapping.proto"
+    "${ADUMP_DIR}/proto/op_mapping_v2.proto"
 )
 
 protobuf_generate(ascend_dump_protos adumpBaseProtoSrcs adumpBaseProtoHeaders ${adumpBaseProtoList} TARGET)
@@ -33,10 +34,7 @@ add_library(adump_headers INTERFACE)
 target_include_directories(adump_headers INTERFACE
     $<BUILD_INTERFACE:${ADUMP_DIR}/inc>
     $<BUILD_INTERFACE:${ADUMP_DIR}/inc/adump>
-    $<BUILD_INTERFACE:${ADUMP_DIR}/inc/stackcore>
     $<BUILD_INTERFACE:${ADUMP_DIR}/external>
-    $<BUILD_INTERFACE:${ADUMP_DIR}/inc/metadef>
-    $<BUILD_INTERFACE:${ADUMP_DIR}/inc/metadef/external>
     $<BUILD_INTERFACE:${PROJECT_TOP_DIR}/include/external>
     $<BUILD_INTERFACE:${PROJECT_TOP_DIR}/pkg_inc/dump>
     ${RUNTIME_DIR}/src/dfx/error_manager
@@ -46,6 +44,54 @@ target_include_directories(adump_headers INTERFACE
 )
 
 ########################### build artifacts ##########################
-include(adump_decouple/adump_server.cmake)
-include(adump_decouple/ascend_dump.cmake)
-include(adump_decouple/adump.cmake)
+if(PRODUCT)
+    if(PRODUCT STREQUAL "ascend031")
+        include(adump_ascend031/adump_server.cmake)
+        include(adump_ascend031/ascend_dump.cmake)
+        include(adump_ascend031/adump.cmake)
+    elseif(ENABLE_NPUF10 STREQUAL true OR
+            PRODUCT STREQUAL "npuf10" OR
+            PRODUCT STREQUAL "ascend310rc" OR
+            PRODUCT STREQUAL "ascend310Brcesl" OR
+            PRODUCT STREQUAL "ascend310Brcemu" OR
+            PRODUCT STREQUAL "ascend035" OR
+            PRODUCT STREQUAL "ascend310Brc" OR
+            (DEFINED MODULE_EXT AND NOT (MODULE_EXT STREQUAL "")))
+        include(adump_cmake/adump_couple/adump_server.cmake)
+        include(adump_cmake/adump_couple/ascend_dump.cmake)
+        include(adump_cmake/adump_couple/adump.cmake)
+    elseif(PRODUCT STREQUAL "ascend" OR
+            PRODUCT STREQUAL "helper310p" OR
+            PRODUCT STREQUAL "ascend310" OR
+            PRODUCT STREQUAL "ascend310B" OR
+            PRODUCT STREQUAL "ascend310Besl" OR
+            PRODUCT STREQUAL "ascend310Bemu" OR
+            PRODUCT STREQUAL "ascend310p" OR
+            PRODUCT STREQUAL "ascend910" OR
+            PRODUCT STREQUAL "ascend920" OR
+            PRODUCT STREQUAL "ascend920esl" OR
+            PRODUCT STREQUAL "ascend920emu" OR
+            PRODUCT STREQUAL "ascend910B" OR
+            PRODUCT STREQUAL "ascend910_93" OR
+            PRODUCT STREQUAL "ascend950" OR
+            PRODUCT STREQUAL "ascend950esl" OR
+            PRODUCT STREQUAL "ascend910_96" OR
+            PRODUCT STREQUAL "ascend910_96esl")
+        include(adump_cmake/adump_decouple/adump_server.cmake)
+        include(adump_cmake/adump_decouple/ascend_dump.cmake)
+        include(adump_cmake/adump_decouple/adump.cmake)
+    else()
+        message(STATUS "Unknown PRODUCT, no chip type matched and MODULE_EXT is empty, "
+                        "will build artifacts with default stragety")
+        include(adump_cmake/adump_decouple/adump_server.cmake)
+        include(adump_cmake/adump_decouple/ascend_dump.cmake)
+        include(adump_cmake/adump_decouple/adump.cmake)
+    endif()
+else()
+    message(STATUS "No PRODUCT, will build artifacts with default stragety")
+    include(adump_cmake/adump_decouple/adump_server.cmake)
+    include(adump_cmake/adump_decouple/ascend_dump.cmake)
+    if (ENABLE_NPUF10 STREQUAL true)
+        include(adump_cmake/adump_couple/adump.cmake)
+    endif()
+endif()

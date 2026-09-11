@@ -13,7 +13,6 @@
 #include "prof_api.h"
 #include "prof_acl_plugin.h"
 #include "prof_cann_plugin.h"
-#include "prof_atls_plugin.h"
 #include "prof_tx_plugin.h"
 #include "prof_plugin_manager.h"
 #include "prof_mstx_plugin.h"
@@ -21,43 +20,42 @@
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
+
 // API for atls using
-MSVP_PROF_API int32_t profRegReporterCallback(MsprofReportHandle reporter)
-{
-    return ProfAPI::ProfAtlsPlugin::instance()->ProfRegisterReporter(reporter);
-}
-
-MSVP_PROF_API int32_t profRegCtrlCallback(MsprofCtrlHandle handle)
-{
-    ProfAPI::ProfPluginManager::instance()->SetProfPlugin(ProfAPI::ProfAtlsPlugin::instance());
-    return ProfAPI::ProfAtlsPlugin::instance()->ProfRegisterCtrl(handle);
-}
-
-MSVP_PROF_API int32_t profRegDeviceStateCallback(MsprofSetDeviceHandle handle)
-{
-    return ProfAPI::ProfAtlsPlugin::instance()->ProfRegisterDeviceNotify(handle);
-}
-
-MSVP_PROF_API int32_t profGetDeviceIdByGeModelIdx(const uint32_t modelIdx, uint32_t *deviceId)
-{
-    return ProfAPI::ProfAtlsPlugin::instance()->ProfGetDeviceIdByGeModelIdx(modelIdx, deviceId);
-}
-
 MSVP_PROF_API int32_t profSetProfCommand(VOID_PTR command, uint32_t len)
 {
-    return ProfAPI::ProfAtlsPlugin::instance()->ProfSetProfCommand(command, len);
+    return ProfAPI::ProfCannPlugin::instance()->ProfSetProfCommand(command, len);
 }
 
 MSVP_PROF_API int32_t MsprofRegisterProfileCallback(int32_t callbackType, VOID_PTR callback, uint32_t len)
 {
-    return ProfAPI::ProfAtlsPlugin::instance()->RegisterProfileCallback(callbackType, callback, len);
+    return ProfAPI::ProfCannPlugin::instance()->RegisterProfileCallback(callbackType, callback, len);
 }
 
-// API for cann & atlas using
+MSVP_PROF_API int32_t MsprofSetInjectionFunc(uint32_t type, void* func)
+{
+    return ProfAPI::ProfCannPlugin::instance()->ProfSetInjectionFunc(type, func);
+}
+
+MSVP_PROF_API int32_t MsprofInjectionInitialize(void)
+{
+    return ProfAPI::ProfCannPlugin::instance()->ProfInjectionInitialize();
+}
+
+MSVP_PROF_API void* MsprofGetInjectionFunc(uint32_t type)
+{
+    return ProfAPI::ProfCannPlugin::instance()->ProfGetInjectionFunc(type);
+}
+
+MSVP_PROF_API int32_t MsprofRegisterDataCallback(uint32_t type, void* callback)
+{
+    return ProfAPI::ProfCannPlugin::instance()->ProfRegisterDataCallback(type, callback);
+}
+
+// API for cann using
 MSVP_PROF_API int32_t profSetStepInfo(const uint64_t indexId, const uint16_t tagId, void* const stream)
 {
-    ProfAPI::ProfPlugin *plugin = ProfAPI::ProfPluginManager::instance()->GetProfPlugin();
-    return plugin->ProfSetStepInfo(indexId, tagId, stream);
+    return ProfAPI::ProfCannPlugin::instance()->ProfSetStepInfo(indexId, tagId, stream);
 }
 
 // prof acl api
@@ -84,54 +82,45 @@ MSVP_PROF_API int32_t ProfOpUnSubscribe(uint32_t devId)
     return ProfAPI::ProfAclPlugin::instance()->ProfOpUnSubscribe(devId);
 }
 
-MSVP_PROF_API uint64_t ProfAclGetOpTime(uint32_t type, const void *opInfo, size_t opInfoLen, uint32_t index)
+MSVP_PROF_API uint64_t ProfAclGetOpTime(uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index)
 {
     return ProfAPI::ProfAclPlugin::instance()->ProfAclGetOpTime(type, opInfo, opInfoLen, index);
 }
 
-MSVP_PROF_API size_t ProfAclGetId(uint32_t type, const void *opInfo, size_t opInfoLen, uint32_t index)
+MSVP_PROF_API size_t ProfAclGetId(uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index)
 {
     return ProfAPI::ProfAclPlugin::instance()->ProfAclGetId(type, opInfo, opInfoLen, index);
 }
 
-MSVP_PROF_API int32_t ProfAclGetOpVal(uint32_t type, const void *opInfo, size_t opInfoLen,
-                                      uint32_t index, void *data, size_t len)
+MSVP_PROF_API int32_t
+ProfAclGetOpVal(uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index, void* data, size_t len)
 {
     return ProfAPI::ProfAclPlugin::instance()->ProfAclGetOpVal(type, opInfo, opInfoLen, index, data, len);
 }
 
-MSVP_PROF_API uint64_t ProfGetOpExecutionTime(const void *data, uint32_t len, uint32_t index)
+MSVP_PROF_API uint64_t ProfGetOpExecutionTime(const void* data, uint32_t len, uint32_t index)
 {
     return ProfAPI::ProfAclPlugin::instance()->ProfGetOpExecutionTime(data, len, index);
 }
 
-MSVP_PROF_API const char *ProfAclGetOpAttriVal(uint32_t type, const void *opInfo, size_t opInfoLen,
-    uint32_t index, uint32_t attri)
+MSVP_PROF_API const char* ProfAclGetOpAttriVal(
+    uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index, uint32_t attri)
 {
     return ProfAPI::ProfAclPlugin::instance()->ProfGetOpAttriVal(type, opInfo, opInfoLen, index, attri);
 }
 // prof tx
-MSVP_PROF_API void *ProfAclCreateStamp()
-{
-    return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxCreateStamp();
-}
+MSVP_PROF_API void* ProfAclCreateStamp() { return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxCreateStamp(); }
 
-MSVP_PROF_API void ProfAclDestroyStamp(void *stamp)
+MSVP_PROF_API void ProfAclDestroyStamp(void* stamp)
 {
     return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxDestroyStamp(stamp);
 }
 
-MSVP_PROF_API int32_t ProfAclPush(void *stamp)
-{
-    return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxPush(stamp);
-}
+MSVP_PROF_API int32_t ProfAclPush(void* stamp) { return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxPush(stamp); }
 
-MSVP_PROF_API int32_t ProfAclPop()
-{
-    return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxPop();
-}
+MSVP_PROF_API int32_t ProfAclPop() { return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxPop(); }
 
-MSVP_PROF_API int32_t ProfAclRangeStart(void *stamp, uint32_t *rangeId)
+MSVP_PROF_API int32_t ProfAclRangeStart(void* stamp, uint32_t* rangeId)
 {
     return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxRangeStart(stamp, rangeId);
 }
@@ -141,22 +130,19 @@ MSVP_PROF_API int32_t ProfAclRangeStop(uint32_t rangeId)
     return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxRangeStop(rangeId);
 }
 
-MSVP_PROF_API int32_t ProfAclSetStampTraceMessage(void *stamp, const char *msg, uint32_t msgLen)
+MSVP_PROF_API int32_t ProfAclSetStampTraceMessage(void* stamp, const char* msg, uint32_t msgLen)
 {
     return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxSetStampTraceMessage(stamp, msg, msgLen);
 }
 
-MSVP_PROF_API int32_t ProfAclMark(void *stamp)
-{
-    return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxMark(stamp);
-}
+MSVP_PROF_API int32_t ProfAclMark(void* stamp) { return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxMark(stamp); }
 
-MSVP_PROF_API int32_t ProfAclMarkEx(const char *msg, size_t msgLen, aclrtStream stream)
+MSVP_PROF_API int32_t ProfAclMarkEx(const char* msg, size_t msgLen, aclrtStream stream)
 {
     return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxMarkEx(msg, msgLen, stream);
 }
 
-MSVP_PROF_API int32_t ProfAclSetCategoryName(uint32_t category, const char *categoryName)
+MSVP_PROF_API int32_t ProfAclSetCategoryName(uint32_t category, const char* categoryName)
 {
     return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxSetCategoryName(category, categoryName);
 }
@@ -171,22 +157,19 @@ MSVP_PROF_API int32_t ProfAclSetStampPayload(VOID_PTR stamp, const int32_t type,
     return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxSetStampPayload(stamp, type, value);
 }
 
-MSVP_PROF_API int32_t AdprofReportAdditionalInfo(uint32_t nonPersistantFlag, const void *data, uint32_t length)
+MSVP_PROF_API int32_t AdprofReportAdditionalInfo(uint32_t nonPersistantFlag, const void* data, uint32_t length)
 {
-    return MsprofReportAdditionalInfo(nonPersistantFlag, static_cast<VOID_PTR>(const_cast<void *>(data)), length);
+    return MsprofReportAdditionalInfo(nonPersistantFlag, static_cast<VOID_PTR>(const_cast<void*>(data)), length);
 }
 
-MSVP_PROF_API int32_t AdprofReportBatchAdditionalInfo(uint32_t nonPersistantFlag, const void *data, uint32_t length)
+MSVP_PROF_API int32_t AdprofReportBatchAdditionalInfo(uint32_t nonPersistantFlag, const void* data, uint32_t length)
 {
-    return MsprofReportBatchAdditionalInfo(nonPersistantFlag, static_cast<VOID_PTR>(const_cast<void *>(data)), length);
+    return MsprofReportBatchAdditionalInfo(nonPersistantFlag, static_cast<VOID_PTR>(const_cast<void*>(data)), length);
 }
 
-MSVP_PROF_API size_t AdprofGetBatchReportMaxSize(uint32_t type)
-{
-    return MsprofGetBatchReportMaxSize(type);
-}
+MSVP_PROF_API size_t AdprofGetBatchReportMaxSize(uint32_t type) { return MsprofGetBatchReportMaxSize(type); }
 
-MSVP_PROF_API uint64_t AdprofGetHashId(const char *hashInfo, size_t length)
+MSVP_PROF_API uint64_t AdprofGetHashId(const char* hashInfo, size_t length)
 {
     return MsprofGetHashId(hashInfo, length);
 }
@@ -215,6 +198,15 @@ MSVP_PROF_API int32_t MsprofUnSubscribeRawData()
     MSPROF_LOGD("MsprofUnsubscribeRawData ok");
     return ret;
 }
+
+MSVP_PROF_API uint64_t ProfStr2Id(const char* hashInfo, size_t length) { return MsprofGetHashId(hashInfo, length); }
+
+MSVP_PROF_API int32_t ProfAclRangePushEx(ACLPROF_EVENT_ATTR_PTR attr)
+{
+    return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxRangePushEx(attr);
+}
+
+MSVP_PROF_API int32_t ProfAclRangePop() { return ProfAPI::ProfTxPlugin::GetProftxInstance().ProftxRangePop(); }
 
 #ifdef __cplusplus
 }

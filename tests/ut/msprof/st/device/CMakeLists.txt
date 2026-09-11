@@ -39,6 +39,7 @@ set(profilerSrcList
     ${MSPROF_SOURCE_DIR}/dvvp/adda/devprof/device/src/task_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/channel/ai_drv_prof_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dev_api.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/msprof_drv_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dsmi_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/collection_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/collection_register.cpp
@@ -55,6 +56,7 @@ set(profilerSrcList
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_hwts_log_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_instr_perf_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_biu_perf_job.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_collect_info.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_aicore_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_aicpu_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_sys_info_job.cpp
@@ -107,8 +109,8 @@ target_include_directories(device_stest PRIVATE
     ${TOP_DIR}/inc/driver
     ${TOP_DIR}/inc/tsch
     ${TOP_DIR}/inc/external
-    ${TOP_DIR}/abl/adump
-    ${TOP_DIR}/abl/adump/external
+    ${TOP_DIR}/runtime/src/dfx/adump
+    ${TOP_DIR}/runtime/src/dfx/adump/external
     ${TOP_DIR}/ace/npuruntime/inc
     ${TOP_DIR}/abl/msprof/inc
     ${TOP_DIR}/metadef/inc
@@ -147,7 +149,7 @@ target_compile_options(device_stest PRIVATE
     -g
     -pipe
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Wfloat-equal
     -Wextra

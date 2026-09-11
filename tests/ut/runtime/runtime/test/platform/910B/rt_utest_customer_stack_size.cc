@@ -20,7 +20,7 @@
 #include "notify.hpp"
 #include "event.hpp"
 #include "task_info.hpp"
-#include "task_info.h"
+#include "task_info_v100.h"
 #include "ffts_task.h"
 #include "device/device_error_proc.hpp"
 #include "program.hpp"
@@ -32,6 +32,8 @@
 #include "profiler.hpp"
 #include "rdma_task.h"
 #include "thread_local_container.hpp"
+#include "inner_kernel.h"
+#include "rt_unwrap.h"
 #undef private
 #undef protected
 
@@ -40,15 +42,13 @@ using namespace cce::runtime;
 
 class CloudV2CustomerStackSize : public testing::Test {
 protected:
-    static void SetUpTestCase()
-    {}
+    static void SetUpTestCase() {}
 
-    static void TearDownTestCase()
-    {}
+    static void TearDownTestCase() {}
 
     virtual void SetUp()
     {
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
         isCfgOpWaitTaskTimeout = rtInstance->timeoutConfig_.isCfgOpWaitTaskTimeout;
         isCfgOpExcTaskTimeout = rtInstance->timeoutConfig_.isCfgOpExcTaskTimeout;
         rtInstance->timeoutConfig_.isCfgOpWaitTaskTimeout = false;
@@ -57,7 +57,7 @@ protected:
 
     virtual void TearDown()
     {
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
         rtInstance->timeoutConfig_.isCfgOpWaitTaskTimeout = isCfgOpWaitTaskTimeout;
         rtInstance->timeoutConfig_.isCfgOpExcTaskTimeout = isCfgOpExcTaskTimeout;
         GlobalMockObject::verify();
@@ -86,15 +86,17 @@ TEST_F(CloudV2CustomerStackSize, getStackBufferMinSize32K)
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     error = rtSetDevice(0);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
-    ElfProgram program(0);
-    Kernel kernel(NULL, "", 355, &program, 10);
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
+    Kernel kernel("", 355, &program, RT_KERNEL_ATTR_TYPE_AICORE, 10);
     kernel.SetMinStackSize1(KERNEL_STACK_SIZE_16K);
     kernel.SetMinStackSize2(KERNEL_STACK_SIZE_16K);
     program.kernelNameMap_.insert({"test1", &kernel});
+    Program* programBase = &program;
+    rtBinHandle programHandle = rt_ut::InitAndExportHandle<rtBinHandle>(programBase);
 
-    const void *stack = nullptr;
+    const void* stack = nullptr;
     uint32_t stackSize = 0U;
-    EXPECT_EQ(rtGetStackBuffer(&program, 0, 0, &stack, &stackSize), RT_ERROR_NONE);
+    EXPECT_EQ(rtGetStackBuffer(programHandle, 0, 0, 0, 0, &stack, &stackSize), RT_ERROR_NONE);
     EXPECT_EQ(stackSize, KERNEL_STACK_SIZE_32K);
     error = rtDeviceReset(0);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
@@ -107,15 +109,17 @@ TEST_F(CloudV2CustomerStackSize, getStackBufferMinSize64K)
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     error = rtSetDevice(0);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
-    ElfProgram program(0);
-    Kernel kernel(NULL, "", 355, &program, 10);
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
+    Kernel kernel("", 355, &program, RT_KERNEL_ATTR_TYPE_AICORE, 10);
     kernel.SetMinStackSize1(KERNEL_STACK_SIZE_16K * 4);
     kernel.SetMinStackSize2(KERNEL_STACK_SIZE_16K);
     program.kernelNameMap_.insert({"test1", &kernel});
+    Program* programBase = &program;
+    rtBinHandle programHandle = rt_ut::InitAndExportHandle<rtBinHandle>(programBase);
 
-    const void *stack = nullptr;
+    const void* stack = nullptr;
     uint32_t stackSize = 0U;
-    EXPECT_EQ(rtGetStackBuffer(&program, 0, 0, &stack, &stackSize), RT_ERROR_NONE);
+    EXPECT_EQ(rtGetStackBuffer(programHandle, 0, 0, 0, 0, &stack, &stackSize), RT_ERROR_NONE);
     EXPECT_EQ(stackSize, 114688);
     error = rtDeviceReset(0);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
@@ -124,7 +128,6 @@ TEST_F(CloudV2CustomerStackSize, getStackBufferMinSize64K)
 
 TEST_F(CloudV2CustomerStackSize, ConstructFftsMixSqeForDavinciTask)
 {
-
     rtError_t error = rtDeviceSetLimit(0, RT_LIMIT_TYPE_STACK_SIZE, 102400);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     error = rtSetDevice(0);
@@ -139,15 +142,15 @@ TEST_F(CloudV2CustomerStackSize, ConstructFftsMixSqeForDavinciTask)
     ret = rtStreamCreate(&stream, 0);
     EXPECT_EQ(ret, RT_ERROR_NONE);
 
-    ElfProgram program(0);
-    Kernel kernel(NULL, "", 355, &program, 10);
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
+    Kernel kernel("", 355, &program, RT_KERNEL_ATTR_TYPE_AICORE, 10);
     kernel.SetMinStackSize1(KERNEL_STACK_SIZE_32K + 1024);
     kernel.SetMinStackSize2(KERNEL_STACK_SIZE_32K + 1024);
     kernel.SetMixType(MIX_AIC_AIV_MAIN_AIC);
     TaskInfo taskInfo = {};
     taskInfo.type = TS_TASK_TYPE_KERNEL_AICORE;
     taskInfo.bindFlag = false;
-    taskInfo.stream = static_cast<Stream*>(stream);
+    taskInfo.stream = rt_ut::UnwrapOrNull<Stream>(stream);
     taskInfo.u.aicTaskInfo.kernel = &kernel;
 
     rtStarsSqe_t command = {};
@@ -166,7 +169,6 @@ TEST_F(CloudV2CustomerStackSize, ConstructFftsMixSqeForDavinciTask)
 
 TEST_F(CloudV2CustomerStackSize, ConstructFftsMixSqeForDavinciTask2)
 {
-
     rtError_t error = rtDeviceSetLimit(0, RT_LIMIT_TYPE_STACK_SIZE, 102400);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     error = rtSetDevice(0);
@@ -181,15 +183,15 @@ TEST_F(CloudV2CustomerStackSize, ConstructFftsMixSqeForDavinciTask2)
     ret = rtStreamCreate(&stream, 0);
     EXPECT_EQ(ret, RT_ERROR_NONE);
 
-    ElfProgram program(0);
-    Kernel kernel(NULL, "", 355, &program, 10);
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
+    Kernel kernel("", 355, &program, RT_KERNEL_ATTR_TYPE_AICORE, 10);
     kernel.SetMinStackSize1(KERNEL_STACK_SIZE_32K);
     kernel.SetMinStackSize2(KERNEL_STACK_SIZE_32K);
     kernel.SetMixType(MIX_AIC_AIV_MAIN_AIC);
     TaskInfo taskInfo = {};
     taskInfo.type = TS_TASK_TYPE_KERNEL_AICORE;
     taskInfo.bindFlag = false;
-    taskInfo.stream = static_cast<Stream*>(stream);
+    taskInfo.stream = rt_ut::UnwrapOrNull<Stream>(stream);
     taskInfo.u.aicTaskInfo.kernel = &kernel;
 
     rtStarsSqe_t command = {};
@@ -208,7 +210,6 @@ TEST_F(CloudV2CustomerStackSize, ConstructFftsMixSqeForDavinciTask2)
 
 TEST_F(CloudV2CustomerStackSize, ConstructFftsMixSqeForDavinciTask3)
 {
-
     rtError_t error = rtDeviceSetLimit(0, RT_LIMIT_TYPE_STACK_SIZE, 102400);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     error = rtSetDevice(0);
@@ -222,15 +223,21 @@ TEST_F(CloudV2CustomerStackSize, ConstructFftsMixSqeForDavinciTask3)
     rtStream_t stream;
     ret = rtStreamCreate(&stream, 0);
     EXPECT_EQ(ret, RT_ERROR_NONE);
+    Context* ctxPtr = (Context*)ctx;
+    Stream* stmPtr = rt_ut::UnwrapOrNull<Stream>(stream);
+    std::list<Stream*> streamList;
+    streamList.push_back(stmPtr);
+    const mmTimespec startTime = mmGetTickCount();
+    (void*)ctxPtr->SyncStreamsWithTimeout(streamList, -1, startTime);
 
-    ElfProgram program(0);
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
     program.SetStackSize(KERNEL_STACK_SIZE_16K);
-    Kernel kernel(NULL, "", 355, &program, 10);
+    Kernel kernel("", 355, &program, RT_KERNEL_ATTR_TYPE_AICORE, 10);
     kernel.SetMixType(MIX_AIC_AIV_MAIN_AIC);
     TaskInfo taskInfo = {};
     taskInfo.type = TS_TASK_TYPE_KERNEL_AICORE;
     taskInfo.bindFlag = false;
-    taskInfo.stream = static_cast<Stream*>(stream);
+    taskInfo.stream = rt_ut::UnwrapOrNull<Stream>(stream);
     taskInfo.u.aicTaskInfo.kernel = &kernel;
 
     rtStarsSqe_t command = {};
@@ -247,9 +254,50 @@ TEST_F(CloudV2CustomerStackSize, ConstructFftsMixSqeForDavinciTask3)
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 }
 
+TEST_F(CloudV2CustomerStackSize, ConstructFftsMixSqeForDavinciTask4)
+{
+    rtError_t ret = RT_ERROR_NONE;
+    ret = rtSetDevice(0);
+    EXPECT_EQ(ret, ACL_RT_SUCCESS);
+    rtStream_t stream;
+    ret = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
+    program.SetStackSize(KERNEL_STACK_SIZE_16K);
+    Kernel kernel("", 355, &program, RT_KERNEL_ATTR_TYPE_AICORE, 10);
+    kernel.SetMixType(MIX_AIC_AIV_MAIN_AIV);
+    TaskInfo taskInfo = {};
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICORE;
+    taskInfo.bindFlag = false;
+    taskInfo.stream = rt_ut::UnwrapOrNull<Stream>(stream);
+    taskInfo.u.aicTaskInfo.kernel = &kernel;
+
+    rtStarsSqe_t command = {};
+    MOCKER(halMemAlloc).stubs().will(returnValue(DRV_ERROR_NONE));
+
+    std::array<QosMasterConfigType, MAX_ACC_QOS_CFG_NUM> aicoreQosCfg = {};
+    aicoreQosCfg[0].mode = 0;
+    aicoreQosCfg[1].mode = 0;
+    aicoreQosCfg[2].mode = 0;
+    aicoreQosCfg[3].mode = 0;
+
+    cce::runtime::RawDevice* dev = (cce::runtime::RawDevice*)(taskInfo.stream->Device_());
+    dev->SetQosCfg(aicoreQosCfg[0], 0);
+    dev->SetQosCfg(aicoreQosCfg[1], 1);
+    dev->SetQosCfg(aicoreQosCfg[2], 2);
+    dev->SetQosCfg(aicoreQosCfg[3], 3);
+    ConstructFftsMixSqeForDavinciTask(&taskInfo, &command);
+
+    ret = rtStreamDestroy(stream);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    ret = rtDeviceReset(0);
+    EXPECT_EQ(ret, ACL_RT_SUCCESS);
+}
+
 TEST_F(CloudV2CustomerStackSize, ConstructAICoreSqeForDavinciTask)
 {
-
     rtError_t error = rtDeviceSetLimit(0, RT_LIMIT_TYPE_STACK_SIZE, 102400);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     error = rtSetDevice(0);
@@ -264,14 +312,14 @@ TEST_F(CloudV2CustomerStackSize, ConstructAICoreSqeForDavinciTask)
     ret = rtStreamCreate(&stream, 0);
     EXPECT_EQ(ret, RT_ERROR_NONE);
 
-    ElfProgram program(0);
-    Kernel kernel(NULL, "", 355, &program, 10);
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
+    Kernel kernel("", 355, &program, RT_KERNEL_ATTR_TYPE_AICORE, 10);
     kernel.SetMinStackSize1(KERNEL_STACK_SIZE_32K + 1024);
     kernel.SetMixType(NO_MIX);
     TaskInfo taskInfo = {};
     taskInfo.type = TS_TASK_TYPE_KERNEL_AICORE;
     taskInfo.bindFlag = false;
-    taskInfo.stream = static_cast<Stream*>(stream);
+    taskInfo.stream = rt_ut::UnwrapOrNull<Stream>(stream);
     taskInfo.u.aicTaskInfo.kernel = &kernel;
 
     rtStarsSqe_t command = {};
@@ -289,7 +337,6 @@ TEST_F(CloudV2CustomerStackSize, ConstructAICoreSqeForDavinciTask)
 
 TEST_F(CloudV2CustomerStackSize, ConstructAICoreSqeForDavinciTask2)
 {
-
     rtError_t error = rtDeviceSetLimit(0, RT_LIMIT_TYPE_STACK_SIZE, 102400);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     error = rtSetDevice(0);
@@ -304,14 +351,14 @@ TEST_F(CloudV2CustomerStackSize, ConstructAICoreSqeForDavinciTask2)
     ret = rtStreamCreate(&stream, 0);
     EXPECT_EQ(ret, RT_ERROR_NONE);
 
-    ElfProgram program(0);
-    Kernel kernel(NULL, "", 355, &program, 10);
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
+    Kernel kernel("", 355, &program, RT_KERNEL_ATTR_TYPE_AICORE, 10);
     kernel.SetMinStackSize1(KERNEL_STACK_SIZE_32K);
     kernel.SetMixType(NO_MIX);
     TaskInfo taskInfo = {};
     taskInfo.type = TS_TASK_TYPE_KERNEL_AICORE;
     taskInfo.bindFlag = false;
-    taskInfo.stream = static_cast<Stream*>(stream);
+    taskInfo.stream = rt_ut::UnwrapOrNull<Stream>(stream);
     taskInfo.u.aicTaskInfo.kernel = &kernel;
 
     rtStarsSqe_t command = {};
@@ -329,7 +376,6 @@ TEST_F(CloudV2CustomerStackSize, ConstructAICoreSqeForDavinciTask2)
 
 TEST_F(CloudV2CustomerStackSize, ConstructAICoreSqeForDavinciTask3)
 {
-
     rtError_t error = rtDeviceSetLimit(0, RT_LIMIT_TYPE_STACK_SIZE, 102400);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     error = rtSetDevice(0);
@@ -344,14 +390,14 @@ TEST_F(CloudV2CustomerStackSize, ConstructAICoreSqeForDavinciTask3)
     ret = rtStreamCreate(&stream, 0);
     EXPECT_EQ(ret, RT_ERROR_NONE);
 
-    ElfProgram program(0);
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
     program.SetStackSize(KERNEL_STACK_SIZE_16K);
-    Kernel kernel(NULL, "", 355, &program, 10);
+    Kernel kernel("", 355, &program, RT_KERNEL_ATTR_TYPE_AICORE, 10);
     kernel.SetMixType(NO_MIX);
     TaskInfo taskInfo = {};
     taskInfo.type = TS_TASK_TYPE_KERNEL_AICORE;
     taskInfo.bindFlag = false;
-    taskInfo.stream = static_cast<Stream*>(stream);
+    taskInfo.stream = rt_ut::UnwrapOrNull<Stream>(stream);
     taskInfo.u.aicTaskInfo.kernel = &kernel;
 
     rtStarsSqe_t command = {};
@@ -367,11 +413,53 @@ TEST_F(CloudV2CustomerStackSize, ConstructAICoreSqeForDavinciTask3)
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 }
 
+TEST_F(CloudV2CustomerStackSize, ConstructAICoreSqeForDavinciTask4)
+{
+    rtError_t ret = RT_ERROR_NONE;
+    ret = rtSetDevice(0);
+    EXPECT_EQ(ret, ACL_RT_SUCCESS);
+
+    rtStream_t stream;
+    ret = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    ElfProgram program(RT_KERNEL_ATTR_TYPE_AICORE);
+    program.SetStackSize(KERNEL_STACK_SIZE_16K);
+    Kernel kernel("", 355, &program, RT_KERNEL_ATTR_TYPE_AICORE, 10);
+    kernel.SetMixType(NO_MIX);
+    TaskInfo taskInfo = {};
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICORE;
+    taskInfo.bindFlag = false;
+    taskInfo.stream = rt_ut::UnwrapOrNull<Stream>(stream);
+    taskInfo.u.aicTaskInfo.kernel = &kernel;
+
+    rtStarsSqe_t command = {};
+
+    std::array<QosMasterConfigType, MAX_ACC_QOS_CFG_NUM> aicoreQosCfg = {};
+    aicoreQosCfg[0].mode = 0;
+    aicoreQosCfg[1].mode = 0;
+    aicoreQosCfg[2].mode = 0;
+    aicoreQosCfg[3].mode = 0;
+
+    cce::runtime::RawDevice* dev = (cce::runtime::RawDevice*)(taskInfo.stream->Device_());
+    dev->SetQosCfg(aicoreQosCfg[0], 0);
+    dev->SetQosCfg(aicoreQosCfg[1], 1);
+    dev->SetQosCfg(aicoreQosCfg[2], 2);
+    dev->SetQosCfg(aicoreQosCfg[3], 3);
+    ConstructAICoreSqeForDavinciTask(&taskInfo, &command);
+
+    ret = rtStreamDestroy(stream);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    ret = rtDeviceReset(0);
+    EXPECT_EQ(ret, ACL_RT_SUCCESS);
+}
+
 TEST_F(CloudV2CustomerStackSize, AllocCustomerStackPhyBaseFailed)
 {
     rtError_t error = rtDeviceSetLimit(0, RT_LIMIT_TYPE_STACK_SIZE, 102400);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
-    RawDevice *dev = new RawDevice(0);
+    RawDevice* dev = new RawDevice(0);
     dev->Init();
     MOCKER_CPP_VIRTUAL(dev->Driver_(), &Driver::DevMemAlloc).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
     rtError_t ret = dev->AllocCustomerStackPhyBase();
@@ -383,7 +471,7 @@ TEST_F(CloudV2CustomerStackSize, AllocCustomerStackPhyBase)
 {
     rtError_t error = rtDeviceSetLimit(0, RT_LIMIT_TYPE_STACK_SIZE, KERNEL_STACK_SIZE_32K);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
-    RawDevice *dev = new RawDevice(0);
+    RawDevice* dev = new RawDevice(0);
     dev->Init();
     rtError_t ret = dev->AllocCustomerStackPhyBase();
     dev->FreeCustomerStackPhyBase();
@@ -395,13 +483,15 @@ TEST_F(CloudV2CustomerStackSize, AllocCustomerStackPhyBaseSuccess)
 {
     rtError_t error = rtDeviceSetLimit(0, RT_LIMIT_TYPE_STACK_SIZE, 102400);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
-    RawDevice *dev = new RawDevice(0);
+    RawDevice* dev = new RawDevice(0);
     dev->Init();
     uint32_t tmp = 0;
-    void *addr = &tmp;
+    void* addr = &tmp;
     MOCKER_CPP_VIRTUAL(dev->Driver_(), &Driver::DevMemAlloc)
         .stubs()
-        .with(outBoundP(&addr, sizeof(void *)), mockcpp::any(), mockcpp::any(), mockcpp::any(), mockcpp::any(), mockcpp::any())
+        .with(
+            outBoundP(&addr, sizeof(void*)), mockcpp::any(), mockcpp::any(), mockcpp::any(), mockcpp::any(),
+            mockcpp::any())
         .will(returnValue(RT_ERROR_NONE));
     rtError_t ret = dev->AllocCustomerStackPhyBase();
     EXPECT_EQ(ret, RT_ERROR_NONE);
@@ -412,7 +502,7 @@ TEST_F(CloudV2CustomerStackSize, FreeCustomerStackPhyBase)
 {
     rtError_t error = rtDeviceSetLimit(0, RT_LIMIT_TYPE_STACK_SIZE, KERNEL_STACK_SIZE_32K);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
-    RawDevice *dev = new RawDevice(0);
+    RawDevice* dev = new RawDevice(0);
     dev->Init();
     int32_t temp = 1;
     // dev->customerStackPhyBase_ = &temp;
@@ -426,9 +516,8 @@ TEST_F(CloudV2CustomerStackSize, UpdateKernelsMinStackSizeInfo)
 {
     ElfKernelInfo elfKernelInfo;
     elfKernelInfo.minStackSize = 102400;
-    std::map<std::string, ElfKernelInfo *> kernelInfoMap = {{"stackSizeTest", &elfKernelInfo}};
     RtKernel kernel;
     kernel.name = "stackSizeTest";
-    auto error = UpdateKernelsMinStackSizeInfo(kernelInfoMap, &kernel, 1);
+    auto error = UpdateKernelsMinStackSizeInfo(&kernel, &elfKernelInfo);
     EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
 }

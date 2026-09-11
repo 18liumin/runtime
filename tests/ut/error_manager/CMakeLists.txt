@@ -10,14 +10,19 @@
 # include directories
 include_directories(${CMAKE_CURRENT_LIST_DIR})
 include_directories(${BASE_DIR}/src/dfx/error_manager)
-include_directories(${BASE_DIR}/include/external)
+include_directories(${BASE_DIR}/include/dfx)
+include_directories(${BASE_DIR}/pkg_inc)
 include_directories(${BASE_DIR}/pkg_inc/base)
 
 set(UT_FILES
     "testcase/error_manager_unittest.cc"
 )
 
-add_executable(ut_error_manager ${UT_FILES})
+set(SRC_FILES
+    "${BASE_DIR}/src/dfx/error_manager/error_manager.cc"
+)
+
+add_executable(ut_error_manager ${UT_FILES} ${SRC_FILES})
 
 target_compile_definitions(ut_error_manager PRIVATE
     BASE_DIR="${BASE_DIR}"
@@ -35,16 +40,23 @@ target_compile_definitions(ut_error_manager PRIVATE
 )
 
 target_link_options(ut_error_manager PRIVATE
+        -Wl,--export-dynamic
         -Wl,--disable-new-dtags
         -Wl,-rpath,${CMAKE_CURRENT_LIST_DIR}
         )
 
-target_link_libraries(ut_error_manager
-    intf_pub
-    error_manager
+target_link_libraries(ut_error_manager PRIVATE
+    $<BUILD_INTERFACE:intf_pub>
+    $<BUILD_INTERFACE:c_sec_headers>
     mmpa
+    unified_dlog
     json
-    GTest::gtest GTest::gtest_main ascend_protobuf c_sec -lrt -ldl -lgcov
-    pthread
-    metadef_headers
+    GTestShared::gtest
+    GTestShared::gtest_main    
+    ascend_protobuf
+    c_sec
+    -lrt
+    -ldl
+    -lgcov
+    -lpthread
 )

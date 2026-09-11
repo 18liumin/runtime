@@ -21,7 +21,9 @@ extern "C" {
 #define DLOG_REPORT_FINALIZE 1U
 #define DLOG_REPORT_START 2U
 #define DLOG_REPORT_STOP 3U
-#define PLOG_FUNC_MAX 4U
+#define ACLLOG_REGISTER_CALLBACK 4U
+#define ACLLOG_UNREGISTER_CALLBACK 5U
+#define PLOG_FUNC_MAX 6U
 
 int32_t PlogTransferToUnifiedlog(void);
 int32_t PlogCloseUnifiedlog(void);

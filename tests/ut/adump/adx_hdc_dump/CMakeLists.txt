@@ -9,8 +9,6 @@
 # -----------------------------------------------------------------------------------------------------------
 
 #  cmakelist for adx hdc data dump ut
-include_directories(${OPEN_SOURCE_DIR}/boost)
-include_directories(${OPEN_SOURCE_DIR}/mockcpp_src/include)
 
 set(adxHdcDumpApiSrcList
     ${SRC_CODE_ROOT_PATH}/adcore/hdc/hdc_api.cpp
@@ -42,7 +40,6 @@ set(adxHdcDumpApiSrcList
     ${SRC_CODE_ROOT_PATH}/adump/host/adx_dump_receive.cpp
     ${SRC_CODE_ROOT_PATH}/adump/device/adx_dump_hdc_api.cpp
     ${SRC_CODE_ROOT_PATH}/adump/device/adx_dump_soc_helper.cpp
-    ${SRC_CODE_ROOT_PATH}/adump/host/adx_datadump_callback.cpp
     ${SRC_CODE_ROOT_PATH}/adump/device/adx_datadump_server_soc.cpp
     ${SRC_CODE_ROOT_PATH}/adcore/component/adx_common_component.cpp
     ${SRC_CODE_ROOT_PATH}/adump/adx_dump_process.cpp
@@ -69,7 +66,7 @@ set(adxHeaders
     ${LLT_CODE_ROOT_PATH}/stub
     ${LLT_CODE_ROOT_PATH}/common_stub
 
-    ${TOP_DIR}/include/driver
+    ${TOP_DIR}/pkg_inc/driver
     ${TOP_DIR}/include/external
     ${TOP_DIR}/include/external/acl
     ${TOP_DIR}/pkg_inc/
@@ -105,11 +102,9 @@ set(adxHdcDumpApiUtSrcList
     ${LLT_CODE_ROOT_PATH}/testcase/adx_dump_receive_utest.cc
     ${LLT_CODE_ROOT_PATH}/testcase/adx_sock_device_utest.cc
     ${LLT_CODE_ROOT_PATH}/testcase/adx_dump_server_utest.cc
-    ${LLT_CODE_ROOT_PATH}/testcase/adx_dump_callback_utest.cc
     ${LLT_CODE_ROOT_PATH}/testcase/adx_hdc_interface_utest.cc
     ${LLT_CODE_ROOT_PATH}/testcase/adx_msg_proto_utest.cc
     ${LLT_CODE_ROOT_PATH}/testcase/adx_data_dump_utest.cc
-    ${LLT_CODE_ROOT_PATH}/testcase/acl_dump_utest.cc
     ${LLT_CODE_ROOT_PATH}/testcase/main.cc
 )
 
@@ -121,6 +116,7 @@ add_executable(adx_hdc_dump_utest
 add_dependencies(adx_hdc_dump_utest adump_base_proto)
 
 target_include_directories(adx_hdc_dump_utest PRIVATE
+    ${LIBC_SEC_HEADER}
     ${adxHeaders}
 )
 
@@ -139,9 +135,7 @@ target_compile_definitions(adx_hdc_dump_utest PRIVATE
 
 target_link_libraries(adx_hdc_dump_utest PRIVATE
     $<BUILD_INTERFACE:adx_utestonetrack_pub>
-    c_sec_static
-    ascend_protobuf_static
-    GTest::gtest
+    GTestShared::gtest
 )
 
 target_compile_options(adx_hdc_dump_utest PRIVATE

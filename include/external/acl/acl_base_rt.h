@@ -11,6 +11,9 @@
 #ifndef INC_EXTERNAL_ACL_ACL_BASE_RT_H_
 #define INC_EXTERNAL_ACL_ACL_BASE_RT_H_
 
+#include <stdint.h>
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -29,7 +32,7 @@ extern "C" {
 #endif
 #endif
 
-#ifdef __GNUC__
+#if defined(__GNUC__) && (__GNUC__ >= 6)
 #define ACL_DEPRECATED __attribute__((deprecated))
 #define ACL_DEPRECATED_MESSAGE(message) __attribute__((deprecated(message)))
 #elif defined(_MSC_VER)
@@ -40,22 +43,23 @@ extern "C" {
 #define ACL_DEPRECATED_MESSAGE(message)
 #endif
 
-typedef void *aclrtStream;
-typedef void *aclrtEvent;
-typedef void *aclrtContext;
-typedef void *aclrtNotify;
-typedef void *aclrtCntNotify;
-typedef void *aclrtLabel;
-typedef void *aclrtLabelList;
-typedef void *aclrtMbuf;
+typedef void* aclrtStream;
+typedef void* aclmdlRITask;
+typedef void* aclrtEvent;
+typedef void* aclrtContext;
+typedef void* aclrtNotify;
+typedef void* aclrtCntNotify;
+typedef void* aclrtLabel;
+typedef void* aclrtLabelList;
+typedef void* aclrtMbuf;
 typedef int aclError;
 typedef uint16_t aclFloat16;
 typedef struct aclDataBuffer aclDataBuffer;
-typedef void *aclrtAllocatorDesc;
-typedef void *aclrtAllocator;
-typedef void *aclrtAllocatorBlock;
-typedef void *aclrtAllocatorAddr;
-typedef void *aclrtTaskGrp;
+typedef void* aclrtAllocatorDesc;
+typedef void* aclrtAllocator;
+typedef void* aclrtAllocatorBlock;
+typedef void* aclrtAllocatorAddr;
+typedef void* aclrtTaskGrp;
 
 static const int ACL_ERROR_NONE = 0;
 static const int ACL_SUCCESS = 0;
@@ -134,90 +138,88 @@ static const int ACL_ERROR_DRV_FAILURE = 500004;
 static const int ACL_ERROR_PROFILING_FAILURE = 500005;
 
 typedef enum {
-  ACL_DT_UNDEFINED = -1,
-  ACL_FLOAT = 0,
-  ACL_FLOAT16 = 1,
-  ACL_INT8 = 2,
-  ACL_INT32 = 3,
-  ACL_UINT8 = 4,
-  ACL_INT16 = 6,
-  ACL_UINT16 = 7,
-  ACL_UINT32 = 8,
-  ACL_INT64 = 9,
-  ACL_UINT64 = 10,
-  ACL_DOUBLE = 11,
-  ACL_BOOL = 12,
-  ACL_STRING = 13,
-  ACL_COMPLEX64 = 16,
-  ACL_COMPLEX128 = 17,
-  ACL_BF16 = 27,
-  ACL_INT4 = 29,
-  ACL_UINT1 = 30,
-  ACL_COMPLEX32 = 33,
-  ACL_HIFLOAT8 = 34,
-  ACL_FLOAT8_E5M2 = 35,
-  ACL_FLOAT8_E4M3FN = 36,
-  ACL_FLOAT8_E8M0 = 37,
-  ACL_FLOAT6_E3M2 = 38,
-  ACL_FLOAT6_E2M3 = 39,
-  ACL_FLOAT4_E2M1 = 40,
-  ACL_FLOAT4_E1M2 = 41,
+    ACL_DT_UNDEFINED = -1,
+    ACL_FLOAT = 0,
+    ACL_FLOAT16 = 1,
+    ACL_INT8 = 2,
+    ACL_INT32 = 3,
+    ACL_UINT8 = 4,
+    ACL_INT16 = 6,
+    ACL_UINT16 = 7,
+    ACL_UINT32 = 8,
+    ACL_INT64 = 9,
+    ACL_UINT64 = 10,
+    ACL_DOUBLE = 11,
+    ACL_BOOL = 12,
+    ACL_STRING = 13,
+    ACL_COMPLEX64 = 16,
+    ACL_COMPLEX128 = 17,
+    ACL_BF16 = 27,
+    ACL_INT4 = 29,
+    ACL_UINT1 = 30,
+    ACL_COMPLEX32 = 33,
+    ACL_HIFLOAT8 = 34,
+    ACL_FLOAT8_E5M2 = 35,
+    ACL_FLOAT8_E4M3FN = 36,
+    ACL_FLOAT8_E8M0 = 37,
+    ACL_FLOAT6_E3M2 = 38,
+    ACL_FLOAT6_E2M3 = 39,
+    ACL_FLOAT4_E2M1 = 40,
+    ACL_FLOAT4_E1M2 = 41,
 } aclDataType;
 
 typedef enum {
-  ACL_FORMAT_UNDEFINED = -1,
-  ACL_FORMAT_NCHW = 0,
-  ACL_FORMAT_NHWC = 1,
-  ACL_FORMAT_ND = 2,
-  ACL_FORMAT_NC1HWC0 = 3,
-  ACL_FORMAT_FRACTAL_Z = 4,
-  ACL_FORMAT_NC1HWC0_C04 = 12,
-  ACL_FORMAT_HWCN = 16,
-  ACL_FORMAT_NDHWC = 27,
-  ACL_FORMAT_FRACTAL_NZ = 29,
-  ACL_FORMAT_NCDHW = 30,
-  ACL_FORMAT_NDC1HWC0 = 32,
-  ACL_FRACTAL_Z_3D = 33,
-  ACL_FORMAT_NC = 35,
-  ACL_FORMAT_NCL = 47,
-  ACL_FORMAT_FRACTAL_NZ_C0_16 = 50,
-  ACL_FORMAT_FRACTAL_NZ_C0_32 = 51,
-  ACL_FORMAT_FRACTAL_NZ_C0_2 = 52,
-  ACL_FORMAT_FRACTAL_NZ_C0_4 = 53,
-  ACL_FORMAT_FRACTAL_NZ_C0_8 = 54,
+    ACL_FORMAT_UNDEFINED = -1,
+    ACL_FORMAT_NCHW = 0,
+    ACL_FORMAT_NHWC = 1,
+    ACL_FORMAT_ND = 2,
+    ACL_FORMAT_NC1HWC0 = 3,
+    ACL_FORMAT_FRACTAL_Z = 4,
+    ACL_FORMAT_NC1HWC0_C04 = 12,
+    ACL_FORMAT_HWCN = 16,
+    ACL_FORMAT_NDHWC = 27,
+    ACL_FORMAT_FRACTAL_NZ = 29,
+    ACL_FORMAT_NCDHW = 30,
+    ACL_FORMAT_NDC1HWC0 = 32,
+    ACL_FRACTAL_Z_3D = 33,
+    ACL_FORMAT_NC = 35,
+    ACL_FORMAT_NCL = 47,
+    ACL_FORMAT_FRACTAL_NZ_C0_16 = 50,
+    ACL_FORMAT_FRACTAL_NZ_C0_32 = 51,
+    ACL_FORMAT_FRACTAL_NZ_C0_2 = 52,
+    ACL_FORMAT_FRACTAL_NZ_C0_4 = 53,
+    ACL_FORMAT_FRACTAL_NZ_C0_8 = 54,
 } aclFormat;
 
 typedef enum {
-  ACL_DEBUG = 0,
-  ACL_INFO = 1,
-  ACL_WARNING = 2,
-  ACL_ERROR = 3,
+    ACL_DEBUG = 0,
+    ACL_INFO = 1,
+    ACL_WARNING = 2,
+    ACL_ERROR = 3,
 } aclLogLevel;
 
-typedef enum {
-  ACL_MEMTYPE_DEVICE = 0,
-  ACL_MEMTYPE_HOST = 1,
-  ACL_MEMTYPE_HOST_COMPILE_INDEPENDENT = 2
-} aclMemType;
+typedef enum { ACL_MEMTYPE_DEVICE = 0, ACL_MEMTYPE_HOST = 1, ACL_MEMTYPE_HOST_COMPILE_INDEPENDENT = 2 } aclMemType;
 
 typedef enum {
-  ACL_OPT_DETERMINISTIC = 0,
-  ACL_OPT_ENABLE_DEBUG_KERNEL = 1,
-  ACL_OPT_STRONG_CONSISTENCY = 2
+    ACL_OPT_DETERMINISTIC = 0, // value: 0:disable, 1:deterministic, 2:strong consistency, 3:batch consistency
+    ACL_OPT_ENABLE_DEBUG_KERNEL = 1,
+    ACL_OPT_STRONG_CONSISTENCY ACL_DEPRECATED_MESSAGE(
+        "ACL_OPT_STRONG_CONSISTENCY is deprecated, use ACL_OPT_DETERMINISTIC with value 2 instead") = 2,
+    ACL_OPT_ENABLE_KERNEL_EARLY_START = 3
 } aclSysParamOpt;
 
 typedef enum {
-  ACL_CANN_ATTR_UNDEFINED = -1,
-  ACL_CANN_ATTR_INF_NAN = 0,
-  ACL_CANN_ATTR_BF16 = 1,
-  ACL_CANN_ATTR_JIT_COMPILE = 2
+    ACL_CANN_ATTR_UNDEFINED = -1,
+    ACL_CANN_ATTR_INF_NAN = 0,
+    ACL_CANN_ATTR_BF16 = 1,
+    ACL_CANN_ATTR_JIT_COMPILE = 2
 } aclCannAttr;
 
 typedef enum {
-  ACL_DEVICE_INFO_UNDEFINED = -1,
-  ACL_DEVICE_INFO_AI_CORE_NUM = 0,
-  ACL_DEVICE_INFO_VECTOR_CORE_NUM = 1,
-  ACL_DEVICE_INFO_L2_SIZE = 2
+    ACL_DEVICE_INFO_UNDEFINED = -1,
+    ACL_DEVICE_INFO_AI_CORE_NUM = 0,
+    ACL_DEVICE_INFO_VECTOR_CORE_NUM = 1,
+    ACL_DEVICE_INFO_L2_SIZE = 2
 } aclDeviceInfo;
 
 /**
@@ -227,6 +229,10 @@ typedef enum {
  * @param value [IN]   Data to be converted
  *
  * @retval Transformed data
+ *
+ * @note 不保留NaN/Inf语义，转换结果为普通有限数值：FP16 +Inf转为65536.0，-Inf转为-65536.0，NaN转为98304.0。
+ *       该行为兼容仅支持饱和模式的芯片，适用于所有形态。
+ *       如需保留NaN/Inf语义，建议直接在算子计算中产生，不要通过本接口构造。
  */
 ACL_FUNC_VISIBILITY float aclFloat16ToFloat(aclFloat16 value);
 
@@ -237,6 +243,10 @@ ACL_FUNC_VISIBILITY float aclFloat16ToFloat(aclFloat16 value);
  * @param value [IN]   Data to be converted
  *
  * @retval Transformed data
+ *
+ * @note 按饱和模式处理：NaN和Inf均转为FP16最大值65504.0(0x7BFF)，负Inf转为-65504.0(0xFBFF)。
+ *       该行为兼容仅支持饱和模式的芯片，适用于所有形态。
+ *       如需保留NaN/Inf语义，建议直接在算子计算中产生，不要通过本接口构造。
  */
 ACL_FUNC_VISIBILITY aclFloat16 aclFloatToFloat16(float value);
 
@@ -255,7 +265,7 @@ ACL_FUNC_VISIBILITY aclFloat16 aclFloatToFloat16(float value);
  *
  * @see aclrtMalloc | aclrtFree
  */
-ACL_FUNC_VISIBILITY aclDataBuffer *aclCreateDataBuffer(void *data, size_t size);
+ACL_FUNC_VISIBILITY aclDataBuffer* aclCreateDataBuffer(void* data, size_t size);
 
 /**
  * @ingroup AscendCL
@@ -273,14 +283,14 @@ ACL_FUNC_VISIBILITY aclDataBuffer *aclCreateDataBuffer(void *data, size_t size);
  *
  * @see aclCreateDataBuffer
  */
-ACL_FUNC_VISIBILITY aclError aclDestroyDataBuffer(const aclDataBuffer *dataBuffer);
+ACL_FUNC_VISIBILITY aclError aclDestroyDataBuffer(const aclDataBuffer* dataBuffer);
 
 /**
  * @ingroup AscendCL
  * @brief update new data of aclDataBuffer
  *
  * @param dataBuffer [OUT]    pointer to aclDataBuffer
- * @li The old data need to be released by the user, otherwise it may occur memory leak leakage
+ * @li The old data need to be released by the user, otherwise it may occur memory leak
  *  call aclGetDataBufferAddr interface to get old data address
  *  call aclrtFree interface to release memory
  *
@@ -296,7 +306,7 @@ ACL_FUNC_VISIBILITY aclError aclDestroyDataBuffer(const aclDataBuffer *dataBuffe
  *
  * @see aclrtMalloc | aclrtFree | aclGetDataBufferAddr
  */
-ACL_FUNC_VISIBILITY aclError aclUpdateDataBuffer(aclDataBuffer *dataBuffer, void *data, size_t size);
+ACL_FUNC_VISIBILITY aclError aclUpdateDataBuffer(aclDataBuffer* dataBuffer, void* data, size_t size);
 
 /**
  * @ingroup AscendCL
@@ -306,7 +316,7 @@ ACL_FUNC_VISIBILITY aclError aclUpdateDataBuffer(aclDataBuffer *dataBuffer, void
  *
  * @retval data address
  */
-ACL_FUNC_VISIBILITY void *aclGetDataBufferAddr(const aclDataBuffer *dataBuffer);
+ACL_FUNC_VISIBILITY void* aclGetDataBufferAddr(const aclDataBuffer* dataBuffer);
 
 /**
  * @ingroup AscendCL
@@ -317,7 +327,7 @@ ACL_FUNC_VISIBILITY void *aclGetDataBufferAddr(const aclDataBuffer *dataBuffer);
  * @retval data size
  */
 ACL_DEPRECATED_MESSAGE("aclGetDataBufferSize is deprecated, use aclGetDataBufferSizeV2 instead")
-ACL_FUNC_VISIBILITY uint32_t aclGetDataBufferSize(const aclDataBuffer *dataBuffer);
+ACL_FUNC_VISIBILITY uint32_t aclGetDataBufferSize(const aclDataBuffer* dataBuffer);
 
 /**
  * @ingroup AscendCL
@@ -327,7 +337,7 @@ ACL_FUNC_VISIBILITY uint32_t aclGetDataBufferSize(const aclDataBuffer *dataBuffe
  *
  * @retval data size
  */
-ACL_FUNC_VISIBILITY size_t aclGetDataBufferSizeV2(const aclDataBuffer *dataBuffer);
+ACL_FUNC_VISIBILITY size_t aclGetDataBufferSizeV2(const aclDataBuffer* dataBuffer);
 
 /**
  * @ingroup AscendCL
@@ -349,9 +359,13 @@ ACL_FUNC_VISIBILITY size_t aclDataTypeSize(aclDataType dataType);
  * @param line [IN]        Number of source lines where the log is located
  * @param fmt [IN]         the format of current log
  * @param ... [IN]         the value of current log
+ *
+ * @attention The formatted log string is limited to 1024 bytes (including the terminating null
+ *            character). Content exceeding this limit will be truncated (with a trailing
+ *            "...[truncated]" mark) rather than discarded.
  */
-ACL_FUNC_VISIBILITY void aclAppLog(aclLogLevel logLevel, const char *func, const char *file, uint32_t line,
-                                   const char *fmt, ...);
+ACL_FUNC_VISIBILITY void aclAppLog(
+    aclLogLevel logLevel, const char* func, const char* file, uint32_t line, const char* fmt, ...);
 
 /**
  * @ingroup AscendCL
@@ -359,11 +373,10 @@ ACL_FUNC_VISIBILITY void aclAppLog(aclLogLevel logLevel, const char *func, const
  *
  * @retval null for failed
  * @retval OtherValues success
-*/
-ACL_FUNC_VISIBILITY const char *aclrtGetSocName();
+ */
+ACL_FUNC_VISIBILITY const char* aclrtGetSocName();
 
-#define ACL_APP_LOG(level, fmt, ...) \
-    aclAppLog(level, __FUNCTION__, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+#define ACL_APP_LOG(level, fmt, ...) aclAppLog(level, __FUNCTION__, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
 
 /**
  * @ingroup AscendCL
@@ -375,7 +388,7 @@ ACL_FUNC_VISIBILITY const char *aclrtGetSocName();
  * @retval ACL_SUCCESS  The function is successfully executed.
  * @retval OtherValues  Failure
  */
-ACL_FUNC_VISIBILITY aclError aclGetCannAttributeList(const aclCannAttr **cannAttrList, size_t *num);
+ACL_FUNC_VISIBILITY aclError aclGetCannAttributeList(const aclCannAttr** cannAttrList, size_t* num);
 
 /**
  * @ingroup AscendCL
@@ -388,7 +401,7 @@ ACL_FUNC_VISIBILITY aclError aclGetCannAttributeList(const aclCannAttr **cannAtt
  * @retval ACL_SUCCESS  The function is successfully executed.
  * @retval OtherValues  Failure
  */
-ACL_FUNC_VISIBILITY aclError aclGetCannAttribute(aclCannAttr cannAttr, int32_t *value);
+ACL_FUNC_VISIBILITY aclError aclGetCannAttribute(aclCannAttr cannAttr, int32_t* value);
 
 /**
  * @ingroup AscendCL
@@ -401,7 +414,7 @@ ACL_FUNC_VISIBILITY aclError aclGetCannAttribute(aclCannAttr cannAttr, int32_t *
  * @retval ACL_SUCCESS  The function is successfully executed.
  * @retval OtherValues  Failure
  */
-ACL_FUNC_VISIBILITY aclError aclGetDeviceCapability(uint32_t deviceId, aclDeviceInfo deviceInfo, int64_t *value);
+ACL_FUNC_VISIBILITY aclError aclGetDeviceCapability(uint32_t deviceId, aclDeviceInfo deviceInfo, int64_t* value);
 
 #ifdef __cplusplus
 }

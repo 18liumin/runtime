@@ -7,13 +7,14 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
+
 #include "scd_ptrace.h"
 #include <elf.h>
 #include <sys/uio.h>
 #include <sys/ptrace.h>
 #include "scd_log.h"
 
-#define MAX_PTRACE_REG_NUM  64U
+#define MAX_PTRACE_REG_NUM 64U
 
 TraStatus ScdPtraceAttach(int32_t tid)
 {
@@ -23,23 +24,17 @@ TraStatus ScdPtraceAttach(int32_t tid)
     return TRACE_SUCCESS;
 }
 
-void ScdPtraceDetach(int32_t tid)
-{
-    (void)ptrace(PTRACE_DETACH, tid, NULL, NULL);
-}
+void ScdPtraceDetach(int32_t tid) { (void)ptrace(PTRACE_DETACH, tid, NULL, NULL); }
 
-void ScdPtraceContinue(int32_t tid)
-{
-    (void)ptrace(PTRACE_CONT, tid, NULL, NULL);
-}
+void ScdPtraceContinue(int32_t tid) { (void)ptrace(PTRACE_CONT, tid, NULL, NULL); }
 
-TraStatus ScdPtraceGetRegs(int32_t tid, uintptr_t *regArray, size_t regNum)
+TraStatus ScdPtraceGetRegs(int32_t tid, uintptr_t* regArray, size_t regNum)
 {
-    uintptr_t regs[MAX_PTRACE_REG_NUM]; //big enough for all architectures
+    uintptr_t regs[MAX_PTRACE_REG_NUM]; // big enough for all architectures
     size_t regLen = 0;
-    
+
 #ifdef PTRACE_GETREGS
-    if(ptrace(PTRACE_GETREGS, tid, NULL, &regs) != 0) {
+    if (ptrace(PTRACE_GETREGS, tid, NULL, &regs) != 0) {
         return TRACE_FAILURE;
     }
     regLen = regNum;
@@ -47,7 +42,7 @@ TraStatus ScdPtraceGetRegs(int32_t tid, uintptr_t *regArray, size_t regNum)
     struct iovec iovec;
     iovec.iov_base = &regs;
     iovec.iov_len = sizeof(regs);
-    if(ptrace(PTRACE_GETREGSET, tid, NT_PRSTATUS, &iovec) != 0) {
+    if (ptrace(PTRACE_GETREGSET, tid, NT_PRSTATUS, &iovec) != 0) {
         return TRACE_FAILURE;
     }
     regLen = iovec.iov_len / sizeof(uintptr_t);

@@ -21,7 +21,8 @@ namespace dvvp {
 namespace transport {
 using UploaderQueue = analysis::dvvp::common::queue::BoundQueue<SHARED_PTR_ALIA<analysis::dvvp::ProfileFileChunk> >;
 class Uploader : public analysis::dvvp::common::thread::Thread {
-using analysis::dvvp::common::thread::Thread::Stop;
+    using analysis::dvvp::common::thread::Thread::Stop;
+
 public:
     explicit Uploader(SHARED_PTR_ALIA<ITransport> transport);
 
@@ -39,11 +40,12 @@ public:
     int32_t UnRegisterPipeTransportCallback();
     void RegisterTransportGenHashIdFuncPtr(HashDataGenIdFuncPtr* ptr);
     void Flush() const;
+    int32_t Flush(uint32_t timeoutSec) const;
     void CloseTransport();
     SHARED_PTR_ALIA<ITransport> GetTransport();
 
 protected:
-    void Run(const struct error_message::Context &errorContext) override;
+    void Run(const error_message::ErrorManagerContext& errorContext) override;
 
 private:
     SHARED_PTR_ALIA<ITransport> transport_;
@@ -53,8 +55,8 @@ private:
     volatile bool forceQuit_;
     volatile bool isStopped_;
 };
-}  // namespace transport
-}  // namespace dvvp
-}  // namespace analysis
+} // namespace transport
+} // namespace dvvp
+} // namespace analysis
 
 #endif

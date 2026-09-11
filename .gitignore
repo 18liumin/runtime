@@ -4,3 +4,18 @@
 /build_out/
 /output/
 /cov/
+*__pycache__/
+
+# pre-commit log
+log/
+oat_reports/
+
+# opencode 自动安装的 skills
+.claude/skills/gitcode-pr/
+.claude/skills/gitcode-issue/
+
+# opencode 配置文件
+.opencode/opencode.json
+
+# third_party
+third_party/

@@ -7,8 +7,8 @@
 ## 文件权限控制
 
 - 建议用户在主机（包括宿主机）及容器中设置运行系统umask值为0027及以上，保障新增文件夹默认最高权限为750，新增文件默认最高权限为640。
-- 建议用户对个人隐私数据、商业资产、源文件和Runtime开发过程中保存的各类文件等敏感内容做好权限控制等安全措施。例如涉及本项目安装目录权限管控、输入公共数据文件权限管控，设定的权限建议参考[A-文件（夹）各场景权限管控推荐最大值](#A-文件（夹）各场景权限管控推荐最大值)。
-- 用户安装和使用过程需要做好权限控制，建议参考[A-文件（夹）各场景权限管控推荐最大值](#A-文件（夹）各场景权限管控推荐最大值)文件权限参考进行设置。
+- 建议用户对个人隐私数据、商业资产、源文件和Runtime开发过程中保存的各类文件等敏感内容做好权限控制等安全措施。例如涉及本项目安装目录权限管控、输入公共数据文件权限管控，设定的权限建议参考[A-文件（夹）各场景权限管控推荐最大值](#a-文件夹各场景权限管控推荐最大值)。
+- 用户安装和使用过程需要做好权限控制，建议参考[A-文件（夹）各场景权限管控推荐最大值](#a-文件夹各场景权限管控推荐最大值)文件权限参考进行设置。
 
 ## 构建安全声明
 
@@ -25,11 +25,18 @@
 |      类型      |                                           开源代码地址                                           |                            文件名                             |             公网IP地址/公网URL地址/域名/邮箱地址/压缩文件地址             |                   用途说明                    |
 | :------------: |:------------------------------------------------------------------------------------------:|:----------------------------------------------------------| :---------------------------------------------------------- |:-----------------------------------------|
 |  依赖  | 不涉及  | cmake/makeself-fetch.cmake | https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz | 从gitcode下载makeself源码，作用编译依赖 |
-|  依赖  | 不涉及  | build_third_party.sh | https://gitcode.com/cann-src-third-party/json/releases/download/v3.11.3/include.zip | 从gitcode下载json源码，作用编译依赖 |
+|  依赖  | 不涉及  | build_third_party.sh | https://gitcode.com/cann-src-third-party/json/releases/download/v3.12.0/json-3.12.0.tar.gz | 从gitcode下载json源码，作用编译依赖 |
 |  依赖  | 不涉及  | build_third_party.sh | https://gitcode.com/cann-src-third-party/googletest/releases/download/v1.14.0/googletest-1.14.0.tar.gz | 从gitcode下载gtest源码，作用编译依赖 |
 |  依赖  | 不涉及  | cmake/third_party/mockcpp.cmake | https://gitcode.com/cann-src-third-party/mockcpp/releases/download/v2.7-h1/mockcpp-2.7_py3.patch | 从gitcode下载mockcpp patch源码，作用编译依赖 |
 |  依赖  | 不涉及  | cmake/third_party/mockcpp.cmake | https://gitcode.com/cann-src-third-party/mockcpp/releases/download/v2.7-h1/mockcpp-2.7.tar.gz | 从gitcode下载mockcpp源码，作用编译依赖 |
 |  依赖  | 不涉及  | cmake/third_party/boost.cmake | https://gitcode.com/cann-src-third-party/boost/releases/download/v1.87.0/boost_1_87_0.tar.gz | 从gitcode下载boost源码，作用编译依赖 |
+|  依赖  | 不涉及  | cmake/third_party/acl_compat.cmake | https://cann-3rd.obs.cn-north-4.myhuaweicloud.com/cann/acl-compat/acl-compat_9.1.0_linux-${TARGET_ARCH}.tar.gz | 从huaweicloud下载二进制依赖 |
+|  依赖  | 不涉及  | cmake/third_party/csec.cmake | https://gitcode.com/cann-src-third-party/libboundscheck/releases/download/v1.1.16/libboundscheck-v1.1.16.tar.gz | 从gitcode下载libboundscheck源码，作用编译依赖 |
+|  依赖  | 不涉及  | cmake/third_party/eigen.cmake | https://gitcode.com/cann-src-third-party/eigen/releases/download/5.0.0-h0.trunk/eigen-5.0.0.tar.gz | 从gitcode下载eigen源码，作用编译依赖 |
+|  依赖  | 不涉及  | cmake/third_party/protobuf.cmake | https://gitcode.com/cann-src-third-party/protobuf/releases/download/v25.1/protobuf-25.1.tar.gz | 从gitcode下载protobuf源码，作用编译依赖 |
+|  依赖  | 不涉及  | cmake/third_party/seccomp.cmake | https://gitcode.com/cann-src-third-party/libseccomp/releases/download/v2.5.4/libseccomp-2.5.4.tar.gz | 从gitcode下载libseccomp源码，作用编译依赖 |
+|  依赖  | 不涉及  | install_deps.sh | https://apt.kitware.com/keys/kitware-archive-latest.asc | 从kitware下载cmake软件，作用编译依赖 |
+|  依赖  | 不涉及  | install_deps.sh | https://apt.kitware.com/ubuntu/ | 从kitware下载cmake软件，作用编译依赖 |
 ---
 
 ## 漏洞机制说明

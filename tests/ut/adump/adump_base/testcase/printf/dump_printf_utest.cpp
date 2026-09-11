@@ -130,7 +130,7 @@ void AddBlockInfo1(unsigned char *data)
     double num11[] = {2.331}; // not support
     // 1, -2, −infinity, 0.333984375, nan, -0, 3.140625, infinity
     uint16_t num12[] = {16256, 49152, 65408, 16043, 65409, 32768, 16457, 32640};
-    int8_t num13[] = {0, 3, 138, 20, 62, 67, 97, 200};
+    uint8_t num13[] = {0, 3, 138, 20, 62, 67, 97, 200};
     bool boolNums[8];
     for (uint8_t i = 0U; i < 8U; ++i) {
         boolNums[i] = (i % 2U == 0U);
@@ -920,6 +920,27 @@ TEST_F(ADX_DUMP_FP16_UTEST, AdxDumpFP16_Large)
     EXPECT_EQ(num10[0].toFloat(), 65504.0);
 }
 
+TEST_F(ADX_DUMP_FP16_UTEST, AdxDumpFP16_InfAndNan)
+{
+    // +Infinity
+    Adx::fp16_t posInf(static_cast<uint16_t>(0x7C00));
+    EXPECT_TRUE(std::isinf(posInf.toFloat()));
+    EXPECT_GT(posInf.toFloat(), 0.0f);
+
+    // -Infinity
+    Adx::fp16_t negInf(static_cast<uint16_t>(0xFC00));
+    EXPECT_TRUE(std::isinf(negInf.toFloat()));
+    EXPECT_LT(negInf.toFloat(), 0.0f);
+
+    // NaN
+    Adx::fp16_t nanVal(static_cast<uint16_t>(0x7C01));
+    EXPECT_TRUE(std::isnan(nanVal.toFloat()));
+    
+    // NaN
+    Adx::fp16_t nanVal2(static_cast<uint16_t>(0x7FFF));
+    EXPECT_TRUE(std::isnan(nanVal2.toFloat()));
+}
+
 TEST_F(ADX_DUMP_ASSERT_UTEST, AdxDumpAssert_MixFftsPlus)
 {
     rtExceptionInfo_t exceptionInfo;
@@ -1069,7 +1090,7 @@ TEST_F(ADX_DUMP_TIMESTAMP_UTEST, AdxDumpTimestamp)
 class ADX_SIMT_PRINTF_UTEST: public testing::Test {
 protected:
     virtual void SetUp() {
-        setenv("ADX_LLT_SOC_VERSION", "Ascend910_9599", 1);
+        setenv("ADX_LLT_SOC_VERSION", "Ascend950PR_9599", 1);
     }
     virtual void TearDown() {
         setenv("ADX_LLT_SOC_VERSION", "", 1);

@@ -29,6 +29,7 @@ enum ProfCollectionJobE {
     HCCS_DRV_COLLECTION_JOB,
     UB_DRV_COLLECTION_JOB,
     ROCE_DRV_COLLECTION_JOB,
+    NETDEV_STATS_COLLECTION_JOB,
     APP_MEM_COLLECTION_JOB,
     DEV_MEM_COLLECTION_JOB,
     AISTACK_MEM_COLLECTION_JOB,
@@ -57,6 +58,7 @@ enum ProfCollectionJobE {
     FFTS_PROFILE_COLLECTION_JOB,
     INSTR_PROFILING_COLLECTION_JOB,
     BIU_PERF_COLLECTION_JOB,
+    PC_SAMPLING_COLLECTION_JOB,
     // system
     ADPROF_COLLECTION_JOB,
     CTRLCPU_PERF_COLLECTION_JOB,
@@ -71,10 +73,15 @@ enum ProfCollectionJobE {
     HOST_SYSCALLS_COLLECTION_JOB,
     HOST_PTHREAD_COLLECTION_JOB,
     HOST_DISKIO_COLLECTION_JOB,
+    HOST_CCA_MS_JOB,
     // diagnostic collection
     DIAGNOSTIC_COLLECTION_JOB,
+    NTS_PMU_COLLECTION_JOB,
+    NTS_TASK_COLLECTION_JOB,
     NR_MAX_COLLECTION_JOB
 };
+
+enum BiuPcSamplingMode { BIU_PC_SAMPLING_AUTO_MODE = -1, BIU_PERF_MONITOR_MODE = 0, PC_SAMPLING_MODE = 1 };
 
 struct CollectionJobParams {
     int32_t coreNum;
@@ -84,6 +91,7 @@ struct CollectionJobParams {
     SHARED_PTR_ALIA<std::vector<std::string>> events;
     SHARED_PTR_ALIA<std::vector<int32_t>> aivCores;
     SHARED_PTR_ALIA<std::vector<std::string>> aivEvents;
+    int32_t biuPcSamplingMode = BIU_PC_SAMPLING_AUTO_MODE;
 };
 
 struct CollectionJobCommonParams {
@@ -102,12 +110,7 @@ struct CollectionJobCfg {
 
 class ICollectionJob;
 struct CollectionJobT {
-    CollectionJobT()
-        : jobTag(NR_MAX_COLLECTION_JOB),
-          jobCfg(nullptr),
-          collectionJob(nullptr)
-    {
-    }
+    CollectionJobT() : jobTag(NR_MAX_COLLECTION_JOB), jobCfg(nullptr), collectionJob(nullptr) {}
     Analysis::Dvvp::JobWrapper::ProfCollectionJobE jobTag;
     SHARED_PTR_ALIA<Analysis::Dvvp::JobWrapper::CollectionJobCfg> jobCfg;
     SHARED_PTR_ALIA<Analysis::Dvvp::JobWrapper::ICollectionJob> collectionJob;
@@ -116,7 +119,7 @@ struct CollectionJobT {
 class ICollectionJob {
 public:
     ICollectionJob();
-    ICollectionJob(int32_t collectionId, const std::string &name);
+    ICollectionJob(int32_t collectionId, const std::string& name);
     virtual ~ICollectionJob();
     virtual int32_t Init(const SHARED_PTR_ALIA<CollectionJobCfg> cfg) = 0;
     virtual int32_t Process() = 0;
@@ -131,11 +134,11 @@ public:
 
 class CollectionJobReflection {
 public:
-    template<typename T>
+    template <typename T>
     static void RegisterCollectionJobClass(const int32_t collectionId)
     {
         collectionJobMap_[collectionId] = []() -> SHARED_PTR_ALIA<ICollectionJob> {
-            return SHARED_PTR_ALIA<T>(new (std::nothrow)T);
+            return SHARED_PTR_ALIA<T>(new (std::nothrow) T);
         };
     }
 
@@ -153,7 +156,7 @@ private:
     static std::map<int32_t, std::function<SHARED_PTR_ALIA<ICollectionJob>()>> collectionJobMap_;
 };
 
-template<typename T>
+template <typename T>
 class CollectionJobRegister {
 public:
     explicit CollectionJobRegister(const int32_t collectionId)
@@ -165,7 +168,7 @@ public:
 #define COLLECTION_JOB_REGISTER(collectionId, collectionJob) \
     CollectionJobRegister<collectionJob> g_##collectionJob##collectionId(collectionId)
 
-}
-}
-}
+} // namespace JobWrapper
+} // namespace Dvvp
+} // namespace Analysis
 #endif

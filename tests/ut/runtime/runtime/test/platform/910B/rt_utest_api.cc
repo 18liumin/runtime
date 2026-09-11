@@ -8,85 +8,133 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include "../../rt_utest_api.hpp"
+#include "platform_manager_v2.h"
+#include "rt_unwrap.h"
 #include "../../data/elf.h"
 
-class CloudV2ApiTest : public testing::Test
+namespace {
+Notify* g_ipcOpenNotifyRet = nullptr;
+
+rtError_t IpcOpenNotifyStub(
+    cce::runtime::ApiImpl* api, Notify** const retNotify, const char_t* const name, uint32_t flag)
 {
+    (void)api;
+    (void)name;
+    (void)flag;
+    *retNotify = g_ipcOpenNotifyRet;
+    return RT_ERROR_NONE;
+}
+
+void EnableValueWaitFeatureForTest()
+{
+    Runtime* const rtInstance = Runtime::Instance();
+    GlobalContainer::SetRtChipType(CHIP_910_B_93);
+    rtInstance->SetChipType(CHIP_910_B_93);
+    rtInstance->UpdateDevProperties(CHIP_910_B_93, "Ascend910B1");
+}
+
+void MockMemValueSubmitSuccess(Stream* const stream)
+{
+    Device* const device = stream->Device_();
+    MOCKER_CPP_VIRTUAL(device, &Device::SubmitTask).stubs().will(returnValue(RT_ERROR_NONE));
+}
+
+drvError_t halMemHostGetDevPointer_success_stub(void* srcPtr, UINT32 devid, void** dstPtr)
+{
+    *dstPtr = reinterpret_cast<void*>(0x12345678);
+    return DRV_ERROR_NONE;
+}
+
+drvError_t drvMemGetAttribute_stub(DVdeviceptr vptr, struct DVattribute* attr)
+{
+    if (vptr == 0x10000000) {
+        attr->memType = DV_MEM_LOCK_HOST;
+        return DRV_ERROR_NONE;
+    }
+    attr->memType = DV_MEM_LOCK_DEV;
+    return DRV_ERROR_NONE;
+}
+} // namespace
+
+class CloudV2ApiTest : public testing::Test {
 public:
     static rtStream_t stream_;
-    static rtEvent_t  event_;
-    static void      *binHandle_;
-    static char       function_;
-    static uint32_t   binary_[32];
-    static Driver*    driver_;
+    static rtEvent_t event_;
+    static void* binHandle_;
+    static char function_;
+    static uint32_t binary_[32];
+    static Driver* driver_;
+
 protected:
     static void SetUpTestCase()
     {
-        ((Runtime *)Runtime::Instance())->SetIsUserSetSocVersion(false);
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
+        (void)rtSetSocVersion("Ascend910B1");
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
+        RawDevice* rawDevice = new RawDevice(0);
+        MOCKER_CPP_VIRTUAL(rawDevice, &RawDevice::SetTschVersionForCmodel).stubs().will(ignoreReturnValue());
         (void)rtSetDevice(0);
         (void)rtSetTSDevice(1);
         rtError_t error1 = rtStreamCreate(&stream_, 0);
         rtError_t error2 = rtEventCreate(&event_);
 
-        for (uint32_t i = 0; i < sizeof(binary_) / sizeof(uint32_t); i++)
-        {
+        for (uint32_t i = 0; i < sizeof(binary_) / sizeof(uint32_t); i++) {
             binary_[i] = i;
         }
 
         rtDevBinary_t devBin;
-        devBin.magic = RT_DEV_BINARY_MAGIC_PLAIN;
-        devBin.version = 1;
-        devBin.length = sizeof(binary_);
-        devBin.data = binary_;
+        devBin.magic = RT_DEV_BINARY_MAGIC_ELF;
+        devBin.version = 2;
+        devBin.data = (void*)elf_o;
+        devBin.length = elf_o_len;
         rtError_t error3 = rtDevBinaryRegister(&devBin, &binHandle_);
 
         rtError_t error4 = rtFunctionRegister(binHandle_, &function_, "foo", NULL, 0);
+        delete rawDevice;
 
-        std::cout<<"Cloudv2 api test start:"<<error1<<", "<<error2<<", "<<error3<<", "<<error4<<std::endl;
+        std::cout << "Cloudv2 api test start:" << error1 << ", " << error2 << ", " << error3 << ", " << error4
+                  << std::endl;
     }
 
     static void TearDownTestCase()
     {
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
         rtError_t error1 = rtStreamDestroy(stream_);
         rtError_t error2 = rtEventDestroy(event_);
         rtError_t error3 = rtDevBinaryUnRegister(binHandle_);
-        std::cout<<"api test start end : "<<error1<<", "<<error2<<", "<<error3<<std::endl;
+        std::cout << "api test start end : " << error1 << ", " << error2 << ", " << error3 << std::endl;
         GlobalMockObject::verify();
         rtDeviceReset(0);
-        ((Runtime *)Runtime::Instance())->SetIsUserSetSocVersion(false);
         (void)rtSetSocVersion("");
+        GlobalContainer::SetRtChipType(CHIP_END);
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
     }
 
     virtual void SetUp()
     {
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
-        RawDevice *rawDevice = new RawDevice(0);
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
+        RawDevice* rawDevice = new RawDevice(0);
         MOCKER_CPP_VIRTUAL(rawDevice, &RawDevice::SetTschVersionForCmodel).stubs().will(ignoreReturnValue());
         delete rawDevice;
     }
 
-    virtual void TearDown()
-    {
-         GlobalMockObject::verify();
-    }
+    virtual void TearDown() { GlobalMockObject::verify(); }
 };
 rtStream_t CloudV2ApiTest::stream_ = NULL;
 rtEvent_t CloudV2ApiTest::event_ = NULL;
 void* CloudV2ApiTest::binHandle_ = nullptr;
-char  CloudV2ApiTest::function_ = 'a';
+char CloudV2ApiTest::function_ = 'a';
 uint32_t CloudV2ApiTest::binary_[32] = {};
 Driver* CloudV2ApiTest::driver_ = NULL;
 
 TEST_F(CloudV2ApiTest, memcpyex_host_to_device)
 {
     rtError_t error;
-    void *hostPtr;
-    void *devPtr;
+    void* hostPtr;
+    void* devPtr;
     size_t free;
     size_t total;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
 
     error = rtMalloc(&hostPtr, 64, RT_MEMORY_HBM, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -104,12 +152,12 @@ TEST_F(CloudV2ApiTest, memcpyex_host_to_device)
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
 
-TEST_F(CloudV2ApiTest, memcpy_async_qos_910_B_93)
+TEST_F(CloudV2ApiTest, memcpy_async_qos_cloud_v2)
 {
     rtError_t error;
-    void *hostPtr;
-    void *devPtr;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    void* hostPtr;
+    void* devPtr;
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
 
     error = rtMalloc(&hostPtr, 64, RT_MEMORY_HBM, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -118,11 +166,10 @@ TEST_F(CloudV2ApiTest, memcpy_async_qos_910_B_93)
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     // RTS_MEMCPYASYNC_QOS_CONFIG_01, set qos null
-    rtTaskCfgInfo_t *taskCfgInfoPtr = nullptr;
+    rtTaskCfgInfo_t* taskCfgInfoPtr = nullptr;
 
     error = rtMemcpyAsyncWithCfgV2(devPtr, 64, hostPtr, 64, RT_MEMCPY_ADDR_DEVICE_TO_DEVICE, stream_, taskCfgInfoPtr);
     EXPECT_EQ(error, RT_ERROR_NONE);
-
 
     // RTS_MEMCPYASYNC_QOS_CONFIG_02, config qos, but not config flag
     rtTaskCfgInfo_t taskCfgInfo = {};
@@ -142,7 +189,6 @@ TEST_F(CloudV2ApiTest, memcpy_async_qos_910_B_93)
     taskCfgInfo1.d2dCrossFlag = 0;
     error = rtMemcpyAsyncWithCfgV2(devPtr, 64, hostPtr, 64, RT_MEMCPY_ADDR_DEVICE_TO_DEVICE, stream_, &taskCfgInfo1);
     EXPECT_EQ(error, RT_ERROR_NONE);
-
 
     // RTS_MEMCPYASYNC_QOS_CONFIG_05, config qos, config flag = 0
     taskCfgInfo1.qos = 3;
@@ -193,14 +239,12 @@ TEST_F(CloudV2ApiTest, memory_advise)
 {
     rtError_t error;
     uint64_t size = 128;
-    void *ptr = NULL;
+    void* ptr = NULL;
     Api* oldApi_ = Runtime::runtime_->api_;
-    Profiler *profiler = new Profiler(oldApi_);
+    Profiler* profiler = new Profiler(oldApi_);
     profiler->Init();
 
-    MOCKER(halMemAdvise)
-        .stubs()
-        .will(returnValue(DRV_ERROR_NONE));
+    MOCKER(halMemAdvise).stubs().will(returnValue(DRV_ERROR_NONE));
 
     error = rtMemAllocManaged(&ptr, size, 0, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -208,7 +252,7 @@ TEST_F(CloudV2ApiTest, memory_advise)
     error = rtMemAdvise(ptr, 100, 100);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     error = rtMemAdvise(ptr, 100, 100);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
@@ -221,9 +265,11 @@ TEST_F(CloudV2ApiTest, memory_advise)
     error = rtMemFreeManaged(ptr);
     delete profiler;
 }
-TEST_F(CloudV2ApiTest, ipc_memory_success){
+
+TEST_F(CloudV2ApiTest, ipc_memory_success)
+{
     rtError_t error;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     g_isAddrFlatDevice = true;
 
     error = rtIpcSetMemoryAttr("mem1", RT_ATTR_TYPE_MEM_MAP, 0);
@@ -232,24 +278,37 @@ TEST_F(CloudV2ApiTest, ipc_memory_success){
 
 TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2)
 {
+    // bin register
+    size_t MAX_LENGTH = 75776;
+    FILE* objFile = fopen("llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.o", "rb");
+    if (NULL == objFile) {
+        printf("master open error\n");
+        return;
+    }
+
+    char data[MAX_LENGTH];
+    size_t len = 0;
+    len = fread(data, sizeof(char), MAX_LENGTH, objFile);
+    fclose(objFile);
+
     rtError_t error;
-    void *handle;
-    Program *prog;
+    void* handle;
+    Program* prog;
     rtDevBinary_t bin;
     bin.magic = RT_DEV_BINARY_MAGIC_ELF;
     bin.version = 2;
-    bin.data = (void*)elf_o;
-    bin.length = elf_o_len;
+    bin.data = data;
+    bin.length = len;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     error = rtDevBinaryRegister(&bin, &handle);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     // constructing dynamic shape kernel
-    prog = (Program *)handle;
-    Kernel *kernelPtr = new (std::nothrow) Kernel(NULL, "", 355, prog, 10);
-    if (NULL == kernelPtr)
-    {
+    prog = rt_ut::UnwrapOrNull<Program>(handle);
+    ASSERT_NE(prog, nullptr);
+    Kernel* kernelPtr = new (std::nothrow) Kernel("", 355ULL, prog, RT_KERNEL_ATTR_TYPE_AICORE, 10);
+    if (NULL == kernelPtr) {
         error = rtStreamSynchronize(NULL);
         EXPECT_EQ(error, RT_ERROR_NONE);
 
@@ -267,11 +326,12 @@ TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2)
     if (prog->KernelTable_ == nullptr) {
         prog->KernelTable_ = new rtKernelArray_t[1];
     }
-    error = prog->AllKernelAdd(kernelPtr);
+    bool addKernelFlag = true;
+    error = prog->AllKernelAdd(kernelPtr, addKernelFlag);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     // api test
-    void * addr = NULL;
+    void* addr = NULL;
     uint32_t cnt = 0U;
     error = rtKernelGetAddrAndPrefCnt(handle, 355, NULL, RT_DYNAMIC_SHAPE_KERNEL, &addr, &cnt);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -282,27 +342,60 @@ TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2)
     error = rtDevBinaryUnRegister(handle);
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
-TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2_V2)
+
+TEST_F(CloudV2ApiTest, event_work_Normal)
 {
     rtError_t error;
-    void *handle;
-    Program *prog;
+    error = rtEventWorkModeSet(0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2ApiTest, cm0_task_normal)
+{
+    rtError_t error;
+    rtCmoTaskCfg_t cmoTaskCfg = {};
+    cmoTaskCfg.cmoType = RT_CMO_PREFETCH;
+    error = rtsLaunchCmoTask(&cmoTaskCfg, nullptr, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    cmoTaskCfg.cmoType = RT_CMO_WRITEBACK;
+    error = rtsLaunchCmoTask(&cmoTaskCfg, nullptr, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2_V2)
+{
+    // bin register
+    size_t MAX_LENGTH = 75776;
+    FILE* objFile = fopen("llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.o", "rb");
+    if (NULL == objFile) {
+        printf("master open error\n");
+        return;
+    }
+
+    char data[MAX_LENGTH];
+    size_t len = 0;
+    len = fread(data, sizeof(char), MAX_LENGTH, objFile);
+    fclose(objFile);
+
+    rtError_t error;
+    void* handle;
+    Program* prog;
     rtDevBinary_t bin;
     bin.magic = RT_DEV_BINARY_MAGIC_ELF;
     bin.version = 2;
-    bin.data = (void*)elf_o;
-    bin.length = elf_o_len;
+    bin.data = data;
+    bin.length = len;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
 
     error = rtDevBinaryRegister(&bin, &handle);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     // constructing dynamic shape kernel
-    prog = (Program *)handle;
-    Kernel *kernelPtr = new (std::nothrow) Kernel(NULL, "", 355, prog, 10);
-    if (NULL == kernelPtr)
-    {
+    prog = rt_ut::UnwrapOrNull<Program>(handle);
+    ASSERT_NE(prog, nullptr);
+    Kernel* kernelPtr = new (std::nothrow) Kernel("", 355ULL, prog, RT_KERNEL_ATTR_TYPE_AICORE, 10);
+    if (NULL == kernelPtr) {
         error = rtStreamSynchronize(NULL);
         EXPECT_EQ(error, RT_ERROR_NONE);
 
@@ -320,12 +413,13 @@ TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2_V2)
     if (prog->KernelTable_ == nullptr) {
         prog->KernelTable_ = new rtKernelArray_t[1];
     }
-    error = prog->AllKernelAdd(kernelPtr);
+    bool addKernelFlag = true;
+    error = prog->AllKernelAdd(kernelPtr, addKernelFlag);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     // api test
     rtKernelDetailInfo_t kernelInfo;
-    rtFunctionInfo_t *functionInfo = kernelInfo.functionInfo;
+    rtFunctionInfo_t* functionInfo = kernelInfo.functionInfo;
     functionInfo[0].pcAddr = NULL;
     functionInfo[1].pcAddr = NULL;
     functionInfo[0].prefetchCnt = 0U;
@@ -343,25 +437,38 @@ TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2_V2)
 }
 TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2_V2_error1)
 {
+    // bin register
+    size_t MAX_LENGTH = 75776;
+    FILE* objFile = fopen("llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.o", "rb");
+    if (NULL == objFile) {
+        printf("master open error\n");
+        return;
+    }
+
+    char data[MAX_LENGTH];
+    size_t len = 0;
+    len = fread(data, sizeof(char), MAX_LENGTH, objFile);
+    fclose(objFile);
+
     rtError_t error;
-    void *handle;
-    Program *prog;
+    void* handle;
+    Program* prog;
     rtDevBinary_t bin;
     bin.magic = RT_DEV_BINARY_MAGIC_ELF;
     bin.version = 2;
-    bin.data = (void*)elf_o;
-    bin.length = elf_o_len;
+    bin.data = data;
+    bin.length = len;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
 
     error = rtDevBinaryRegister(&bin, &handle);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     // constructing dynamic shape kernel
-    prog = (Program *)handle;
-    Kernel *kernelPtr = new (std::nothrow) Kernel(NULL, "", 355, prog, 10);
-    if (NULL == kernelPtr)
-    {
+    prog = rt_ut::UnwrapOrNull<Program>(handle);
+    ASSERT_NE(prog, nullptr);
+    Kernel* kernelPtr = new (std::nothrow) Kernel("", 355ULL, prog, RT_KERNEL_ATTR_TYPE_AICORE, 10);
+    if (NULL == kernelPtr) {
         error = rtStreamSynchronize(NULL);
         EXPECT_EQ(error, RT_ERROR_NONE);
 
@@ -379,12 +486,13 @@ TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2_V2_error1)
     if (prog->KernelTable_ == nullptr) {
         prog->KernelTable_ = new rtKernelArray_t[1];
     }
-    error = prog->AllKernelAdd(kernelPtr);
+    bool addKernelFlag = true;
+    error = prog->AllKernelAdd(kernelPtr, addKernelFlag);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     // api test
     rtKernelDetailInfo_t kernelInfo;
-    rtFunctionInfo_t *functionInfo = kernelInfo.functionInfo;
+    rtFunctionInfo_t* functionInfo = kernelInfo.functionInfo;
     functionInfo[0].pcAddr = NULL;
     functionInfo[1].pcAddr = NULL;
     functionInfo[0].prefetchCnt = 0U;
@@ -402,25 +510,38 @@ TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2_V2_error1)
 }
 TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2_V2_error2)
 {
+    // bin register
+    size_t MAX_LENGTH = 75776;
+    FILE* objFile = fopen("llt/ace/npuruntime/runtime/ut/runtime/test/data/elf.o", "rb");
+    if (NULL == objFile) {
+        printf("master open error\n");
+        return;
+    }
+
+    char data[MAX_LENGTH];
+    size_t len = 0;
+    len = fread(data, sizeof(char), MAX_LENGTH, objFile);
+    fclose(objFile);
+
     rtError_t error;
-    void *handle;
-    Program *prog;
+    void* handle;
+    Program* prog;
     rtDevBinary_t bin;
     bin.magic = RT_DEV_BINARY_MAGIC_ELF;
     bin.version = 2;
-    bin.data = (void*)elf_o;
-    bin.length = elf_o_len;
+    bin.data = data;
+    bin.length = len;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
 
     error = rtDevBinaryRegister(&bin, &handle);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     // constructing dynamic shape kernel
-    prog = (Program *)handle;
-    Kernel *kernelPtr = new (std::nothrow) Kernel(NULL, "", 355, prog, 10);
-    if (NULL == kernelPtr)
-    {
+    prog = rt_ut::UnwrapOrNull<Program>(handle);
+    ASSERT_NE(prog, nullptr);
+    Kernel* kernelPtr = new (std::nothrow) Kernel("", 355ULL, prog, RT_KERNEL_ATTR_TYPE_AICORE, 10);
+    if (NULL == kernelPtr) {
         error = rtStreamSynchronize(NULL);
         EXPECT_EQ(error, RT_ERROR_NONE);
 
@@ -438,12 +559,13 @@ TEST_F(CloudV2ApiTest, LAUNCH_ALL_KERNEL_TEST_2_V2_error2)
     if (prog->KernelTable_ == nullptr) {
         prog->KernelTable_ = new rtKernelArray_t[1];
     }
-    error = prog->AllKernelAdd(kernelPtr);
+    bool addKernelFlag = true;
+    error = prog->AllKernelAdd(kernelPtr, addKernelFlag);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     // api test
     rtKernelDetailInfo_t kernelInfo;
-    rtFunctionInfo_t *functionInfo = kernelInfo.functionInfo;
+    rtFunctionInfo_t* functionInfo = kernelInfo.functionInfo;
     functionInfo[0].pcAddr = NULL;
     functionInfo[1].pcAddr = NULL;
     functionInfo[0].prefetchCnt = 0U;
@@ -464,10 +586,10 @@ TEST_F(CloudV2ApiTest, KERNEL_LAUNCH_EX_1)
     rtError_t error;
     ApiImpl impl;
     ApiErrorDecorator api(&impl);
-    void * devPtr;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    void* devPtr;
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
 
-    error = api.KernelLaunchEx("", (void *)1, 1, 0, NULL);
+    error = api.KernelLaunchEx("", (void*)1, 1, 0, NULL);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = api.ManagedMemFree(NULL);
@@ -475,11 +597,9 @@ TEST_F(CloudV2ApiTest, KERNEL_LAUNCH_EX_1)
 
     uint64_t size = 128;
     uint32_t device = 1;
-    void *ptr = NULL;
+    void* ptr = NULL;
 
-    MOCKER(halShmemCloseHandle)
-        .stubs()
-        .will(returnValue(DRV_ERROR_RESERVED));
+    MOCKER(halShmemCloseHandle).stubs().will(returnValue(DRV_ERROR_RESERVED));
 
     error = rtMalloc(&devPtr, 60, RT_MEMORY_HBM, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -504,12 +624,12 @@ TEST_F(CloudV2ApiTest, KERNEL_LAUNCH_EX_1)
 
     GlobalMockObject::verify();
 
-    void *dst = NULL;
-    const void *src = NULL;
+    void* dst = NULL;
+    const void* src = NULL;
     uint64_t count = 0;
     rtRecudeKind_t kind;
     rtDataType_t type;
-    Stream *stream = NULL;
+    Stream* stream = NULL;
     error = api.ReduceAsync(dst, src, count, kind, type, stream, 0);
     EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
 
@@ -523,7 +643,7 @@ TEST_F(CloudV2ApiTest, label_api)
     rtError_t error;
     rtLabel_t label;
     rtStream_t stream;
-    const char *name = "label";
+    const char* name = "label";
     uint32_t value = 0;
 
     rtModel_t model;
@@ -539,33 +659,38 @@ TEST_F(CloudV2ApiTest, label_api)
     error = rtLabelCreateV2(&label, model);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    ((Label *)label)->SetLabelDevAddr(NULL);
+    rt_ut::UnwrapOrNull<Label>(label)->SetLabelDevAddr(NULL);
 
     error = rtLabelSet(label, stream);
     EXPECT_NE(error, RT_ERROR_NONE);
 
     error = rtLabelGoto(label, stream);
     EXPECT_NE(error, RT_ERROR_NONE);
+    error = rtLabelGoto(label, nullptr);
+    EXPECT_NE(error, RT_ERROR_NONE);
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     error = rtLabelGoto(label, stream);
     EXPECT_NE(error, RT_ERROR_NONE);
 
     error = rtLabelDestroy(label);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
     error = rtStreamDestroy(stream);
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
-//changed
-TEST_F(CloudV2ApiTest, memcpy_async_host_to_device_81)
+// changed
+TEST_F(CloudV2ApiTest, memcpy_async_host_to_device_910_93)
 {
     rtError_t error;
-    void *hostPtr;
-    void *devPtr;
+    void* hostPtr;
+    void* devPtr;
     size_t size = 128;
 
-    hostPtr = malloc(size);   /* malloc host pageable memory */
+    hostPtr = malloc(size); /* malloc host pageable memory */
     EXPECT_EQ(true, hostPtr != nullptr);
 
     error = rtMalloc(&devPtr, size, RT_MEMORY_HBM, DEFAULT_MODULEID);
@@ -575,11 +700,13 @@ TEST_F(CloudV2ApiTest, memcpy_async_host_to_device_81)
     dvAttributesSrc.memType = DV_MEM_USER_MALLOC;
     dvAttributesDst.memType = DV_MEM_LOCK_DEV;
 
-    MOCKER(drvMemGetAttribute).stubs()
+    MOCKER(drvMemGetAttribute)
+        .stubs()
         .with(eq(RtPtrToPtr<DVdeviceptr>(hostPtr)), outBoundP(&dvAttributesSrc))
         .will(returnValue(DRV_ERROR_NONE));
 
-    MOCKER(drvMemGetAttribute).stubs()
+    MOCKER(drvMemGetAttribute)
+        .stubs()
         .with(eq(RtPtrToPtr<DVdeviceptr>(devPtr)), outBoundP(&dvAttributesDst))
         .will(returnValue(DRV_ERROR_NONE));
 
@@ -599,34 +726,37 @@ TEST_F(CloudV2ApiTest, LAUNCH_KERNEL_WITH_TYPE)
 {
     rtError_t error;
     rtDevBinary_t devBin;
-    void      *binHandle_;
-    uint32_t   binary_[32];
+    void* binHandle_;
+    uint32_t binary_[32];
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
 
-    void *args[] = {&error, NULL};
-    devBin.magic = RT_DEV_BINARY_MAGIC_PLAIN;
-    devBin.version = 1;
-    devBin.length = sizeof(binary_);
-    devBin.data = binary_;
+    void* args[] = {&error, NULL};
+    devBin.magic = RT_DEV_BINARY_MAGIC_ELF;
+    devBin.version = 2;
+    devBin.data = (void*)elf_o;
+    devBin.length = elf_o_len;
     error = rtDevBinaryRegister(&devBin, &binHandle_);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    void *stub_func = (void *)0x123;
+    void* stub_func = (void*)0x123;
     error = rtFunctionRegister(binHandle_, stub_func, "stub_func1", "foo", (1 << 16)); // mix aic
 
-    stub_func = (void *)0x1234;
+    stub_func = (void*)0x1234;
     error = rtFunctionRegister(binHandle_, stub_func, "stub_func1", "foo", (2 << 16)); // mix aiv
 
-    stub_func = (void *)0x12345;
+    stub_func = (void*)0x12345;
     error = rtFunctionRegister(binHandle_, stub_func, "stub_func1", "foo", (3 << 16)); // mix aic && aiv
+
+    error = rtDevBinaryUnRegister(binHandle_);
+    EXPECT_EQ(error, RT_ERROR_NONE);
 }
 
 TEST_F(CloudV2ApiTest, GetDevArgsAddr)
 {
     rtStream_t stm;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
 
     rtError_t error = rtStreamCreate(&stm, 0);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -640,14 +770,227 @@ TEST_F(CloudV2ApiTest, GetDevArgsAddr)
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
 
-class CloudV2ApiTest2 : public testing::Test
+TEST_F(CloudV2ApiTest, mem_wait_record_task_01)
 {
+    rtError_t error;
+    rtStream_t stream;
+    void* devPtr;
+
+    MOCKER(memcpy_s).stubs().will(returnValue(NULL));
+
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+
+    error = rtMalloc(&devPtr, 60, RT_MEMORY_HBM, DEFAULT_MODULEID);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    NpuDriver* rawDrv = new NpuDriver();
+
+    rtPointerAttributes_t rtAttributes;
+    rtAttributes.deviceID = 0;
+    rtAttributes.memoryType = RT_MEMORY_TYPE_DEVICE;
+    rtAttributes.locationType = RT_MEMORY_LOC_DEVICE;
+    MOCKER_CPP_VIRTUAL(rawDrv, &NpuDriver::PointerGetAttributes)
+        .stubs()
+        .with(outBoundP(&rtAttributes, sizeof(rtAttributes)), mockcpp::any())
+        .will(returnValue(RT_ERROR_NONE));
+
+    EnableValueWaitFeatureForTest();
+    MockMemValueSubmitSuccess(rt_ut::UnwrapOrNull<Stream>(stream_));
+    MockMemValueSubmitSuccess(rt_ut::UnwrapOrNull<Stream>(stream));
+
+    error = rtsValueWrite(devPtr, 0, 0, stream_);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsValueWait(devPtr, 0, 0, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    GlobalMockObject::verify();
+
+    error = rtStreamDestroyForce(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtFree(devPtr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    delete rawDrv;
+}
+
+TEST_F(CloudV2ApiTest, mem_wait_record_task_03)
+{
+    rtError_t error;
+    rtStream_t stream;
+    void* devPtr;
+    rtContext_t ctx;
+    Context* context = NULL;
+
+    MOCKER(memcpy_s).stubs().will(returnValue(NULL));
+
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+
+    error = rtCtxGetCurrent(&ctx);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtMalloc(&devPtr, 60, RT_MEMORY_HBM, DEFAULT_MODULEID);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    NpuDriver* rawDrv = new NpuDriver();
+
+    rtPointerAttributes_t rtAttributes;
+    rtAttributes.deviceID = 0;
+    rtAttributes.memoryType = RT_MEMORY_TYPE_DEVICE;
+    rtAttributes.locationType = RT_MEMORY_LOC_DEVICE;
+    MOCKER_CPP_VIRTUAL(rawDrv, &NpuDriver::PointerGetAttributes)
+        .stubs()
+        .with(outBoundP(&rtAttributes, sizeof(rtAttributes)), mockcpp::any())
+        .will(returnValue(RT_ERROR_NONE));
+
+    EnableValueWaitFeatureForTest();
+    MockMemValueSubmitSuccess(rt_ut::UnwrapOrNull<Stream>(stream_));
+    MockMemValueSubmitSuccess(rt_ut::UnwrapOrNull<Stream>(stream));
+
+    context = (Context*)ctx;
+
+    error = rtsValueWrite(devPtr, 0, 0, stream_);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsValueWait(devPtr, 0, 0, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    GlobalMockObject::verify();
+
+    error = rtStreamDestroyForce(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtFree(devPtr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    delete rawDrv;
+}
+
+TEST_F(CloudV2ApiTest, mem_wait_record_task_04)
+{
+    rtError_t error;
+    rtStream_t stream;
+    void* devPtr;
+    ApiImpl impl;
+    Profiler profiler(nullptr);
+    ApiProfileLogDecorator api(&impl, &profiler);
+    ApiProfileDecorator api_2(&impl, &profiler);
+    ApiDecorator api_3(&impl);
+
+    MOCKER(memcpy_s).stubs().will(returnValue(NULL));
+
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+
+    error = rtMalloc(&devPtr, 60, RT_MEMORY_HBM, DEFAULT_MODULEID);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    NpuDriver* rawDrv = new NpuDriver();
+
+    rtPointerAttributes_t rtAttributes;
+    rtAttributes.deviceID = 0;
+    rtAttributes.memoryType = RT_MEMORY_TYPE_DEVICE;
+    rtAttributes.locationType = RT_MEMORY_LOC_DEVICE;
+    MOCKER_CPP_VIRTUAL(rawDrv, &NpuDriver::PointerGetAttributes)
+        .stubs()
+        .with(outBoundP(&rtAttributes, sizeof(rtAttributes)), mockcpp::any())
+        .will(returnValue(RT_ERROR_NONE));
+
+    EnableValueWaitFeatureForTest();
+    MockMemValueSubmitSuccess(rt_ut::UnwrapOrNull<Stream>(stream_));
+    MockMemValueSubmitSuccess(rt_ut::UnwrapOrNull<Stream>(stream));
+
+    error = rtsValueWrite(devPtr, 0, 0, stream_);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsValueWait(devPtr, 0, 0, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = api.MemWriteValue(devPtr, 0, 0, rt_ut::UnwrapOrNull<Stream>(stream_));
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = api.MemWaitValue(devPtr, 0, 1, rt_ut::UnwrapOrNull<Stream>(stream));
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = api_2.MemWriteValue(devPtr, 0, 0, rt_ut::UnwrapOrNull<Stream>(stream_));
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = api_2.MemWaitValue(devPtr, 0, 1, rt_ut::UnwrapOrNull<Stream>(stream));
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = api_3.MemWriteValue(devPtr, 0, 0, rt_ut::UnwrapOrNull<Stream>(stream_));
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = api_3.MemWaitValue(devPtr, 0, 1, rt_ut::UnwrapOrNull<Stream>(stream));
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    GlobalMockObject::verify();
+
+    error = rtStreamDestroyForce(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtFree(devPtr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    delete rawDrv;
+}
+
+TEST_F(CloudV2ApiTest, mem_wait_record_task_05)
+{
+    rtError_t error;
+    void* devPtr;
+
+    MOCKER(memcpy_s).stubs().will(returnValue(NULL));
+
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+
+    error = rtMalloc(&devPtr, 60, RT_MEMORY_HBM, DEFAULT_MODULEID);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    NpuDriver* rawDrv = new NpuDriver();
+
+    rtPointerAttributes_t rtAttributes;
+    rtAttributes.deviceID = 0;
+    rtAttributes.memoryType = RT_MEMORY_TYPE_DEVICE;
+    rtAttributes.locationType = RT_MEMORY_LOC_DEVICE;
+    MOCKER_CPP_VIRTUAL(rawDrv, &NpuDriver::PointerGetAttributes)
+        .stubs()
+        .with(outBoundP(&rtAttributes, sizeof(rtAttributes)), mockcpp::any())
+        .will(returnValue(RT_ERROR_NONE));
+
+    EnableValueWaitFeatureForTest();
+    MockMemValueSubmitSuccess(Runtime::Instance()->CurrentContext()->DefaultStream_());
+
+    error = rtsValueWrite(devPtr, 0, 0, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsValueWait(devPtr, 0, 0, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    GlobalMockObject::verify();
+
+    error = rtFree(devPtr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    delete rawDrv;
+}
+
+class CloudV2ApiTest2 : public testing::Test {
 protected:
     static void SetUpTestCase()
     {
-        (void)rtSetSocVersion("Ascend910B1");
-        ((Runtime *)Runtime::Instance())->SetIsUserSetSocVersion(false);
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
+        (void)rtSetSocVersion("Ascend910B");
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
         (void)rtSetDevice(0);
         (void)rtSetTSDevice(1);
     }
@@ -655,31 +998,30 @@ protected:
     static void TearDownTestCase()
     {
         rtDeviceReset(0);
-        ((Runtime *)Runtime::Instance())->SetIsUserSetSocVersion(false);
         (void)rtSetSocVersion("");
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
     }
 
     virtual void SetUp()
     {
-        RawDevice *rawDevice = new RawDevice(0);
+        RawDevice* rawDevice = new RawDevice(0);
         MOCKER_CPP_VIRTUAL(rawDevice, &RawDevice::SetTschVersionForCmodel).stubs().will(ignoreReturnValue());
         delete rawDevice;
     }
 
-    virtual void TearDown()
-    {
-         GlobalMockObject::verify();
-    }
+    virtual void TearDown() { GlobalMockObject::verify(); }
 
 public:
-    static rtError_t GetNotifyPhyInfo_stub_succ(cce::runtime::ApiImpl *api, Notify *const inNotify, rtNotifyPhyInfo* notifyInfo)
+    static rtError_t GetNotifyPhyInfo_stub_succ(
+        cce::runtime::ApiImpl* api, Notify* const inNotify, rtNotifyPhyInfo* notifyInfo)
     {
         notifyInfo->phyId = 1;
         notifyInfo->tsId = 2;
         return RT_ERROR_NONE;
     }
 
-    static int32_t stubRtsDeviceTaskAbortCallback(uint32_t devId, rtDeviceTaskAbortStage stage, uint32_t timeout, void *args)
+    static int32_t stubRtsDeviceTaskAbortCallback(
+        uint32_t devId, rtDeviceTaskAbortStage stage, uint32_t timeout, void* args)
     {
         return 0;
     }
@@ -693,11 +1035,14 @@ TEST_F(CloudV2ApiTest2, ipc_open_with_flag_succ)
     uint32_t tsId;
     uint32_t notifyId;
     rtNotifyPhyInfo notifyInfo;
-    rtNotify_t notify = new (std::nothrow) Notify(0, 0);
+    rtNotify_t notify = nullptr;
+    Notify* notifyObj = new (std::nothrow) Notify(0, 0);
+    ASSERT_NE(notifyObj, nullptr);
+    InitEmbeddedInnerHandle<Notify>(notifyObj);
+    g_ipcOpenNotifyRet = notifyObj;
 
-    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::IpcOpenNotify).stubs().will(returnValue(RT_ERROR_NONE));
-    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::GetNotifyPhyInfo).stubs()
-        .will(invoke(GetNotifyPhyInfo_stub_succ));
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::IpcOpenNotify).stubs().will(invoke(IpcOpenNotifyStub));
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::GetNotifyPhyInfo).stubs().will(invoke(GetNotifyPhyInfo_stub_succ));
     MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::NotifyDestroy).stubs().will(returnValue(RT_ERROR_NONE));
     error = rtIpcOpenNotifyWithFlag(&notify, "abc", 0);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
@@ -708,28 +1053,34 @@ TEST_F(CloudV2ApiTest2, ipc_open_with_flag_succ)
     error = rtNotifyGetPhyInfoExt(notify, &notifyInfo);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     rtNotifyDestroy(notify);
-    delete notify;
+    g_ipcOpenNotifyRet = nullptr;
+    delete notifyObj;
 }
 
 TEST_F(CloudV2ApiTest2, notify_get_phyinfo_invalid_1)
 {
     ApiImpl apiImpl;
-    rtNotify_t notify;
+    rtNotify_t notify = nullptr;
     rtError_t error;
     uint32_t phyDevId;
     uint32_t tsId;
     uint32_t notifyId;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    Notify* notifyObj = new (std::nothrow) Notify(0, 0);
+    ASSERT_NE(notifyObj, nullptr);
+    InitEmbeddedInnerHandle<Notify>(notifyObj);
+    g_ipcOpenNotifyRet = notifyObj;
 
-    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::IpcOpenNotify).stubs().will(returnValue(RT_ERROR_NONE));
-    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::GetNotifyPhyInfo).stubs()
-        .then(returnValue(RT_ERROR_INVALID_VALUE));
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::IpcOpenNotify).stubs().will(invoke(IpcOpenNotifyStub));
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::GetNotifyPhyInfo).stubs().then(returnValue(RT_ERROR_INVALID_VALUE));
     MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::NotifyDestroy).stubs().will(returnValue(RT_ERROR_NONE));
     error = rtIpcOpenNotifyWithFlag(&notify, "abc", 0);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     error = rtNotifyGetPhyInfo(notify, &phyDevId, &tsId);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
     rtNotifyDestroy(notify);
+    g_ipcOpenNotifyRet = nullptr;
+    delete notifyObj;
 }
 
 TEST_F(CloudV2ApiTest2, rtGetP2PStatus)
@@ -743,9 +1094,7 @@ TEST_F(CloudV2ApiTest2, rtGetP2PStatus)
     error = rtGetP2PStatus(0, 0, NULL);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 
-    MOCKER(drvGetP2PStatus)
-        .stubs()
-        .will(returnValue(DRV_ERROR_INVALID_VALUE));
+    MOCKER(drvGetP2PStatus).stubs().will(returnValue(DRV_ERROR_INVALID_VALUE));
     error = rtGetP2PStatus(0, 0, &status);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 }
@@ -805,69 +1154,22 @@ TEST_F(CloudV2ApiTest2, notify_record1)
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
 
-TEST_F(CloudV2ApiTest2, stream_get_priority)
-{
-    rtError_t error;
-    rtStream_t stream;
-    uint32_t priority = 0;
-
-    error = rtStreamCreateWithFlags(&stream, 5, RT_STREAM_FORBIDDEN_DEFAULT);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtStreamGetPriority(stream, &priority);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-    EXPECT_EQ(priority, 5);
-
-    error = rtStreamGetPriority(nullptr, &priority);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtStreamGetPriority(stream, nullptr);
-    EXPECT_NE(error, RT_ERROR_NONE);
-
-    error = rtStreamDestroy(stream);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-}
-
-TEST_F(CloudV2ApiTest2, stream_get_flags)
-{
-    rtStream_t stream;
-    rtError_t error = RT_ERROR_NONE;
-    uint32_t flags = 0;
-
-    error = rtStreamCreateWithFlags(&stream, 1, RT_STREAM_PERSISTENT);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtStreamGetFlags(stream, &flags);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-    EXPECT_EQ(flags, RT_STREAM_PERSISTENT);
-
-    error = rtStreamGetFlags(nullptr, &flags);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtStreamGetFlags(stream, nullptr);
-    EXPECT_NE(error, RT_ERROR_NONE);
-
-    error = rtStreamDestroy(stream);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-}
-
-
 TEST_F(CloudV2ApiTest2, rtStreamSetModeTest_normal)
 {
     rtError_t error;
     int32_t device_id = 0;
     uint32_t tsId = 0;
 
-    Device *device = ((Runtime *)Runtime::Instance())->DeviceRetain(0, 0);
+    Device* device = ((Runtime*)Runtime::Instance())->DeviceRetain(0, 0);
     int32_t version = device->GetTschVersion();
     device->SetTschVersion(TS_VERSION_SET_STREAM_MODE);
 
     rtStream_t stm;
     rtEvent_t event;
     error = rtStreamCreate(&stm, 0);
-    Stream *stream = static_cast<Stream *>(stm);
+    Stream* stream = rt_ut::UnwrapOrNull<Stream>(stm);
     rtError_t contextStatus = stream->Context_()->GetFailureError();
-    TsStreamFailureMode ctxMode =  stream->Context_()->GetCtxMode();
+    TsStreamFailureMode ctxMode = stream->Context_()->GetCtxMode();
     stream->Context_()->SetCtxMode(STOP_ON_FAILURE);
 
     stream->EnterFailureAbort();
@@ -877,12 +1179,12 @@ TEST_F(CloudV2ApiTest2, rtStreamSetModeTest_normal)
     stream->Context_()->SetCtxMode(ctxMode);
     error = rtStreamDestroy(stm);
     device->SetTschVersion(version);
-    ((Runtime *)Runtime::Instance())->DeviceRelease(device);
+    ((Runtime*)Runtime::Instance())->DeviceRelease(device);
 }
 
 TEST_F(CloudV2ApiTest2, reset_device_force)
 {
-    rtStream_t *stream = nullptr;
+    rtStream_t* stream = nullptr;
     (void)rtSetDevice(0);
     (void)rtSetDevice(0);
     (void)rtSetDevice(0);
@@ -924,7 +1226,7 @@ TEST_F(CloudV2ApiTest2, set_device_by_default_device_id_02)
     EXPECT_EQ(error, RT_ERROR_NONE);
     error = rtSetDefaultDeviceId(0);
     EXPECT_EQ(error, RT_ERROR_NONE);
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     EXPECT_EQ(rtInstance->defaultDeviceId_, 0);
     EXPECT_EQ(rtInstance->hasSetDefaultDevId_, true);
     // 隐式setdevice
@@ -943,89 +1245,85 @@ TEST_F(CloudV2ApiTest2, set_device_by_default_device_id_02)
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
 
-class CloudV2ApiTest3 : public testing::Test
-{
+class CloudV2ApiTest3 : public testing::Test {
 protected:
     static void SetUpTestCase()
     {
-        ((Runtime *)Runtime::Instance())->SetIsUserSetSocVersion(false);
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
-        RawDevice *rawDevice = new RawDevice(0);
+        (void)rtSetSocVersion("Ascend910B1");
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
+        RawDevice* rawDevice = new RawDevice(0);
         MOCKER_CPP_VIRTUAL(rawDevice, &RawDevice::SetTschVersionForCmodel).stubs().will(ignoreReturnValue());
         (void)rtSetDevice(0);
         (void)rtSetTSDevice(1);
         rtError_t error1 = rtStreamCreate(&stream_, 0);
         rtError_t error2 = rtEventCreate(&event_);
 
-        for (uint32_t i = 0; i < sizeof(binary_)/sizeof(uint32_t); i++)
-        {
+        for (uint32_t i = 0; i < sizeof(binary_) / sizeof(uint32_t); i++) {
             binary_[i] = i;
         }
 
         rtDevBinary_t devBin;
-        devBin.magic = RT_DEV_BINARY_MAGIC_PLAIN;
-        devBin.version = 1;
-        devBin.length = sizeof(binary_);
-        devBin.data = binary_;
+        devBin.magic = RT_DEV_BINARY_MAGIC_ELF;
+        devBin.version = 2;
+        devBin.data = (void*)elf_o;
+        devBin.length = elf_o_len;
         rtError_t error3 = rtDevBinaryRegister(&devBin, &binHandle_);
 
         rtError_t error4 = rtFunctionRegister(binHandle_, &function_, "foo", NULL, 0);
         delete rawDevice;
 
-        std::cout<<"api test start:"<<error1<<", "<<error2<<", "<<error3<<", "<<error4<<std::endl;
+        std::cout << "api test start:" << error1 << ", " << error2 << ", " << error3 << ", " << error4 << std::endl;
     }
 
     static void TearDownTestCase()
     {
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
         rtError_t error1 = rtStreamDestroy(stream_);
         rtError_t error2 = rtEventDestroy(event_);
         rtError_t error3 = rtDevBinaryUnRegister(binHandle_);
-        std::cout<<"api test start end : "<<error1<<", "<<error2<<", "<<error3<<std::endl;
+        std::cout << "api test start end : " << error1 << ", " << error2 << ", " << error3 << std::endl;
         GlobalMockObject::verify();
         rtDeviceReset(0);
-        ((Runtime *)Runtime::Instance())->SetIsUserSetSocVersion(false);
         (void)rtSetSocVersion("");
+        ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
     }
 
     virtual void SetUp()
     {
-        Runtime *rtInstance = (Runtime *)Runtime::Instance();
-        RawDevice *rawDevice = new RawDevice(0);
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
+        RawDevice* rawDevice = new RawDevice(0);
         MOCKER_CPP_VIRTUAL(rawDevice, &RawDevice::SetTschVersionForCmodel).stubs().will(ignoreReturnValue());
         delete rawDevice;
     }
 
-    virtual void TearDown()
-    {
-         GlobalMockObject::verify();
-    }
+    virtual void TearDown() { GlobalMockObject::verify(); }
 
 public:
-
-    static int32_t StubTaskAbortCallBack(uint32_t devId, rtTaskAbortStage_t stage, uint32_t timeout, void *args)
+    static int32_t StubTaskAbortCallBack(uint32_t devId, rtTaskAbortStage_t stage, uint32_t timeout, void* args)
     {
         g_taskAbortCallBack = true;
         return 0;
     }
 
-    static int32_t stubRtsDeviceTaskAbortCallback(uint32_t devId, rtDeviceTaskAbortStage stage, uint32_t timeout, void *args)
+    static int32_t stubRtsDeviceTaskAbortCallback(
+        uint32_t devId, rtDeviceTaskAbortStage stage, uint32_t timeout, void* args)
     {
         return 0;
     }
 
     static rtStream_t stream_;
-    static rtEvent_t  event_;
-    static void      *binHandle_;
-    static char       function_;
-    static uint32_t   binary_[32];
-    static Driver*    driver_;
-    static bool       g_taskAbortCallBack;
+    static rtEvent_t event_;
+    static void* binHandle_;
+    static char function_;
+    static uint32_t binary_[32];
+    static Driver* driver_;
+    static bool g_taskAbortCallBack;
 };
 rtStream_t CloudV2ApiTest3::stream_ = nullptr;
 rtEvent_t CloudV2ApiTest3::event_ = nullptr;
 void* CloudV2ApiTest3::binHandle_ = nullptr;
-char  CloudV2ApiTest3::function_ = 'a';
+char CloudV2ApiTest3::function_ = 'a';
 uint32_t CloudV2ApiTest3::binary_[32] = {};
 Driver* CloudV2ApiTest3::driver_ = nullptr;
 bool CloudV2ApiTest3::g_taskAbortCallBack = false;
@@ -1052,20 +1350,17 @@ TEST_F(CloudV2ApiTest3, TEST_Stars_Launch)
     EXPECT_NE(error, RT_ERROR_NONE);
 }
 
-
 TEST_F(CloudV2ApiTest3, test_get_fault_event)
 {
     rtError_t error;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     uint32_t eventCount;
     error = rtGetFaultEvent(0, nullptr, nullptr, 10, &eventCount);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 
     rtDmsEventFilter filter;
     rtDmsFaultEvent dmsEvent;
-    MOCKER(halGetFaultEvent)
-        .stubs()
-        .will(returnValue(DRV_ERROR_NONE));
+    MOCKER(halGetFaultEvent).stubs().will(returnValue(DRV_ERROR_NONE));
     error = rtGetFaultEvent(0, &filter, &dmsEvent, sizeof(rtDmsFaultEvent), &eventCount);
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
@@ -1076,7 +1371,7 @@ TEST_F(CloudV2ApiTest3, TaskAbortCallBack)
     rtError_t error;
     char args[] = "0x100";
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     error = rtSetTaskAbortCallBack(moduleName, StubTaskAbortCallBack, args);
     EXPECT_EQ(error, RT_ERROR_NONE);
     error = rtInstance->taskAbortCallbackMap_.count("HCCL");
@@ -1086,7 +1381,7 @@ TEST_F(CloudV2ApiTest3, TaskAbortCallBack)
 TEST_F(CloudV2ApiTest3, SetWaitTimeOutMilan)
 {
     rtError_t error;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     error = rtSetOpWaitTimeOut(1);
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
@@ -1094,7 +1389,7 @@ TEST_F(CloudV2ApiTest3, SetWaitTimeOutMilan)
 TEST_F(CloudV2ApiTest3, set_device_repeat)
 {
     rtError_t error;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
 
     error = rtSetDevice(0);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -1132,7 +1427,7 @@ TEST_F(CloudV2ApiTest3, rtStreamWaitEventStars)
     error = rtStreamWaitEvent(nullptr, nullptr);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     error = rtStreamWaitEvent(nullptr, nullptr);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 }
@@ -1143,7 +1438,7 @@ TEST_F(CloudV2ApiTest3, rtsSetDeviceTaskAbortCallback_002)
     rtError_t error;
     char args[] = "0x100";
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     error = rtsSetDeviceTaskAbortCallback(moduleName, &stubRtsDeviceTaskAbortCallback, args);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
     error = rtInstance->taskAbortCallbackMap_.count("HCCL");
@@ -1163,7 +1458,7 @@ TEST_F(CloudV2ApiTest3, rtsProfTrace_002)
     rtError_t error;
     int32_t length = 20;
     uint8_t data1[length] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x11, 0x22, 0x33, 0x44, 0x55,
-        0x11, 0x22, 0x33, 0x44, 0x55, 0x11, 0x22, 0x33, 0x44, 0x55};
+                             0x11, 0x22, 0x33, 0x44, 0x55, 0x11, 0x22, 0x33, 0x44, 0x55};
     error = rtsProfTrace(&data1, length, stream_);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 }
@@ -1172,8 +1467,7 @@ TEST_F(CloudV2ApiTest3, rtsProfTrace_003)
 {
     rtError_t error;
     int32_t length = 15;
-    uint8_t data2[length] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00};
+    uint8_t data2[length] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
     error = rtsProfTrace(&data2, length, stream_);
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
@@ -1182,16 +1476,16 @@ TEST_F(CloudV2ApiTest3, rtsProfTrace_004)
 {
     rtError_t error;
     int32_t length = 18;
-    uint8_t data3[length] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01};
+    uint8_t data3[length] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+                             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01};
     error = rtsProfTrace(&data3, length, stream_);
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
 
 TEST_F(CloudV2ApiTest3, rtsNpuGetFloatOverFlowStatus)
 {
-    void *descBuf = malloc(8);         // device memory
-    uint64_t descBufLen=64;
+    void* descBuf = malloc(8); // device memory
+    uint64_t descBufLen = 64;
     uint32_t checkmode = 0;
 
     rtError_t error = rtsNpuGetFloatOverFlowStatus(descBuf, descBufLen, checkmode, stream_);
@@ -1202,11 +1496,11 @@ TEST_F(CloudV2ApiTest3, rtsNpuGetFloatOverFlowStatus)
 
 TEST_F(CloudV2ApiTest3, rtsNpuGetFloatOverFlowDebugStatus)
 {
-    void *descBuf = malloc(8);         // device memory
-    uint64_t descBufLen=64;
+    void* descBuf = malloc(8); // device memory
+    uint64_t descBufLen = 64;
     uint32_t checkmode = 0;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     FeatureToTsVersionInit();
     Device* dev = rtInstance->GetDevice(0, 0);
     int32_t version = dev->GetTschVersion();
@@ -1227,7 +1521,7 @@ TEST_F(CloudV2ApiTest3, rtsNpuClearFloatOverFlowStatus)
 TEST_F(CloudV2ApiTest3, rtsNpuClearFloatDebugStatus)
 {
     uint32_t checkmode = 0;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     FeatureToTsVersionInit();
     rtChipType_t chipType = rtInstance->GetChipType();
 
@@ -1259,13 +1553,21 @@ TEST_F(CloudV2ApiTest, rts_ipc_open_with_flag_succ)
     uint32_t tsId;
     uint32_t notifyId;
     rtNotifyPhyInfo notifyInfo;
-    rtNotify_t notify = new (std::nothrow) Notify(0, 0);
+    Notify* notifyObj = new (std::nothrow) Notify(0, 0);
+    ASSERT_NE(notifyObj, nullptr);
+    InitEmbeddedInnerHandle<Notify>(notifyObj);
+    g_ipcOpenNotifyRet = notifyObj;
+    rtNotify_t notify = nullptr;
 
-    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::IpcOpenNotify).stubs().will(returnValue(RT_ERROR_NONE));
-    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::GetNotifyPhyInfo).stubs()
-        .will(invoke(GetNotifyPhyInfoStub));
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::IpcOpenNotify).stubs().will(invoke(IpcOpenNotifyStub));
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::GetNotifyPhyInfo).stubs().will(invoke(GetNotifyPhyInfoStub));
     MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::NotifyDestroy).stubs().will(returnValue(RT_ERROR_NONE));
     error = rtsNotifyImportByKey(&notify, "aaaa", 0);
+    if (error == ACL_ERROR_RT_FEATURE_NOT_SUPPORT) {
+        g_ipcOpenNotifyRet = nullptr;
+        delete notifyObj;
+        return;
+    }
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     error = rtNotifyGetPhyInfo(notify, &phyDevId, &tsId);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
@@ -1274,32 +1576,53 @@ TEST_F(CloudV2ApiTest, rts_ipc_open_with_flag_succ)
     error = rtNotifyGetPhyInfoExt(notify, &notifyInfo);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     rtNotifyDestroy(notify);
-    delete notify;
+    g_ipcOpenNotifyRet = nullptr;
+    delete notifyObj;
 }
 
 TEST_F(CloudV2ApiTest, rtGetOpTimeOutV2_notset)
 {
     rtError_t error;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
-    rtSocType_t socType = rtInstance->GetSocType();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    std::string socVersion = rtInstance->GetSocVersion();
 
-    //not set timeout
+    // not set timeout
     uint32_t timeout = 0;
+    RtTimeoutConfig originTimeout;
+    originTimeout.isCfgOpExcTaskTimeout = Runtime::Instance()->timeoutConfig_.isCfgOpExcTaskTimeout;
+    originTimeout.opExcTaskTimeout = Runtime::Instance()->timeoutConfig_.opExcTaskTimeout;
+    originTimeout.isOpTimeoutMs = Runtime::Instance()->timeoutConfig_.isOpTimeoutMs;
+
     Runtime::Instance()->timeoutConfig_.isInit = false;
-    rtInstance->SetSocType(SOC_ASCEND910B1);
+    rtInstance->SetSocVersion("Ascend910B1");
     error = rtGetOpExecuteTimeoutV2(&timeout);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     EXPECT_EQ(timeout, 1090922);
 
-    rtInstance->SetSocType(socType);
+    Runtime::Instance()->timeoutConfig_.isOpTimeoutMs = false;
+    Runtime::Instance()->timeoutConfig_.isCfgOpExcTaskTimeout = true;
+    Runtime::Instance()->timeoutConfig_.opExcTaskTimeout = 0UL;
+    error = rtGetOpExecuteTimeoutV2(&timeout);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_EQ(timeout, 1090922);
+
+    Runtime::Instance()->timeoutConfig_.isOpTimeoutMs = true;
+    error = rtGetOpExecuteTimeoutV2(&timeout);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_EQ(timeout, UINT32_MAX); // never timeout
+
+    rtInstance->SetSocVersion(socVersion);
+    Runtime::Instance()->timeoutConfig_.isCfgOpExcTaskTimeout = originTimeout.isCfgOpExcTaskTimeout;
+    Runtime::Instance()->timeoutConfig_.opExcTaskTimeout = originTimeout.opExcTaskTimeout;
+    Runtime::Instance()->timeoutConfig_.isOpTimeoutMs = originTimeout.isOpTimeoutMs;
 }
 
 TEST_F(CloudV2ApiTest, rtGetOpTimeOutV2_set)
 {
     rtError_t error;
     rtStream_t stream;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
-    rtSocType_t socType = rtInstance->GetSocType();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    std::string socVersion = rtInstance->GetSocVersion();
     bool oriisCfgOpExcTaskTimeout = rtInstance->timeoutConfig_.isCfgOpExcTaskTimeout;
     int32_t oriopExcTaskTimeout = rtInstance->timeoutConfig_.opExcTaskTimeout;
     rtInstance->timeoutConfig_.isCfgOpExcTaskTimeout = true;
@@ -1307,13 +1630,13 @@ TEST_F(CloudV2ApiTest, rtGetOpTimeOutV2_set)
     uint32_t timeout = 0;
     Runtime::Instance()->timeoutConfig_.isInit = false;
     rtInstance->timeoutConfig_.opExcTaskTimeout = 10;
-    //change soctype
-    rtInstance->SetSocType(SOC_ASCEND910B1);
+    // change soctype
+    rtInstance->SetSocVersion("Ascend910B1");
     error = rtGetOpExecuteTimeoutV2(&timeout);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     EXPECT_EQ(timeout, 4295);
 
-    rtInstance->SetSocType(socType);
+    rtInstance->SetSocVersion(socVersion);
     rtInstance->timeoutConfig_.isCfgOpExcTaskTimeout = oriisCfgOpExcTaskTimeout;
     rtInstance->timeoutConfig_.opExcTaskTimeout = oriopExcTaskTimeout;
 }
@@ -1325,15 +1648,15 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_USE_AICPUTASK_TEST)
 
     task_info.randomNumFuncParaInfo.funcType = RT_RANDOM_NUM_FUNC_TYPE_NORMAL_DIS;
     uint32_t mean = 100;
-    memcpy_s(task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.mean.valueOrAddr,
-             sizeof(task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.mean.valueOrAddr),
-             &mean, 2);
+    memcpy_s(
+        task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.mean.valueOrAddr,
+        sizeof(task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.mean.valueOrAddr), &mean, 2);
     task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.mean.size = 2;
     task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.mean.isAddr = false;
     uint32_t stddev = 100;
-    memcpy_s(task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.stddev.valueOrAddr,
-             sizeof(task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.stddev.valueOrAddr),
-             &stddev, 2);
+    memcpy_s(
+        task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.stddev.valueOrAddr,
+        sizeof(task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.stddev.valueOrAddr), &stddev, 2);
     task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.stddev.size = 2;
     task_info.randomNumFuncParaInfo.paramInfo.normalDisInfo.stddev.isAddr = false;
 
@@ -1342,27 +1665,22 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_USE_AICPUTASK_TEST)
     task_info.randomResultAddr = &addr;
     task_info.randomCounterAddr = &addr;
     uint32_t seed = 0;
-    memcpy_s(task_info.randomSeed.valueOrAddr,
-             sizeof(task_info.randomSeed.valueOrAddr),
-             &seed, sizeof(uint32_t));
+    memcpy_s(task_info.randomSeed.valueOrAddr, sizeof(task_info.randomSeed.valueOrAddr), &seed, sizeof(uint32_t));
     task_info.randomSeed.size = sizeof(uint32_t);
     task_info.randomSeed.isAddr = false;
     uint32_t num = 128;
-    memcpy_s(task_info.randomNum.valueOrAddr,
-             sizeof(task_info.randomNum.valueOrAddr),
-             &num, sizeof(uint32_t));
+    memcpy_s(task_info.randomNum.valueOrAddr, sizeof(task_info.randomNum.valueOrAddr), &num, sizeof(uint32_t));
     task_info.randomNum.size = sizeof(uint32_t);
     task_info.randomNum.isAddr = false;
     task_info.dataType = RT_RANDOM_NUM_DATATYPE_FP32;
 
-
     // uint32_t *hostPtr;
-    uint32_t *devPtr;
+    uint32_t* devPtr;
 
     rtError_t error;
     rtStream_t sinkStream;
     rtStream_t execStream;
-    rtModel_t  model;
+    rtModel_t model;
     uint32_t dsa_taskid = 0;
     uint32_t dsa_streamId = 0;
 
@@ -1386,26 +1704,26 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_USE_AICPUTASK_TEST)
     error = rtModelGetTaskId(model, &dsa_taskid, &dsa_streamId);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error=  rtEndGraph(model, sinkStream);
+    error = rtEndGraph(model, sinkStream);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtModelLoadComplete(model);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr, dsa_update_size, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr, dsa_update_size, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtMemcpy(devPtr, dsa_update_size, &task_info, dsa_update_size, RT_MEMCPY_HOST_TO_DEVICE);
 
     rtDsaTaskUpdateAttr_t attr = {};
-    attr.srcAddr = (void *)devPtr;
+    attr.srcAddr = (void*)devPtr;
     attr.size = dsa_update_size;
 
     rtTaskUpdateCfg_t cfg = {};
     cfg.id = RT_UPDATE_DSA_TASK;
     cfg.val.dsaTaskAttr = attr;
 
-   // normal test
+    // normal test
     error = rtsLaunchUpdateTask(sinkStream, dsa_taskid, execStream, &cfg);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
@@ -1434,28 +1752,28 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_USE_AICPUTASK_TEST_2)
     rtRandomNumTaskInfo_t task_info = {};
 
     // uint32_t *hostPtr;
-    uint32_t *devPtr;
-    void *devPtr2;
+    uint32_t* devPtr;
+    void* devPtr2;
     rtError_t error;
     rtStream_t sinkStream;
     rtStream_t execStream;
-    rtModel_t  model;
+    rtModel_t model;
     uint32_t dsa_taskid = 0;
     uint32_t dsa_streamId = 0;
 
     uint64_t dsa_update_size = sizeof(rtRandomNumTaskInfo_t);
 
     uint32_t dropoutRation = 1000;
-    error = rtMalloc((void **)&devPtr2, 20, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr2, 20, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtMemcpy(devPtr2, 20, &dropoutRation, 4, RT_MEMCPY_HOST_TO_DEVICE);
 
     task_info.randomNumFuncParaInfo.funcType = RT_RANDOM_NUM_FUNC_TYPE_DROPOUT_BITMASK;
 
-    memcpy_s(task_info.randomNumFuncParaInfo.paramInfo.dropoutBitmaskInfo.dropoutRation.valueOrAddr,
-             sizeof(task_info.randomNumFuncParaInfo.paramInfo.dropoutBitmaskInfo.dropoutRation.valueOrAddr),
-             &devPtr2, 8);
+    memcpy_s(
+        task_info.randomNumFuncParaInfo.paramInfo.dropoutBitmaskInfo.dropoutRation.valueOrAddr,
+        sizeof(task_info.randomNumFuncParaInfo.paramInfo.dropoutBitmaskInfo.dropoutRation.valueOrAddr), &devPtr2, 8);
     task_info.randomNumFuncParaInfo.paramInfo.dropoutBitmaskInfo.dropoutRation.size = 8;
     task_info.randomNumFuncParaInfo.paramInfo.dropoutBitmaskInfo.dropoutRation.isAddr = true;
 
@@ -1464,15 +1782,11 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_USE_AICPUTASK_TEST_2)
     task_info.randomResultAddr = &addr;
     task_info.randomCounterAddr = &addr;
     uint32_t seed = 0;
-    memcpy_s(task_info.randomSeed.valueOrAddr,
-             sizeof(task_info.randomSeed.valueOrAddr),
-             &seed, sizeof(uint32_t));
+    memcpy_s(task_info.randomSeed.valueOrAddr, sizeof(task_info.randomSeed.valueOrAddr), &seed, sizeof(uint32_t));
     task_info.randomSeed.size = sizeof(uint32_t);
     task_info.randomSeed.isAddr = false;
     uint32_t num = 128;
-    memcpy_s(task_info.randomNum.valueOrAddr,
-             sizeof(task_info.randomNum.valueOrAddr),
-             &num, sizeof(uint32_t));
+    memcpy_s(task_info.randomNum.valueOrAddr, sizeof(task_info.randomNum.valueOrAddr), &num, sizeof(uint32_t));
     task_info.randomNum.size = sizeof(uint32_t);
     task_info.randomNum.isAddr = false;
     task_info.dataType = RT_RANDOM_NUM_DATATYPE_FP32;
@@ -1495,26 +1809,26 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_USE_AICPUTASK_TEST_2)
     error = rtModelGetTaskId(model, &dsa_taskid, &dsa_streamId);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error=  rtEndGraph(model, sinkStream);
+    error = rtEndGraph(model, sinkStream);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtModelLoadComplete(model);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr, dsa_update_size, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr, dsa_update_size, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtMemcpy(devPtr, dsa_update_size, &task_info, dsa_update_size, RT_MEMCPY_HOST_TO_DEVICE);
 
     rtDsaTaskUpdateAttr_t attr = {};
-    attr.srcAddr = (void *)devPtr;
+    attr.srcAddr = (void*)devPtr;
     attr.size = dsa_update_size;
 
     rtTaskUpdateCfg_t cfg = {};
     cfg.id = RT_UPDATE_DSA_TASK;
     cfg.val.dsaTaskAttr = attr;
 
-   // normal test
+    // normal test
     error = rtsLaunchUpdateTask(sinkStream, dsa_taskid, execStream, &cfg);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
@@ -1546,12 +1860,12 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_USE_AICPUTASK_TEST_3)
     rtRandomNumTaskInfo_t task_info = {};
 
     // uint32_t *hostPtr;
-    uint32_t *devPtr;
-    void *devPtr2;
+    uint32_t* devPtr;
+    void* devPtr2;
     rtError_t error;
     rtStream_t sinkStream;
     rtStream_t execStream;
-    rtModel_t  model;
+    rtModel_t model;
     uint32_t dsa_taskid = 0;
     uint32_t dsa_streamId = 0;
 
@@ -1559,22 +1873,22 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_USE_AICPUTASK_TEST_3)
 
     uint32_t min = 1000;
     uint32_t max = 1000;
-    error = rtMalloc((void **)&devPtr2, 20, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr2, 20, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtMemcpy(devPtr2, 20, &max, 4, RT_MEMCPY_HOST_TO_DEVICE);
 
     task_info.randomNumFuncParaInfo.funcType = RT_RANDOM_NUM_FUNC_TYPE_UNIFORM_DIS;
 
-    memcpy_s(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.valueOrAddr,
-             sizeof(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.valueOrAddr),
-             &min, 4);
+    memcpy_s(
+        task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.valueOrAddr,
+        sizeof(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.valueOrAddr), &min, 4);
     task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.size = 4;
     task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.isAddr = false;
 
-    memcpy_s(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.valueOrAddr,
-             sizeof(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.valueOrAddr),
-             &devPtr2, 8);
+    memcpy_s(
+        task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.valueOrAddr,
+        sizeof(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.valueOrAddr), &devPtr2, 8);
     task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.size = 8;
     task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.isAddr = true;
 
@@ -1583,15 +1897,11 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_USE_AICPUTASK_TEST_3)
     task_info.randomResultAddr = &addr;
     task_info.randomCounterAddr = &addr;
     uint32_t seed = 0;
-    memcpy_s(task_info.randomSeed.valueOrAddr,
-             sizeof(task_info.randomSeed.valueOrAddr),
-             &seed, sizeof(uint32_t));
+    memcpy_s(task_info.randomSeed.valueOrAddr, sizeof(task_info.randomSeed.valueOrAddr), &seed, sizeof(uint32_t));
     task_info.randomSeed.size = sizeof(uint32_t);
     task_info.randomSeed.isAddr = false;
     uint32_t num = 128;
-    memcpy_s(task_info.randomNum.valueOrAddr,
-             sizeof(task_info.randomNum.valueOrAddr),
-             &num, sizeof(uint32_t));
+    memcpy_s(task_info.randomNum.valueOrAddr, sizeof(task_info.randomNum.valueOrAddr), &num, sizeof(uint32_t));
     task_info.randomNum.size = sizeof(uint32_t);
     task_info.randomNum.isAddr = false;
     task_info.dataType = RT_RANDOM_NUM_DATATYPE_FP32;
@@ -1614,26 +1924,26 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_USE_AICPUTASK_TEST_3)
     error = rtModelGetTaskId(model, &dsa_taskid, &dsa_streamId);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error=  rtEndGraph(model, sinkStream);
+    error = rtEndGraph(model, sinkStream);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtModelLoadComplete(model);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr, dsa_update_size, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr, dsa_update_size, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtMemcpy(devPtr, dsa_update_size, &task_info, dsa_update_size, RT_MEMCPY_HOST_TO_DEVICE);
 
     rtDsaTaskUpdateAttr_t attr = {};
-    attr.srcAddr = (void *)devPtr;
+    attr.srcAddr = (void*)devPtr;
     attr.size = dsa_update_size;
 
     rtTaskUpdateCfg_t cfg = {};
     cfg.id = RT_UPDATE_DSA_TASK;
     cfg.val.dsaTaskAttr = attr;
 
-   // normal test
+    // normal test
     error = rtsLaunchUpdateTask(sinkStream, dsa_taskid, execStream, &cfg);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
@@ -1664,29 +1974,29 @@ TEST_F(CloudV2ApiTest, rtsLaunchRandomNumTask_TEST_abnormal)
     rtRandomNumTaskInfo_t task_info = {};
 
     // uint32_t *hostPtr;
-    void *devPtr2;
+    void* devPtr2;
     rtError_t error;
     rtStream_t sinkStream;
-    rtModel_t  model;
+    rtModel_t model;
 
     uint32_t min = 1000;
     uint32_t max = 1000;
-    error = rtMalloc((void **)&devPtr2, 20, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr2, 20, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtMemcpy(devPtr2, 20, &max, 4, RT_MEMCPY_HOST_TO_DEVICE);
 
     task_info.randomNumFuncParaInfo.funcType = RT_RANDOM_NUM_FUNC_TYPE_UNIFORM_DIS;
 
-    memcpy_s(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.valueOrAddr,
-             sizeof(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.valueOrAddr),
-             &min, 4);
+    memcpy_s(
+        task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.valueOrAddr,
+        sizeof(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.valueOrAddr), &min, 4);
     task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.size = 4;
     task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.min.isAddr = 2;
 
-    memcpy_s(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.valueOrAddr,
-             sizeof(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.valueOrAddr),
-             &devPtr2, 8);
+    memcpy_s(
+        task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.valueOrAddr,
+        sizeof(task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.valueOrAddr), &devPtr2, 8);
     task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.size = 8;
     task_info.randomNumFuncParaInfo.paramInfo.uniformDisInfo.max.isAddr = true;
 
@@ -1695,15 +2005,11 @@ TEST_F(CloudV2ApiTest, rtsLaunchRandomNumTask_TEST_abnormal)
     task_info.randomResultAddr = &addr;
     task_info.randomCounterAddr = &addr;
     uint32_t seed = 0;
-    memcpy_s(task_info.randomSeed.valueOrAddr,
-             sizeof(task_info.randomSeed.valueOrAddr),
-             &seed, sizeof(uint32_t));
+    memcpy_s(task_info.randomSeed.valueOrAddr, sizeof(task_info.randomSeed.valueOrAddr), &seed, sizeof(uint32_t));
     task_info.randomSeed.size = sizeof(uint32_t);
     task_info.randomSeed.isAddr = false;
     uint32_t num = 128;
-    memcpy_s(task_info.randomNum.valueOrAddr,
-             sizeof(task_info.randomNum.valueOrAddr),
-             &num, sizeof(uint32_t));
+    memcpy_s(task_info.randomNum.valueOrAddr, sizeof(task_info.randomNum.valueOrAddr), &num, sizeof(uint32_t));
     task_info.randomNum.size = sizeof(uint32_t);
     task_info.randomNum.isAddr = false;
     task_info.dataType = RT_RANDOM_NUM_DATATYPE_FP32;
@@ -1731,36 +2037,6 @@ TEST_F(CloudV2ApiTest, rtsLaunchRandomNumTask_TEST_abnormal)
 
     error = rtFree(devPtr2);
     EXPECT_EQ(error, RT_ERROR_NONE);
-}
-
-TEST_F(CloudV2ApiTest, rtModelCheckCompatibility_archVersion)
-{
-    rtError_t error;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
-    rtArchType_t oriArchType = rtInstance->GetArchType();
-
-    rtInstance->SetArchType(ARCH_M300);
-    // OmArchVersion is null
-    error = rtModelCheckCompatibility("SOC_ASCEND910B1", "");
-    EXPECT_EQ(error, RT_ERROR_NONE);
-    // OmArchVersion is nullptr
-    error = rtModelCheckCompatibility("SOC_ASCEND910B1", nullptr);
-    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
-
-    // OmArchVersion is not same as archType
-    error = rtModelCheckCompatibility("SOC_ASCEND910B1", "11");
-    EXPECT_EQ(error, ACL_ERROR_RT_SOC_VERSION);
-
-    // OmArchVersion is same as archType
-    error = rtModelCheckCompatibility("SOC_ASCEND910B1", "10");
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    // OmArchVersion is not find
-    error = rtModelCheckCompatibility("SOC_ASCEND910B1", "20");
-    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
-
-    // restore all type
-    rtInstance->SetArchType(oriArchType);
 }
 
 TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_PARAM_SRC_NULL)
@@ -1804,41 +2080,41 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_PARAM_CNT_INVALID)
 
 TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_PARAM_NORMAL_TEST)
 {
-    uint32_t *hostPtr_01;
-    uint32_t *devPtr_01;
-    uint32_t *hostPtr_02;
-    uint32_t *devPtr_02;
-    uint32_t *hostPtr_03;
-    uint32_t *devPtr_03;
-    uint32_t *hostPtr_04;
-    uint32_t *devPtr_04;
-    uint32_t *hostPtr_05;
-    uint32_t *devPtr_05;
+    uint32_t* hostPtr_01;
+    uint32_t* devPtr_01;
+    uint32_t* hostPtr_02;
+    uint32_t* devPtr_02;
+    uint32_t* hostPtr_03;
+    uint32_t* devPtr_03;
+    uint32_t* hostPtr_04;
+    uint32_t* devPtr_04;
+    uint32_t* hostPtr_05;
+    uint32_t* devPtr_05;
 
-    uint32_t *hostPtr_06;
-    uint32_t *devPtr_06;
-    uint32_t *hostPtr_07;
-    uint32_t *devPtr_07;
-    uint32_t *hostPtr_08;
-    uint32_t *devPtr_08;
-    uint32_t *hostPtr_09;
-    uint32_t *devPtr_09;
-    uint32_t *hostPtr_10;
-    uint32_t *devPtr_10;
+    uint32_t* hostPtr_06;
+    uint32_t* devPtr_06;
+    uint32_t* hostPtr_07;
+    uint32_t* devPtr_07;
+    uint32_t* hostPtr_08;
+    uint32_t* devPtr_08;
+    uint32_t* hostPtr_09;
+    uint32_t* devPtr_09;
+    uint32_t* hostPtr_10;
+    uint32_t* devPtr_10;
 
-    uint32_t *hostPtr;
-    uint32_t *devPtr;
+    uint32_t* hostPtr;
+    uint32_t* devPtr;
 
     rtError_t error;
     rtStream_t sinkStream;
     rtStream_t execStream;
-    rtModel_t  model;
+    rtModel_t model;
     uint32_t dsa_taskid = 0;
     uint32_t dsa_streamId = 0;
 
     uint64_t dsa_update_size = 40U;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
 
     error = rtStreamCreateWithFlags(&sinkStream, 5, RT_STREAM_PERSISTENT);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -1853,81 +2129,81 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_PARAM_NORMAL_TEST)
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     rtStarsDsaSqe_t dsa_sqe_;
-    dsa_sqe_.sqeHeader.type = 15;        //RT_STARS_SQE_TYPE_DSA;
+    dsa_sqe_.sqeHeader.type = 15; // RT_STARS_SQE_TYPE_DSA;
     dsa_sqe_.start = 1;
     dsa_sqe_.functionType = 0;
-    dsa_sqe_.dataType = 6;    // f32
+    dsa_sqe_.dataType = 6; // f32
     dsa_sqe_.algoType = 0;
     dsa_sqe_.paramVldBitmap = 1;
     dsa_sqe_.paramAddrValBitmap = 1;
     dsa_sqe_.kernelCredit = 100U;
 
     // mem_01
-    error = rtMallocHost((void **)&hostPtr_01, 16, DEFAULT_MODULEID);
+    error = rtMallocHost((void**)&hostPtr_01, 16, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr_01, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr_01, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    initData(hostPtr_01, 16/sizeof(uint32_t), 0);
+    initData(hostPtr_01, 16 / sizeof(uint32_t), 0);
     error = rtMemcpy(devPtr_01, 16, hostPtr_01, 16, RT_MEMCPY_HOST_TO_DEVICE);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    dsa_sqe_.dsaCfgResultAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_01) & 0xFFFFFFFFU);
+    dsa_sqe_.dsaCfgResultAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_01)&0xFFFFFFFFU);
     dsa_sqe_.dsaCfgResultAddrHigh = static_cast<uint32_t>((uint64_t)(devPtr_01) >> 32);
 
     // mem_02
-    error = rtMallocHost((void **)&hostPtr_02, 16, DEFAULT_MODULEID);
+    error = rtMallocHost((void**)&hostPtr_02, 16, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr_02, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr_02, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    initData(hostPtr_02, 16/sizeof(uint32_t), 0);
+    initData(hostPtr_02, 16 / sizeof(uint32_t), 0);
     error = rtMemcpy(devPtr_02, 16, hostPtr_02, 16, RT_MEMCPY_HOST_TO_DEVICE);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    dsa_sqe_.dsaCfgStateAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_02) & 0xFFFFFFFFU);
+    dsa_sqe_.dsaCfgStateAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_02)&0xFFFFFFFFU);
     dsa_sqe_.dsaCfgStateAddrHigh = static_cast<uint32_t>((uint64_t)(devPtr_02) >> 32);
 
     // mem_03
-    error = rtMallocHost((void **)&hostPtr_03, 16, DEFAULT_MODULEID);
+    error = rtMallocHost((void**)&hostPtr_03, 16, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr_03, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr_03, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    initData(hostPtr_03, 16/sizeof(uint32_t), 0x3f000000);
+    initData(hostPtr_03, 16 / sizeof(uint32_t), 0x3f000000);
     error = rtMemcpy(devPtr_03, 16, hostPtr_03, 16, RT_MEMCPY_HOST_TO_DEVICE);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    dsa_sqe_.dsaCfgParamAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_03) & 0xFFFFFFFFU);
+    dsa_sqe_.dsaCfgParamAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_03)&0xFFFFFFFFU);
     dsa_sqe_.dsaCfgParamAddrHigh = static_cast<uint32_t>((uint64_t)(devPtr_03) >> 32);
 
     // mem_04
-    error = rtMallocHost((void **)&hostPtr_04, 16, DEFAULT_MODULEID);
+    error = rtMallocHost((void**)&hostPtr_04, 16, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr_04, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr_04, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    initData(hostPtr_04, 16/sizeof(uint32_t), 0);
+    initData(hostPtr_04, 16 / sizeof(uint32_t), 0);
     error = rtMemcpy(devPtr_04, 16, hostPtr_04, 16, RT_MEMCPY_HOST_TO_DEVICE);
     EXPECT_EQ(error, RT_ERROR_NONE);
-    dsa_sqe_.dsaCfgSeedLow = static_cast<uint32_t>((uint64_t)(devPtr_04) & 0xFFFFFFFFU);
+    dsa_sqe_.dsaCfgSeedLow = static_cast<uint32_t>((uint64_t)(devPtr_04)&0xFFFFFFFFU);
     dsa_sqe_.dsaCfgSeedHigh = static_cast<uint32_t>((uint64_t)(devPtr_04) >> 32);
 
     // mem_05
-    error = rtMallocHost((void **)&hostPtr_05, 8, DEFAULT_MODULEID);
+    error = rtMallocHost((void**)&hostPtr_05, 8, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr_05, 8, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr_05, 8, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    initData(hostPtr_05, 8/sizeof(uint32_t), 0x100);
+    initData(hostPtr_05, 8 / sizeof(uint32_t), 0x100);
     error = rtMemcpy(devPtr_05, 8, hostPtr_05, 8, RT_MEMCPY_HOST_TO_DEVICE);
 
-    dsa_sqe_.dsaCfgNumberLow = static_cast<uint32_t>((uint64_t)(devPtr_05) & 0xFFFFFFFFU);
+    dsa_sqe_.dsaCfgNumberLow = static_cast<uint32_t>((uint64_t)(devPtr_05)&0xFFFFFFFFU);
     dsa_sqe_.dsaCfgNumberHigh = static_cast<uint32_t>((uint64_t)(devPtr_05) >> 32);
 
     std::vector<uintptr_t> input;
@@ -1941,105 +2217,105 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_PARAM_NORMAL_TEST)
     error = rtModelGetTaskId(model, &dsa_taskid, &dsa_streamId);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error=  rtEndGraph(model, sinkStream);
+    error = rtEndGraph(model, sinkStream);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtModelLoadComplete(model);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     // mem_06
-    error = rtMallocHost((void **)&hostPtr_06, 16, DEFAULT_MODULEID);
+    error = rtMallocHost((void**)&hostPtr_06, 16, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr_06, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr_06, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    initData(hostPtr_01, 16/sizeof(uint32_t), 0);
+    initData(hostPtr_01, 16 / sizeof(uint32_t), 0);
     error = rtMemcpy(devPtr_06, 16, hostPtr_06, 16, RT_MEMCPY_HOST_TO_DEVICE);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    dsa_sqe_.dsaCfgResultAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_06) & 0xFFFFFFFFU);
+    dsa_sqe_.dsaCfgResultAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_06)&0xFFFFFFFFU);
     dsa_sqe_.dsaCfgResultAddrHigh = static_cast<uint32_t>((uint64_t)(devPtr_06) >> 32);
 
     // mem_07
-    error = rtMallocHost((void **)&hostPtr_07, 16, DEFAULT_MODULEID);
+    error = rtMallocHost((void**)&hostPtr_07, 16, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr_07, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr_07, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    initData(hostPtr_07, 16/sizeof(uint32_t), 0);
+    initData(hostPtr_07, 16 / sizeof(uint32_t), 0);
     error = rtMemcpy(devPtr_07, 16, hostPtr_07, 16, RT_MEMCPY_HOST_TO_DEVICE);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    dsa_sqe_.dsaCfgStateAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_07) & 0xFFFFFFFFU);
+    dsa_sqe_.dsaCfgStateAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_07)&0xFFFFFFFFU);
     dsa_sqe_.dsaCfgStateAddrHigh = static_cast<uint32_t>((uint64_t)(devPtr_07) >> 32);
 
     // mem_08
-    error = rtMallocHost((void **)&hostPtr_08, 16, DEFAULT_MODULEID);
+    error = rtMallocHost((void**)&hostPtr_08, 16, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr_08, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr_08, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    initData(hostPtr_08, 16/sizeof(uint32_t), 0x3f000000);
+    initData(hostPtr_08, 16 / sizeof(uint32_t), 0x3f000000);
     error = rtMemcpy(devPtr_08, 16, hostPtr_08, 16, RT_MEMCPY_HOST_TO_DEVICE);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    dsa_sqe_.dsaCfgParamAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_08) & 0xFFFFFFFFU);
+    dsa_sqe_.dsaCfgParamAddrLow = static_cast<uint32_t>((uint64_t)(devPtr_08)&0xFFFFFFFFU);
     dsa_sqe_.dsaCfgParamAddrHigh = static_cast<uint32_t>((uint64_t)(devPtr_08) >> 32);
 
     // mem_09
-    error = rtMallocHost((void **)&hostPtr_09, 16, DEFAULT_MODULEID);
+    error = rtMallocHost((void**)&hostPtr_09, 16, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr_09, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr_09, 16, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    initData(hostPtr_09, 16/sizeof(uint32_t), 0);
+    initData(hostPtr_09, 16 / sizeof(uint32_t), 0);
     error = rtMemcpy(devPtr_09, 16, hostPtr_09, 16, RT_MEMCPY_HOST_TO_DEVICE);
     EXPECT_EQ(error, RT_ERROR_NONE);
-    dsa_sqe_.dsaCfgSeedLow = static_cast<uint32_t>((uint64_t)(devPtr_09) & 0xFFFFFFFFU);
+    dsa_sqe_.dsaCfgSeedLow = static_cast<uint32_t>((uint64_t)(devPtr_09)&0xFFFFFFFFU);
     dsa_sqe_.dsaCfgSeedHigh = static_cast<uint32_t>((uint64_t)(devPtr_09) >> 32);
 
     // mem_10
-    error = rtMallocHost((void **)&hostPtr_10, 8, DEFAULT_MODULEID);
+    error = rtMallocHost((void**)&hostPtr_10, 8, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr_10, 8, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr_10, 8, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    initData(hostPtr_10, 8/sizeof(uint32_t), 0x100);
+    initData(hostPtr_10, 8 / sizeof(uint32_t), 0x100);
     error = rtMemcpy(devPtr_10, 8, hostPtr_10, 8, RT_MEMCPY_HOST_TO_DEVICE);
 
-    dsa_sqe_.dsaCfgNumberLow = static_cast<uint32_t>((uint64_t)(devPtr_10) & 0xFFFFFFFFU);
+    dsa_sqe_.dsaCfgNumberLow = static_cast<uint32_t>((uint64_t)(devPtr_10)&0xFFFFFFFFU);
     dsa_sqe_.dsaCfgNumberHigh = static_cast<uint32_t>((uint64_t)(devPtr_10) >> 32);
 
     // mem_update_dsa
-    error = rtMallocHost((void **)&hostPtr, dsa_update_size, DEFAULT_MODULEID);
+    error = rtMallocHost((void**)&hostPtr, dsa_update_size, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    error = rtMalloc((void **)&devPtr, dsa_update_size, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    error = rtMalloc((void**)&devPtr, dsa_update_size, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     initUpdateDsaSqe(hostPtr, &dsa_sqe_);
     error = rtMemcpy(devPtr, dsa_update_size, hostPtr, dsa_update_size, RT_MEMCPY_HOST_TO_DEVICE);
 
-   // normal test
+    // normal test
     error = rtLaunchSqeUpdateTask(dsa_streamId, dsa_taskid, devPtr, dsa_update_size, execStream);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-   // normal test 01
+    // normal test 01
     error = rtLaunchSqeUpdateTask(dsa_streamId, dsa_taskid, devPtr, dsa_update_size, nullptr);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-   // devPtr changed
+    // devPtr changed
     uint64_t dsaSrcDevAddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(devPtr)) + 16U;
-    uint32_t* testWrongDevPtr = reinterpret_cast<uint32_t *>(static_cast<uintptr_t>(dsaSrcDevAddr));
+    uint32_t* testWrongDevPtr = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(dsaSrcDevAddr));
     error = rtLaunchSqeUpdateTask(dsa_streamId, dsa_taskid, testWrongDevPtr, dsa_update_size, execStream);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 
-    Stream* modelStream = static_cast<Stream *>(sinkStream);
+    Stream* modelStream = rt_ut::UnwrapOrNull<Stream>(sinkStream);
     modelStream->SetBindFlag(false);
     error = rtLaunchSqeUpdateTask(dsa_streamId, dsa_taskid, devPtr, dsa_update_size, execStream);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
@@ -2133,8 +2409,8 @@ TEST_F(CloudV2ApiTest, rtLaunchSqeUpdateTask_PARAM_NORMAL_TEST)
 
 TEST_F(CloudV2ApiTest, rtNpuGetFloatStatus)
 {
-    void *descBuf = malloc(8);         // device memory
-    uint64_t descBufLen=64;
+    void* descBuf = malloc(8); // device memory
+    uint64_t descBufLen = 64;
     uint32_t checkmode = 0;
 
     std::vector<uintptr_t> input;
@@ -2151,11 +2427,11 @@ TEST_F(CloudV2ApiTest, rtNpuGetFloatStatus)
 
 TEST_F(CloudV2ApiTest, rtNpuGetFloatDebugStatus)
 {
-    void *descBuf = malloc(8);         // device memory
-    uint64_t descBufLen=64;
+    void* descBuf = malloc(8); // device memory
+    uint64_t descBufLen = 64;
     uint32_t checkmode = 0;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     FeatureToTsVersionInit();
     Device* dev = rtInstance->GetDevice(0, 0);
     int32_t version = dev->GetTschVersion();
@@ -2175,8 +2451,8 @@ TEST_F(CloudV2ApiTest, rtNpuGetFloatDebugStatus)
 
 TEST_F(CloudV2ApiTest, rtNpuGetFloatDebugStatus_01)
 {
-    void *descBuf = malloc(8);         // device memory
-    uint64_t descBufLen=64;
+    void* descBuf = malloc(8); // device memory
+    uint64_t descBufLen = 64;
     uint32_t checkmode = 0;
 
     // not mock tsch version
@@ -2187,7 +2463,7 @@ TEST_F(CloudV2ApiTest, rtNpuGetFloatDebugStatus_01)
     input.push_back(reinterpret_cast<uintptr_t>(nullptr));
     rtError_t error = rtGeneralCtrl(input.data(), input.size(), RT_GNL_CTRL_TYPE_NPU_GET_FLOAT_DEBUG_STATUS);
 
-    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+    EXPECT_EQ(error, ACL_ERROR_RT_FEATURE_NOT_SUPPORT);
 
     free(descBuf);
 }
@@ -2195,7 +2471,7 @@ TEST_F(CloudV2ApiTest, rtNpuGetFloatDebugStatus_01)
 TEST_F(CloudV2ApiTest, rtNpuClearFloatDebugStatus)
 {
     uint32_t checkmode = 0;
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     FeatureToTsVersionInit();
 
     Device* dev = rtInstance->GetDevice(0, 0);
@@ -2218,7 +2494,7 @@ TEST_F(CloudV2ApiTest, rtNpuClearFloatDebugStatus_01)
     input.push_back(reinterpret_cast<uintptr_t>(nullptr));
     rtError_t error = rtGeneralCtrl(input.data(), input.size(), RT_GNL_CTRL_TYPE_NPU_CLEAR_FLOAT_DEBUG_STATUS);
 
-    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+    EXPECT_EQ(error, ACL_ERROR_RT_FEATURE_NOT_SUPPORT);
 }
 
 TEST_F(CloudV2ApiTest, rtNpuClearFloatStatus)
@@ -2236,7 +2512,19 @@ TEST_F(CloudV2ApiTest, rtNpuClearFloatStatus)
 TEST_F(CloudV2ApiTest, rtsGetHardwareSyncAddr)
 {
     rtError_t error;
-    void *addr = nullptr;
+    void* addr = nullptr;
+
+    Driver* driver = ((Runtime*)Runtime::Instance())->driverFactory_.GetDriver(NPU_DRIVER);
+    uint64_t c2cAddr = 0x10;
+    uint32_t addrLen = 2;
+    MOCKER_CPP_VIRTUAL((NpuDriver*)driver, &NpuDriver::GetC2cCtrlAddr)
+        .stubs()
+        .with(mockcpp::any(), outBoundP(&c2cAddr, sizeof(c2cAddr)), outBoundP(&addrLen, sizeof(addrLen)))
+        .will(returnValue(RT_ERROR_NONE));
+
+    error = rtsGetHardwareSyncAddr(&addr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
     error = rtsGetHardwareSyncAddr(&addr);
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
@@ -2262,12 +2550,12 @@ TEST_F(CloudV2ApiTest, rtsCmoAsyn_testCmoType)
 TEST_F(CloudV2ApiTest, rtsCheckMemType)
 {
     rtError_t error;
-    void *addr = nullptr;
+    void* addr = nullptr;
     uint32_t result;
     error = rtsCheckMemType(&addr, 1, 2, &result, 0);
     EXPECT_EQ(error, RT_ERROR_NONE);
     uint32_t flag = RT_MEMORY_ATTRIBUTE_READONLY | RT_MEMORY_DDR | RT_MEMORY_POLICY_HUGE_PAGE_ONLY | 0x40000000;
-    void * devPtr = nullptr;
+    void* devPtr = nullptr;
     error = rtDvppMallocWithFlag(&devPtr, 60, flag, DEFAULT_MODULEID);
     EXPECT_EQ(error, RT_ERROR_NONE);
     MOCKER(halMemGetInfo).stubs().will(returnValue(DRV_ERROR_IOCRL_FAIL));
@@ -2280,7 +2568,7 @@ TEST_F(CloudV2ApiTest, rtsCheckMemType)
 TEST_F(CloudV2ApiTest, rtsCmoAsyncWithBarrier_test)
 {
     uint64_t srcAddr = 0;
-    uint32_t logicId= 1;
+    uint32_t logicId = 1;
     rtError_t error = rtsCmoAsyncWithBarrier(&srcAddr, 4, RT_CMO_PREFETCH, logicId, stream_);
     EXPECT_EQ(error, ACL_ERROR_RT_FEATURE_NOT_SUPPORT);
 }
@@ -2288,9 +2576,9 @@ TEST_F(CloudV2ApiTest, rtsCmoAsyncWithBarrier_test)
 TEST_F(CloudV2ApiTest, rtsDeviceStatusQuery_01)
 {
     rtError_t error = RT_ERROR_NONE;
-    Runtime *rtInstance = ((Runtime *)Runtime::Instance());
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
     uint32_t devId = 0U;
-    RawDevice *dev = new RawDevice(devId);
+    RawDevice* dev = new RawDevice(devId);
     rtDeviceStatus deviceStatus = RT_DEVICE_STATUS_NORMAL;
     error = rtInstance->SetWatchDogDevStatus(dev, RT_DEVICE_STATUS_ABNORMAL);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -2302,8 +2590,8 @@ TEST_F(CloudV2ApiTest, rtsDeviceStatusQuery_01)
 TEST_F(CloudV2ApiTest, rtsDvppLaunch_test_03)
 {
     rtError_t error;
-    void *args[] = {&error, NULL};
-    void *stubFunc;
+    void* args[] = {&error, NULL};
+    void* stubFunc;
 
     MOCKER(memcpy_s).stubs().will(returnValue(NULL));
     cce::runtime::rtStarsCommonSqe_t sqe = {};
@@ -2321,14 +2609,12 @@ TEST_F(CloudV2ApiTest, rtsDvppLaunch_test_03)
 TEST_F(CloudV2ApiTest, cache_last_task_opinfo_coverage_apidecorator)
 {
     rtError_t error;
-    ApiImpl *apiImpl = new ApiImpl();
+    ApiImpl* apiImpl = new ApiImpl();
     ApiDecorator api(apiImpl);
     char rawInfo[] = "test_op_info_data";
     size_t infoSize = sizeof(rawInfo);
 
-    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::CacheLastTaskOpInfo)
-        .stubs()
-        .will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::CacheLastTaskOpInfo).stubs().will(returnValue(RT_ERROR_NONE));
     error = api.CacheLastTaskOpInfo(rawInfo, infoSize);
     EXPECT_EQ(error, RT_ERROR_NONE);
     GlobalMockObject::verify();
@@ -2338,7 +2624,7 @@ TEST_F(CloudV2ApiTest, cache_last_task_opinfo_coverage_apidecorator)
 TEST_F(CloudV2ApiTest, cache_last_task_opinfo_coverage_apierrordecorator)
 {
     rtError_t error;
-    ApiImpl *apiImpl = new ApiImpl();
+    ApiImpl* apiImpl = new ApiImpl();
     ApiErrorDecorator api(apiImpl);
     char rawInfo[] = "test_op_info_data";
     size_t infoSize = sizeof(rawInfo);
@@ -2353,9 +2639,7 @@ TEST_F(CloudV2ApiTest, cache_last_task_opinfo_coverage_apierrordecorator)
     error = api.CacheLastTaskOpInfo(rawInfo, 65537U);
     EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
 
-    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::CacheLastTaskOpInfo)
-        .stubs()
-        .will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::CacheLastTaskOpInfo).stubs().will(returnValue(RT_ERROR_NONE));
     error = api.CacheLastTaskOpInfo(rawInfo, infoSize);
     EXPECT_EQ(error, RT_ERROR_NONE);
     GlobalMockObject::verify();
@@ -2371,9 +2655,7 @@ TEST_F(CloudV2ApiTest, cache_last_task_opinfo_coverage_apiprofiledecorator)
     char rawInfo[] = "test_op_info_data";
     size_t infoSize = sizeof(rawInfo);
 
-    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::CacheLastTaskOpInfo)
-        .stubs()
-        .will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::CacheLastTaskOpInfo).stubs().will(returnValue(RT_ERROR_NONE));
 
     error = api.CacheLastTaskOpInfo(rawInfo, infoSize);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -2388,9 +2670,7 @@ TEST_F(CloudV2ApiTest, cache_last_task_opinfo_coverage_apiprofilelogdecorator)
     char rawInfo[] = "test_op_info_data";
     size_t infoSize = sizeof(rawInfo);
 
-    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::CacheLastTaskOpInfo)
-        .stubs()
-        .will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::CacheLastTaskOpInfo).stubs().will(returnValue(RT_ERROR_NONE));
 
     error = api.CacheLastTaskOpInfo(rawInfo, infoSize);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -2400,7 +2680,7 @@ TEST_F(CloudV2ApiTest, rtCacheLastTaskOpInfo_success)
 {
     rtError_t error;
     rtStream_t stream;
-    rtModel_t  model;
+    rtModel_t model;
     rtStreamAttrValue_t setvalue;
     rtStreamAttrValue_t stmModeRet;
 
@@ -2418,16 +2698,13 @@ TEST_F(CloudV2ApiTest, rtCacheLastTaskOpInfo_success)
     error = rtsStreamSetAttribute(stream, RT_STREAM_ATTR_CACHE_OP_INFO, &setvalue);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    Stream * const exeStream = static_cast<Stream *>(stream);
+    Stream* const exeStream = rt_ut::UnwrapOrNull<Stream>(stream);
     Stream* captureStream = exeStream->GetCaptureStream();
     MOCKER_CPP(&StreamSqCqManage::GetStreamById)
         .stubs()
         .with(mockcpp::any(), outBoundP(&captureStream), mockcpp::any())
         .will(returnValue(RT_ERROR_NONE));
 
-    TaskInfo task = {};
-    InitByStream(&task, captureStream);
-    MOCKER_CPP(&TaskFactory::GetTask).stubs().will(returnValue(&task));
     error = rtCacheLastTaskOpInfo(rawInfo, infoSize);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
@@ -2435,24 +2712,27 @@ TEST_F(CloudV2ApiTest, rtCacheLastTaskOpInfo_success)
     error = rtsStreamGetAttribute(stream, RT_STREAM_ATTR_CACHE_OP_INFO, &stmModeRet);
     EXPECT_EQ(stmModeRet.cacheOpInfoSwitch, 1);
 
-    Runtime *rt = ((Runtime *)Runtime::Instance());
-    Profiler* profiler = rt->profiler_;
-    profiler->ReportCacheShapeInfo();
-
-    MOCKER(MsprofReportAdditionalInfo).stubs().will(returnValue((int)1));
-    profiler->ReportCacheShapeInfo();
-
     const size_t totalSize = sizeof(MsprofShapeInfo) + sizeof(MsprofShapeHeader) + infoSize;
-    auto rawMemPtr = std::make_unique<uint8_t []>(totalSize);
-    MsprofShapeInfo *shapeInfo = RtPtrToPtr<MsprofShapeInfo *, uint8_t *>(rawMemPtr.get());
+    auto rawMemPtr = std::make_unique<uint8_t[]>(totalSize);
+    MsprofShapeInfo* shapeInfo = RtPtrToPtr<MsprofShapeInfo*, uint8_t*>(rawMemPtr.get());
     shapeInfo->dataLen = 0U;
     Model* mdl = captureStream->Model_();
-    CaptureModel *captureMdl = dynamic_cast<CaptureModel *>(mdl);
-    captureMdl->AddShapeInfo(rawMemPtr);
-    profiler->ReportCacheShapeInfo();
+    CaptureModel* captureMdl = dynamic_cast<CaptureModel*>(mdl);
+    captureMdl->SetShapeInfo(captureStream, 0U, rawMemPtr.get(), totalSize);
+
+    size_t infoSizeGet = 0;
+    void* infoPtr = captureMdl->GetShapeInfo(captureStream->Id_(), 0U, infoSizeGet);
+    EXPECT_EQ(infoSizeGet, totalSize);
+
+    int cmpRet = memcmp(infoPtr, (void*)rawMemPtr.get(), totalSize);
+    EXPECT_EQ(cmpRet, 0);
+
+    captureMdl->ReportShapeInfoForProfiling();
 
     error = rtStreamEndCapture(stream, &model);
     EXPECT_EQ(error, RT_ERROR_NONE);
+
+    captureMdl->ClearShapeInfo(captureStream->Id_(), 0U);
 
     error = rtModelDestroy(model);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -2465,7 +2745,7 @@ TEST_F(CloudV2ApiTest, rtCacheLastTaskOpInfo_switch_off)
 {
     rtError_t error;
     rtStream_t stream;
-    rtModel_t  model;
+    rtModel_t model;
 
     char rawInfo[] = "test_op_info_data";
     size_t infoSize = sizeof(rawInfo);
@@ -2476,53 +2756,12 @@ TEST_F(CloudV2ApiTest, rtCacheLastTaskOpInfo_switch_off)
     error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    Stream * const exeStream = static_cast<Stream *>(stream);
+    Stream* const exeStream = rt_ut::UnwrapOrNull<Stream>(stream);
     Stream* captureStream = exeStream->GetCaptureStream();
     MOCKER_CPP(&StreamSqCqManage::GetStreamById)
         .stubs()
         .with(mockcpp::any(), outBoundP(&captureStream), mockcpp::any())
         .will(returnValue(RT_ERROR_NONE));
-
-    error = rtCacheLastTaskOpInfo(rawInfo, infoSize);
-    EXPECT_EQ(error, ACL_ERROR_RT_INTERNAL_ERROR);
-
-    error = rtStreamEndCapture(stream, &model);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtModelDestroy(model);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtStreamDestroy(stream);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-}
-
-TEST_F(CloudV2ApiTest, rtCacheLastTaskOpInfo_task_null)
-{
-    rtError_t error;
-    rtStream_t stream;
-    rtModel_t  model;
-    rtStreamAttrValue_t setvalue;
-
-    char rawInfo[] = "test_op_info_data";
-    size_t infoSize = sizeof(rawInfo);
-
-    error = rtStreamCreate(&stream, 0);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    Stream * const exeStream = static_cast<Stream *>(stream);
-    Stream* captureStream = exeStream->GetCaptureStream();
-    MOCKER_CPP(&StreamSqCqManage::GetStreamById)
-        .stubs()
-        .with(mockcpp::any(), outBoundP(&captureStream), mockcpp::any())
-        .will(returnValue(RT_ERROR_NONE));
-
-    setvalue = {0};
-    setvalue.cacheOpInfoSwitch = 1;
-    error = rtsStreamSetAttribute(stream, RT_STREAM_ATTR_CACHE_OP_INFO, &setvalue);
-    EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtCacheLastTaskOpInfo(rawInfo, infoSize);
     EXPECT_EQ(error, ACL_ERROR_RT_INTERNAL_ERROR);
@@ -2541,7 +2780,7 @@ TEST_F(CloudV2ApiTest, rtCacheLastTaskOpInfo_memcpy_error)
 {
     rtError_t error;
     rtStream_t stream;
-    rtModel_t  model;
+    rtModel_t model;
     rtStreamAttrValue_t setvalue;
     rtStreamAttrValue_t stmModeRet;
 
@@ -2559,16 +2798,12 @@ TEST_F(CloudV2ApiTest, rtCacheLastTaskOpInfo_memcpy_error)
     error = rtsStreamSetAttribute(stream, RT_STREAM_ATTR_CACHE_OP_INFO, &setvalue);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    Stream * const exeStream = static_cast<Stream *>(stream);
+    Stream* const exeStream = rt_ut::UnwrapOrNull<Stream>(stream);
     Stream* captureStream = exeStream->GetCaptureStream();
     MOCKER_CPP(&StreamSqCqManage::GetStreamById)
         .stubs()
         .with(mockcpp::any(), outBoundP(&captureStream), mockcpp::any())
         .will(returnValue(RT_ERROR_NONE));
-
-    TaskInfo task = {};
-    InitByStream(&task, captureStream);
-    MOCKER_CPP(&TaskFactory::GetTask).stubs().will(returnValue(&task));
 
     MOCKER(memcpy_s).stubs().will(returnValue((int)1));
 
@@ -2598,15 +2833,86 @@ TEST_F(CloudV2ApiTest, set_stream_cache_opinfo_switch_coverage_apierrordecorator
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = api.SetStreamCacheOpInfoSwitch(nullptr, cacheOpInfoSwitch);
-    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+    EXPECT_EQ(error, RT_ERROR_NONE);
 
-    Stream * const exeStream = static_cast<Stream *>(stream);
+    Stream* const exeStream = rt_ut::UnwrapOrNull<Stream>(stream);
     const uint32_t invalidCacheOpInfoSwitch = 3;
     error = api.SetStreamCacheOpInfoSwitch(exeStream, invalidCacheOpInfoSwitch);
     EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
 
     error = rtStreamDestroy(stream);
     EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2ApiTest, rtHostMemMapCapabilities_01)
+{
+    rtError_t error;
+    rtHacType hacType = RT_HAC_TYPE_STARS;
+    rtHostMemMapCapability capabilities = RT_HOST_MEM_MAP_NOT_SUPPORTED;
+
+    error = rtHostMemMapCapabilities(0, hacType, &capabilities);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    hacType = RT_HAC_TYPE_AICPU;
+    capabilities = RT_HOST_MEM_MAP_SUPPORTED;
+    error = rtHostMemMapCapabilities(0, hacType, &capabilities);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    hacType = RT_HAC_TYPE_AIC;
+    capabilities = RT_HOST_MEM_MAP_SUPPORTED;
+    error = rtHostMemMapCapabilities(0, hacType, &capabilities);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    hacType = RT_HAC_TYPE_AIV;
+    capabilities = RT_HOST_MEM_MAP_NOT_SUPPORTED;
+    error = rtHostMemMapCapabilities(0, hacType, &capabilities);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    hacType = RT_HAC_TYPE_PCIEDMA;
+    capabilities = RT_HOST_MEM_MAP_NOT_SUPPORTED;
+    error = rtHostMemMapCapabilities(0, hacType, &capabilities);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    hacType = RT_HAC_TYPE_RDMA;
+    capabilities = RT_HOST_MEM_MAP_NOT_SUPPORTED;
+    error = rtHostMemMapCapabilities(0, hacType, &capabilities);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    hacType = RT_HAC_TYPE_SDMA;
+    capabilities = RT_HOST_MEM_MAP_NOT_SUPPORTED;
+    error = rtHostMemMapCapabilities(1, hacType, &capabilities);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    hacType = RT_HAC_TYPE_DVPP;
+    capabilities = RT_HOST_MEM_MAP_NOT_SUPPORTED;
+    MOCKER(halHostRegisterCapabilities).stubs().will(returnValue(DRV_ERROR_INVALID_DEVICE));
+    error = rtHostMemMapCapabilities(3, hacType, &capabilities);
+    EXPECT_EQ(error, ACL_ERROR_RT_INVALID_DEVICEID);
+}
+
+TEST_F(CloudV2ApiTest, rtHostMemMapCapabilities_02)
+{
+    rtError_t error;
+    ApiImpl impl;
+    ApiDecorator api(&impl);
+    uint32_t deviceId = 0;
+    rtHacType hacType = RT_HAC_TYPE_STARS;
+    rtHostMemMapCapability capabilities;
+    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::HostMemMapCapabilities).stubs().will(returnValue(RT_ERROR_NONE));
+    error = api.HostMemMapCapabilities(deviceId, hacType, &capabilities);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2ApiTest, rtHostMemMapCapabilities_03)
+{
+    rtError_t error;
+    rtHacType hacType = RT_HAC_TYPE_STARS;
+    rtHostMemMapCapability capabilities;
+
+    MOCKER(halHostRegisterCapabilities).stubs().will(returnValue(DRV_ERROR_INVALID_VALUE));
+
+    error = rtHostMemMapCapabilities(0, hacType, &capabilities);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 }
 
 TEST_F(CloudV2ApiTest, get_stream_cache_opinfo_switch_coverage_apierrordecorator)
@@ -2622,9 +2928,9 @@ TEST_F(CloudV2ApiTest, get_stream_cache_opinfo_switch_coverage_apierrordecorator
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = api.GetStreamCacheOpInfoSwitch(nullptr, &cacheOpInfoSwitch);
-    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+    EXPECT_EQ(error, RT_ERROR_NONE);
 
-    Stream * const exeStream = static_cast<Stream *>(stream);
+    Stream* const exeStream = rt_ut::UnwrapOrNull<Stream>(stream);
     error = api.GetStreamCacheOpInfoSwitch(exeStream, nullptr);
     EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
 
@@ -2644,11 +2950,9 @@ TEST_F(CloudV2ApiTest, set_stream_cache_opinfo_switch_coverage_apidecorator)
     error = rtStreamCreate(&stream, 0);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::SetStreamCacheOpInfoSwitch)
-        .stubs()
-        .will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::SetStreamCacheOpInfoSwitch).stubs().will(returnValue(RT_ERROR_NONE));
 
-    Stream * const exeStream = static_cast<Stream *>(stream);
+    Stream* const exeStream = rt_ut::UnwrapOrNull<Stream>(stream);
     error = api.SetStreamCacheOpInfoSwitch(exeStream, cacheOpInfoSwitch);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
@@ -2668,14 +2972,401 @@ TEST_F(CloudV2ApiTest, get_stream_cache_opinfo_switch_coverage_apidecorator)
     error = rtStreamCreate(&stream, 0);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::GetStreamCacheOpInfoSwitch)
-        .stubs()
-        .will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::GetStreamCacheOpInfoSwitch).stubs().will(returnValue(RT_ERROR_NONE));
 
-    Stream * const exeStream = static_cast<Stream *>(stream);
+    Stream* const exeStream = rt_ut::UnwrapOrNull<Stream>(stream);
     error = api.GetStreamCacheOpInfoSwitch(exeStream, &cacheOpInfoSwitch);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtStreamDestroy(stream);
     EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2ApiTest, check_get_soc_spec)
+{
+    rtError_t error;
+
+    int32_t rtn = 0U;
+
+    MOCKER_CPP(&rtGetSocVersion).stubs().will(returnValue(ACL_RT_SUCCESS));
+    MOCKER_CPP(&PlatformManagerV2::GetSocSpec).stubs().will(returnValue(rtn));
+
+    char npuArch[32];
+    error = rtGetSocSpec("Version", "NpuArch", npuArch, 32);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+}
+
+TEST_F(CloudV2ApiTest, check_get_soc_spec_no_platform_info)
+{
+    rtError_t error;
+
+    int32_t rtn = RT_ERROR_NOT_FOUND;
+
+    MOCKER_CPP(&rtGetSocVersion).stubs().will(returnValue(ACL_RT_SUCCESS));
+    MOCKER_CPP(&PlatformManagerV2::GetSocSpec).stubs().will(returnValue(rtn));
+
+    char npuArch[32];
+    error = rtGetSocSpec("Version", "NpuArch", npuArch, 64);
+    EXPECT_EQ(error, rtn);
+}
+
+TEST_F(CloudV2ApiTest, check_get_soc_spec_error_return)
+{
+    rtError_t error;
+
+    int32_t rtn = 0x1U;
+
+    MOCKER_CPP(&rtGetSocVersion).stubs().will(returnValue(ACL_RT_SUCCESS));
+    MOCKER_CPP(&PlatformManagerV2::GetSocSpec).stubs().will(returnValue(rtn));
+
+    char npuArch[32];
+    error = rtGetSocSpec("Version", "NpuArch", npuArch, 64);
+    EXPECT_EQ(error, rtn);
+}
+
+TEST_F(CloudV2ApiTest, check_get_soc_spec_exceed_limit)
+{
+    rtError_t error;
+
+    int32_t rtn = 0U;
+
+    MOCKER_CPP(&rtGetSocVersion).stubs().will(returnValue(ACL_RT_SUCCESS));
+    MOCKER_CPP(&PlatformManagerV2::GetSocSpec).stubs().will(returnValue(rtn));
+
+    char npuArch[32];
+    error = rtGetSocSpec("Version", "NpuArch", npuArch, 0);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+}
+
+TEST_F(CloudV2ApiTest, rtsModelExecuteTest)
+{
+    rtError_t error;
+    rtModel_t model;
+
+    error = rtModelCreate(&model, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsModelExecute(model, -1);
+    EXPECT_EQ(error, ACL_ERROR_RT_MODEL_EXECUTE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2ApiTest, apiImpl_stream_clear)
+{
+    rtStream_t stream;
+    rtError_t error = RT_ERROR_NONE;
+    Device* device = ((Runtime*)Runtime::Instance())->DeviceRetain(0, 0);
+    int32_t version = device->GetTschVersion();
+    device->SetTschVersion(TS_VERSION_AICPU_SINGLE_TIMEOUT);
+
+    error = rtStreamCreateWithFlags(&stream, 0, RT_STREAM_CP_PROCESS_USE);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    error = rtStreamClear(stream, RT_STREAM_STOP);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    device->SetTschVersion(version);
+    ((Runtime*)Runtime::Instance())->DeviceRelease(device);
+}
+
+TEST_F(CloudV2ApiTest, apiImpl_notify_reset)
+{
+    rtNotify_t notify;
+    rtError_t error;
+    int32_t device_id = 0;
+    Device* device = ((Runtime*)Runtime::Instance())->DeviceRetain(0, 0);
+    int32_t version = device->GetTschVersion();
+    device->SetTschVersion(TS_VERSION_AICPU_SINGLE_TIMEOUT);
+
+    error = rtNotifyCreate(device_id, &notify);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtNotifyReset(notify);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamSynchronize(0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtNotifyDestroy(notify);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    device->SetTschVersion(version);
+    ((Runtime*)Runtime::Instance())->DeviceRelease(device);
+}
+
+TEST_F(CloudV2ApiTest, apiImpl_model_abort)
+{
+    rtError_t error;
+    Model* model = NULL;
+    ApiImpl apiImpl;
+
+    Device* device = ((Runtime*)Runtime::Instance())->DeviceRetain(0, 0);
+    error = apiImpl.ModelCreate(&model, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = apiImpl.ModelAbort(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    error = apiImpl.ModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    ((Runtime*)Runtime::Instance())->DeviceRelease(device);
+}
+
+TEST_F(CloudV2ApiTest, apiImpl_aicpu_model_destroy)
+{
+    rtError_t error;
+    Model* model = NULL;
+    int32_t devId;
+    Context* ctx;
+    uint32_t flag = 1;
+    uint64_t addr = 0x1000;
+    uint32_t streamId;
+    uint32_t taskId;
+
+    error = rtGetDevice(&devId);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    RefObject<Context*>* refObject = NULL;
+    refObject = (RefObject<Context*>*)((Runtime*)Runtime::Instance())->PrimaryContextRetain(devId);
+    ctx = refObject->GetVal();
+    error = ctx->ModelCreate(&model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    MOCKER_CPP(&Model::NeedLoadAicpuModelTask).stubs().will(returnValue(true));
+    error = ctx->ModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    (void)((Runtime*)Runtime::Instance())->PrimaryContextRelease(devId);
+}
+
+TEST_F(CloudV2ApiTest, apiImpl_context_debugUnRegister_succ)
+{
+    rtError_t error;
+    Model* model = NULL;
+    int32_t devId;
+    Context* ctx;
+    uint32_t flag = 1;
+    uint64_t addr = 0x1000;
+    uint32_t streamId;
+    uint32_t taskId;
+
+    error = rtGetDevice(&devId);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    RefObject<Context*>* refObject = NULL;
+    refObject = (RefObject<Context*>*)((Runtime*)Runtime::Instance())->PrimaryContextRetain(devId);
+    ctx = refObject->GetVal();
+
+    error = ctx->ModelCreate(&model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = ctx->DebugRegister(model, flag, &addr, &streamId, &taskId);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = ctx->DebugUnRegister(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = ctx->ModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    (void)((Runtime*)Runtime::Instance())->PrimaryContextRelease(devId);
+}
+
+TEST_F(CloudV2ApiTest, apiImpl_datadump_loadinfo)
+{
+    rtModel_t model, m;
+    int32_t devId;
+    rtStream_t stream;
+    rtDevBinary_t devBin;
+    void* binHandle_;
+    char function_;
+    uint32_t binary_[32];
+    devBin.magic = RT_DEV_BINARY_MAGIC_ELF;
+    devBin.version = 2;
+    devBin.data = (void*)elf_o;
+    devBin.length = elf_o_len;
+    uint32_t datdumpinfo[32];
+
+    rtError_t error = rtGetDevice(&devId);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    RefObject<Context*>* refObject = NULL;
+    refObject = (RefObject<Context*>*)((Runtime*)Runtime::Instance())->PrimaryContextRetain(devId);
+    Context* ctx = refObject->GetVal();
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtDevBinaryRegister(&devBin, &binHandle_);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtBinaryRegisterToFastMemory(binHandle_);
+
+    error = rtFunctionRegister(binHandle_, &function_, "foo", NULL, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelCreate(&model, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtDatadumpInfoLoad(datdumpinfo, sizeof(datdumpinfo));
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    // input output tilingaddr tilingdata hostdata
+    std::vector<uint64_t> arg(10, 0x1234567890);
+    rtArgsEx_t argsInfo = {};
+    argsInfo.args = arg.data();
+    argsInfo.argsSize = 10 * sizeof(arg[0]);
+    argsInfo.tilingAddrOffset = 16U;
+    argsInfo.tilingDataOffset = 24U;
+    argsInfo.hasTiling = true;
+    rtHostInputInfo_t hostInputInfo = {};
+    hostInputInfo.addrOffset = 0U;
+    hostInputInfo.dataOffset = 32U;
+    argsInfo.hostInputInfoNum = 1U;
+    argsInfo.hostInputInfoPtr = &hostInputInfo;
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtKernelLaunchWithFlag(&function_, 1, &argsInfo, NULL, stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &m);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtDevBinaryUnRegister(binHandle_);
+    error = rtModelDestroy(m);
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    (void)((Runtime*)Runtime::Instance())->PrimaryContextRelease(devId);
+}
+
+TEST_F(CloudV2ApiTest, apiImpl_get_cq_id)
+{
+    rtStream_t stream;
+    rtError_t error = RT_ERROR_NONE;
+    uint32_t cqid;
+    uint32_t logicCqid;
+    error = rtStreamGetCqid(nullptr, &cqid, &logicCqid);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2ApiTest, model_switch_stream_ex)
+{
+    rtError_t error;
+    rtModel_t model;
+    rtStream_t streamA;
+    rtStream_t streamB;
+    rtStream_t streamC;
+    rtStream_t exeStream;
+    int64_t dev_val, dev_val_target;
+
+    int64_t* devMem = &dev_val;
+    int64_t* devMem_target = &dev_val_target;
+
+    error = rtStreamCreate(&streamA, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreate(&streamB, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreate(&exeStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelCreate(&model, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamSwitchEx((void*)devMem, RT_EQUAL, (void*)devMem_target, streamB, streamA, RT_SWITCH_INT64);
+    EXPECT_EQ(error, ACL_ERROR_RT_STREAM_MODEL);
+
+    error = rtModelBindStream(model, streamB, 1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamSwitchEx((void*)devMem, RT_EQUAL, (void*)devMem_target, streamB, streamA, RT_SWITCH_INT64);
+    EXPECT_EQ(error, ACL_ERROR_RT_STREAM_MODEL);
+
+    // Main Stream
+    error = rtModelBindStream(model, streamA, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamSwitchEx((void*)devMem, RT_EQUAL, (void*)devMem_target, streamB, streamA, RT_SWITCH_INT64);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelUnbindStream(model, streamA);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelUnbindStream(model, streamB);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(streamA);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(streamB);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(exeStream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    GlobalMockObject::verify();
+}
+
+TEST_F(CloudV2ApiTest, rtMemcpyAsync_convert_mapped_addr_host_to_device)
+{
+    rtError_t error;
+    void* hostPtr = reinterpret_cast<void*>(0x10000000);
+    void* devPtr;
+    size_t size = 64;
+    rtStream_t stream;
+
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+
+    error = rtMalloc(&devPtr, size, RT_MEMORY_HBM, DEFAULT_MODULEID);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    g_isAddrFlatDevice = true;
+
+    MOCKER(&halMemHostGetDevPointer).stubs().will(invoke(halMemHostGetDevPointer_success_stub));
+
+    MOCKER(drvMemGetAttribute).stubs().will(invoke(drvMemGetAttribute_stub));
+
+    error = rtMemcpyAsync(devPtr, size, hostPtr, size, RT_MEMCPY_HOST_TO_DEVICE, stream);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    error = rtStreamSynchronize(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    g_isAddrFlatDevice = false;
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtFree(devPtr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    GlobalMockObject::verify();
+}
+
+TEST_F(CloudV2ApiTest, rtHostMemMapCapabilities_feature_not_support)
+{
+    rtError_t error;
+    ApiImpl impl;
+    ApiErrorDecorator apiError(&impl);
+    uint32_t deviceId = 0;
+    rtHacType hacType = RT_HAC_TYPE_STARS;
+    rtHostMemMapCapability capabilities;
+
+    MOCKER_CPP_VIRTUAL(impl, &ApiImpl::HostMemMapCapabilities).stubs().will(returnValue(RT_ERROR_FEATURE_NOT_SUPPORT));
+
+    error = apiError.HostMemMapCapabilities(deviceId, hacType, &capabilities);
+    EXPECT_EQ(error, RT_ERROR_FEATURE_NOT_SUPPORT);
 }

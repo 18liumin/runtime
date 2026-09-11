@@ -9,8 +9,6 @@
 # -----------------------------------------------------------------------------------------------------------
 
 ############ adx_dump_soc_api ###########
-include_directories(${OPEN_SOURCE_DIR}/boost)
-include_directories(${OPEN_SOURCE_DIR}/mockcpp_src/include)
 
 set(adxSocDumpApiSrcList
     ${SRC_CODE_ROOT_PATH}/adcore/hdc/hdc_api.cpp
@@ -68,7 +66,7 @@ set(adxSocDumpApiUtHeaderList
     ${LLT_CODE_ROOT_PATH}/stub
     ${LLT_CODE_ROOT_PATH}/common_stub
 
-    ${TOP_DIR}/include/driver
+    ${TOP_DIR}/pkg_inc/driver
     ${TOP_DIR}/include/external
     ${TOP_DIR}/include/external/acl
     ${TOP_DIR}/pkg_inc/
@@ -85,6 +83,7 @@ add_executable(adx_soc_dump_utest
 )
 
 target_include_directories(adx_soc_dump_utest PRIVATE
+    ${LIBC_SEC_HEADER}
     ${adxSocDumpApiUtHeaderList}
 )
 
@@ -103,10 +102,6 @@ target_compile_definitions(adx_soc_dump_utest PRIVATE
 
 target_link_libraries(adx_soc_dump_utest PRIVATE
     $<BUILD_INTERFACE:adx_utestonetrack_pub>
-    -Wl,-rpath,${TOP_DIR}/output/llt/c_sec/lib
-    c_sec_static
-    ascend_protobuf_static
-    GTest::gtest
 )
 
 target_compile_options(adx_soc_dump_utest PRIVATE

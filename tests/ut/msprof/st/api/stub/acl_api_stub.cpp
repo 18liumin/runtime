@@ -17,6 +17,7 @@
 #include "prof_acl_mgr.h"
 #include "hash_data.h"
 #include "prof_acl_api.h"
+#include "acl_stub.h"
 
 namespace Cann {
 namespace Dvvp {

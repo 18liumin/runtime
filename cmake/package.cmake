@@ -9,119 +9,122 @@
 # -----------------------------------------------------------------------------------------------------------
 
 #### CPACK to package run #####
-message(STATUS "System processor: ${CMAKE_SYSTEM_PROCESSOR}")
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-    message(STATUS "Detected architecture: x86_64")
-    set(ARCH x86_64)
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|arm")
-    message(STATUS "Detected architecture: ARM64")
-    set(ARCH aarch64)
-else ()
-    message(WARNING "Unknown architecture: ${CMAKE_SYSTEM_PROCESSOR}")
-endif ()
+
 # 打印路径
 message(STATUS "CMAKE_INSTALL_PREFIX = ${CMAKE_INSTALL_PREFIX}")
-message(STATUS "CMAKE_SOURCE_DIR = ${CMAKE_SOURCE_DIR}")
-message(STATUS "CMAKE_BINARY_DIR = ${CMAKE_BINARY_DIR}")
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/makeself-fetch.cmake)
+if (ENABLE_OPEN_SRC)
+    set(INSTALL_DIR ${CMAKE_SYSTEM_PROCESSOR}-linux/lib64)
+    set(SCHED_TARGETS dgw_client tsdclient)
+else()
+    set(INSTALL_DIR lib)
+    set(SCHED_TARGETS dgw_client tsdclient)
+endif()
 
-set(script_prefix ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package/runtime/scripts)
-install(DIRECTORY ${script_prefix}/
-    DESTINATION share/info/runtime/script
-    FILE_PERMISSIONS
-    OWNER_READ OWNER_WRITE OWNER_EXECUTE  # 文件权限
-    GROUP_READ GROUP_EXECUTE
-    WORLD_READ WORLD_EXECUTE
-    DIRECTORY_PERMISSIONS
-    OWNER_READ OWNER_WRITE OWNER_EXECUTE  # 目录权限
-    GROUP_READ GROUP_EXECUTE
-    WORLD_READ WORLD_EXECUTE
-)
 set(SCRIPTS_FILES
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/check_version_required.awk
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_func.inc
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_interface.sh
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_interface.csh
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_interface.fish
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/version_compatiable.inc
+    ${CANN_CMAKE_DIR}/scripts/install/check_version_required.awk
+    ${CANN_CMAKE_DIR}/scripts/install/common_func.inc
+    ${CANN_CMAKE_DIR}/scripts/install/common_interface.sh
+    ${CANN_CMAKE_DIR}/scripts/install/common_interface.csh
+    ${CANN_CMAKE_DIR}/scripts/install/common_interface.fish
+    ${CANN_CMAKE_DIR}/scripts/install/version_compatiable.inc
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/cleanup.sh
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/help.info
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/install.sh
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/run_runtime_install.sh
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/run_runtime_uninstall.sh
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/run_runtime_upgrade.sh
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/runtime_custom_install.sh
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/runtime_func.sh
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/uninstall.sh
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/ver_check.sh
 )
 
 install(FILES ${SCRIPTS_FILES}
     DESTINATION share/info/runtime/script
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+    PERMISSIONS
+    OWNER_READ OWNER_WRITE OWNER_EXECUTE  # 文件权限
+    GROUP_READ GROUP_EXECUTE
+    WORLD_READ WORLD_EXECUTE
 )
 set(COMMON_FILES
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/install_common_parser.sh
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_func_v2.inc
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_installer.inc
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/script_operator.inc
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/version_cfg.inc
+    ${CANN_CMAKE_DIR}/scripts/install/install_common_parser.sh
+    ${CANN_CMAKE_DIR}/scripts/install/common_func_v2.inc
+    ${CANN_CMAKE_DIR}/scripts/install/common_installer.inc
+    ${CANN_CMAKE_DIR}/scripts/install/script_operator.inc
+    ${CANN_CMAKE_DIR}/scripts/install/version_cfg.inc
 )
 
 set(PACKAGE_FILES
     ${COMMON_FILES}
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/multi_version.inc
-)
-set(LATEST_MANGER_FILES
-    ${COMMON_FILES}
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_func.inc
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/version_compatiable.inc
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/check_version_required.awk
+    ${CANN_CMAKE_DIR}/scripts/install/multi_version.inc
 )
 set(CONF_FILES
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/cfg/path.cfg
-    ${CMAKE_SOURCE_DIR}/scripts/package/common/cfg/ascend_package_load.ini
+    ${CANN_CMAKE_DIR}/scripts/package/cfg/path.cfg
+    ${RUNTIME_DIR}/scripts/package/common/cfg/ascend_package_load.ini
+    ${RUNTIME_DIR}/scripts/package/common/cfg/RuntimeConfig.ini
 )
 
-install(FILES ${RUNTIME_VERSION_FILE}
+install(FILES ${CMAKE_BINARY_DIR}/version.npu-runtime.info
     DESTINATION share/info/runtime
+    RENAME version.info
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
 install(FILES ${CONF_FILES}
-    DESTINATION runtime/conf
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/conf
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 install(FILES ${PACKAGE_FILES}
     DESTINATION share/info/runtime/script
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
-install(FILES ${LATEST_MANGER_FILES}
-    DESTINATION latest_manager
+install(FILES ${RUNTIME_DIR}/src/acl/config/swFeatureList.json
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/data/ascendcl_config
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/scripts/package/latest_manager/scripts/
-    DESTINATION latest_manager
-)
-install(FILES ${CMAKE_SOURCE_DIR}/src/acl/config/swFeatureList.json
-    DESTINATION runtime/data/ascendcl_config
-)
-install(FILES ${CMAKE_SOURCE_DIR}/src/dfx/error_manager/error_code.json
-    DESTINATION runtime/conf/error_manager
+install(FILES ${RUNTIME_DIR}/src/dfx/error_manager/error_code.json
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/conf/error_manager
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 set(BIN_FILES
-    ${CMAKE_SOURCE_DIR}/scripts/package/runtime/scripts/prereq_check.bash
-    ${CMAKE_SOURCE_DIR}/scripts/package/runtime/scripts/prereq_check.csh
-    ${CMAKE_SOURCE_DIR}/scripts/package/runtime/scripts/prereq_check.fish
-    ${CMAKE_SOURCE_DIR}/scripts/package/runtime/scripts/setenv.bash
-    ${CMAKE_SOURCE_DIR}/scripts/package/runtime/scripts/setenv.csh
-    ${CMAKE_SOURCE_DIR}/scripts/package/runtime/scripts/setenv.fish
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/prereq_check.bash
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/prereq_check.csh
+    ${RUNTIME_DIR}/scripts/package/runtime/scripts/prereq_check.fish
+    ${INSTALL_OPTIONAL}
 )
 install(FILES ${BIN_FILES}
     DESTINATION share/info/runtime/bin
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
-install(FILES ${CMAKE_SOURCE_DIR}/scripts/package/runtime/set_env.sh
-    DESTINATION runtime
+install(FILES ${RUNTIME_DIR}/scripts/package/runtime/set_env.sh
+    DESTINATION .
+    PERMISSIONS OWNER_READ GROUP_READ
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/include
-    DESTINATION runtime
-    FILES_MATCHING
-    PATTERN "*.h"
-    PATTERN "include/external/acl/acl_rt_impl.h" EXCLUDE
+install(DIRECTORY ${RUNTIME_DIR}/include/dfx/base/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/include/base
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
 install(FILES
     ${LIBC_SEC_HEADER}/securec.h
     ${LIBC_SEC_HEADER}/securectype.h
-    DESTINATION runtime/include
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/include
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
 install(FILES
@@ -129,7 +132,9 @@ install(FILES
     ${RUNTIME_DIR}/pkg_inc/dump/adump_api.h
     ${RUNTIME_DIR}/pkg_inc/dump/adump_pub.h
     ${RUNTIME_DIR}/pkg_inc/dump/adump_device_pub.h
-    DESTINATION runtime/pkg_inc/dump
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/dump
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
 install(FILES
@@ -146,11 +151,13 @@ install(FILES
     ${RUNTIME_DIR}/pkg_inc/runtime/rt_external_preload.h
     ${RUNTIME_DIR}/pkg_inc/runtime/rt_external_stars_define.h
     ${RUNTIME_DIR}/pkg_inc/runtime/rt_external_stream.h
-    DESTINATION runtime/pkg_inc/runtime
+    ${RUNTIME_DIR}/pkg_inc/runtime/rt_external_dqs.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/runtime
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
 install(FILES
-    ${RUNTIME_DIR}/pkg_inc/runtime/runtime/__clang_cce_runtime.h
     ${RUNTIME_DIR}/pkg_inc/runtime/runtime/base.h
     ${RUNTIME_DIR}/pkg_inc/runtime/runtime/config.h
     ${RUNTIME_DIR}/pkg_inc/runtime/runtime/context.h
@@ -173,7 +180,9 @@ install(FILES
     ${RUNTIME_DIR}/pkg_inc/runtime/runtime/rt.h
     ${RUNTIME_DIR}/pkg_inc/runtime/runtime/stars_interface.h
     ${RUNTIME_DIR}/pkg_inc/runtime/runtime/stream.h
-    DESTINATION runtime/pkg_inc/runtime/runtime
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/runtime/runtime
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
  
 install(FILES
@@ -189,192 +198,297 @@ install(FILES
     ${RUNTIME_DIR}/pkg_inc/runtime/runtime/rts/rts_stars.h
     ${RUNTIME_DIR}/pkg_inc/runtime/runtime/rts/rts_stream.h
     ${RUNTIME_DIR}/pkg_inc/runtime/runtime/rts/rts.h
-    DESTINATION runtime/pkg_inc/runtime/runtime/rts
+    ${RUNTIME_DIR}/pkg_inc/runtime/runtime/rts/rts_snapshot.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/runtime/runtime/rts
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(DIRECTORY ${RUNTIME_DIR}/pkg_inc/driver
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc
+    COMPONENT npu-runtime
 )
 
 install(FILES
-    pkg_inc/profiling/aprof_pub.h
-    pkg_inc/profiling/devprof_pub.h
-    pkg_inc/profiling/prof_api.h
-    pkg_inc/profiling/prof_common.h
-    DESTINATION runtime/pkg_inc/profiling
+    ${RUNTIME_DIR}/pkg_inc/profiling/aprof_pub.h
+    ${RUNTIME_DIR}/pkg_inc/profiling/devprof_pub.h
+    ${RUNTIME_DIR}/pkg_inc/profiling/prof_api.h
+    ${RUNTIME_DIR}/pkg_inc/profiling/prof_common.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/profiling
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
 install(FILES
-    pkg_inc/toolchain/prof_api.h
-    DESTINATION runtime/pkg_inc/toolchain
+    ${RUNTIME_DIR}/pkg_inc/profiling/prof_api.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/toolchain
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
 install(FILES
-    pkg_inc/trace/atrace_pub.h
-    pkg_inc/trace/atrace_types.h
-    DESTINATION runtime/pkg_inc/trace
+    ${RUNTIME_DIR}/pkg_inc/trace/atrace_pub.h
+    ${RUNTIME_DIR}/pkg_inc/trace/atrace_types.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/trace
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
 install(FILES
-    pkg_inc/watchdog/awatchdog_types.h
-    pkg_inc/watchdog/awatchdog.h
-    DESTINATION runtime/pkg_inc/watchdog
+    ${RUNTIME_DIR}/pkg_inc/watchdog/awatchdog_types.h
+    ${RUNTIME_DIR}/pkg_inc/watchdog/awatchdog.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/watchdog
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
 install(FILES
-    src/mmpa/inc/mmpa/mmpa_api.h
-    DESTINATION runtime/include/mmpa
+    ${RUNTIME_DIR}/pkg_inc/mmpa/mmpa_api.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/mmpa
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
 install(FILES
-    src/mmpa/inc/mmpa/sub_inc/mmpa_linux.h
-    src/mmpa/inc/mmpa/sub_inc/mmpa_typedef_linux.h
-    src/mmpa/inc/mmpa/sub_inc/mmpa_env_define.h
-    DESTINATION runtime/include/mmpa/sub_inc
-)
-
-install(DIRECTORY pkg_inc/aicpu
-    DESTINATION runtime/pkg_inc
-)
-
-install(FILES
-    pkg_inc/base/err_mgr.h
-    pkg_inc/base/dlog_pub.h
-    pkg_inc/base/log_types.h
-    pkg_inc/base/plog.h
-    DESTINATION runtime/pkg_inc/base
-)
-
-install(FILES
-    src/dfx/log/inc/toolchain/alog_pub.h
-    src/dfx/log/inc/toolchain/log_types.h
-    DESTINATION runtime/include/dfx/base
-)
- 
-install(FILES
-    src/dfx/log/inc/toolchain/slog.h
-    src/dfx/log/inc/toolchain/dlog_pub.h
-    src/dfx/log/inc/toolchain/log_types.h
-    DESTINATION runtime/include/toolchain
-)
- 
-install(FILES
-    src/dfx/error_manager/error_manager.h
-    DESTINATION runtime/include/experiment/metadef/common/util/error_manager
-)
-
-install(DIRECTORY pkg_inc/platform
-    DESTINATION runtime/include
-)
-
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/src/platform/platform_config
-    DESTINATION runtime/data
-)
-
-# TODO: ge so packed temporarily for debugging, this need be reverted after ge code has been moved to ge repository.
-install(TARGETS acl_rt acl_rt_impl acl_tdt_queue acl_tdt_channel runtime runtime_common runtime_v100
-        shared_c_sec mmpa static_mmpa error_manager platform awatchdog_share
-        LIBRARY DESTINATION runtime/lib
-        ARCHIVE DESTINATION runtime/lib
-)
-
-install(TARGETS platform
-        LIBRARY DESTINATION runtime/lib
-        ARCHIVE DESTINATION runtime/lib
-)
-
-install(TARGETS platform stub_acl_rt stub_acl_tdt_channel stub_acl_tdt_queue stub_acl_prof stub_error_manager ascend_hal_stub
-        LIBRARY DESTINATION runtime/devlib/linux/${ARCH}
-        ARCHIVE DESTINATION runtime/devlib/linux/${ARCH}
-)
-
-install(FILES
-    ${CMAKE_BINARY_DIR}/lib_acl/stub/linux/${ARCH}/libascendcl.so
-    DESTINATION runtime/devlib/linux/${ARCH}
-    OPTIONAL
-)
-
-install(TARGETS slog alog unified_dlog
-    LIBRARY DESTINATION runtime/lib
-    ARCHIVE DESTINATION runtime/lib
-)
-
-install(TARGETS adcore ascend_dump adump_server ascend_dump_static
-    LIBRARY DESTINATION runtime/lib
-    ARCHIVE DESTINATION runtime/lib
-)
-
-install(TARGETS profapi_share msprofiler_fwk_share profimpl_fwk_share
-    LIBRARY DESTINATION runtime/lib
-    ARCHIVE DESTINATION runtime/lib
-)
-
-install(TARGETS atrace_share
-    LIBRARY DESTINATION runtime/lib
-    ARCHIVE DESTINATION runtime/lib
-)
-
-install(TARGETS asc_dumper
-    RUNTIME DESTINATION runtime/bin
-)
-
-install(CODE "execute_process(COMMAND cd ${PROTOBUF_SHARED_PKG_DIR}/lib && ln -sf libascend_protobuf.so.3.13.0.0 libascend_protobuf.so)")
-
-install(FILES
-    ${PROTOBUF_SHARED_PKG_DIR}/lib/libascend_protobuf.so.3.13.0.0
-    ${PROTOBUF_SHARED_PKG_DIR}/lib/libascend_protobuf.so
-    DESTINATION runtime/lib
+    ${RUNTIME_DIR}/pkg_inc/mmpa/sub_inc/mmpa_linux.h
+    ${RUNTIME_DIR}/pkg_inc/mmpa/sub_inc/mmpa_typedef_linux.h
+    ${RUNTIME_DIR}/pkg_inc/mmpa/sub_inc/mmpa_env_define.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/mmpa/sub_inc
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
 )
 
 install(DIRECTORY
-    ${CMAKE_BINARY_DIR}/lib_acl/
-    DESTINATION runtime/lib
+    ${RUNTIME_DIR}/pkg_inc/aicpu_sched/common/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/aicpu
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+    # 排除type_def.h
+    PATTERN "type_def.h" EXCLUDE
+)
+
+# 单独安装type_def.h到aicpu/common目录
+install(FILES
+    ${RUNTIME_DIR}/pkg_inc/aicpu_sched/common/type_def.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/aicpu/common
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(FILES
+    ${RUNTIME_DIR}/scripts/package/runtime/pkg_inc/aicpu_engine_struct.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(DIRECTORY
+    ${RUNTIME_DIR}/pkg_inc/aicpu_sched/aicpu_schedule/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/aicpu/aicpu_schedule
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(DIRECTORY
+    ${RUNTIME_DIR}/pkg_inc/queue_schedule
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/aicpu
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(DIRECTORY
+    ${RUNTIME_DIR}/pkg_inc/aicpu_sched/cpu_kernels/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/aicpu/cpu_kernels
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(DIRECTORY
+    ${RUNTIME_DIR}/pkg_inc/tsd/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/aicpu/tsd
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(DIRECTORY
+    ${RUNTIME_DIR}/include/external/acl/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/include/acl
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+    PATTERN "acl_base_mdl.h" EXCLUDE
+    PATTERN "acl_mdl.h" EXCLUDE
+    PATTERN "acl_op.h" EXCLUDE
+)
+
+install(DIRECTORY
+    ${RUNTIME_DIR}/include/external/ge/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/include/ge
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(FILES
+    ${RUNTIME_DIR}/pkg_inc/base/err_mgr.h
+    ${RUNTIME_DIR}/pkg_inc/base/dlog_pub.h
+    ${RUNTIME_DIR}/include/dfx/base/log_types.h
+    ${RUNTIME_DIR}/pkg_inc/base/plog.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc/base
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(FILES
+    ${RUNTIME_DIR}/src/dfx/log/inc/toolchain/alog_pub.h
+    ${RUNTIME_DIR}/src/dfx/log/inc/toolchain/log_types.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/include/base
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+ 
+install(FILES
+    ${RUNTIME_DIR}/src/dfx/error_manager/error_manager.h
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/include/experiment/metadef/common/util/error_manager
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(DIRECTORY ${RUNTIME_DIR}/pkg_inc/platform
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/include
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(DIRECTORY ${RUNTIME_DIR}/src/platform/platform_config/cann/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/data/platform_config
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(DIRECTORY ${RUNTIME_DIR}/src/platform/platform_config/cann-dev/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/data/platform_config
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(DIRECTORY ${RUNTIME_DIR}/src/platform/platform_config/kirin/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/data/platform_config
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(DIRECTORY ${RUNTIME_DIR}/src/platform/platform_config/kirin-dev/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/data/platform_config
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(FILES
+    ${PROTOBUF_HOST_STATIC_FINAL_PATH}
+    DESTINATION ${INSTALL_DIR}
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+# TODO: ge so packed temporarily for debugging, this need be reverted after ge code has been moved to ge repository.
+install(TARGETS acl_rt acl_rt_impl acl_tdt_queue acl_tdt_channel runtime xpu_tprt runtime_common runtime_v100 runtime_v201
+        mmpa static_mmpa error_manager platform awatchdog_share runtime_v200
+        LIBRARY DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+        ARCHIVE DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+)
+
+install(FILES
+    $<TARGET_FILE:c_sec> $<TARGET_FILE:c_sec_static>
+    DESTINATION ${INSTALL_DIR} COMPONENT npu-runtime
+)
+
+install(TARGETS platform
+        LIBRARY DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+        ARCHIVE DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+)
+
+install(TARGETS platform stub_acl_rt stub_acl_tdt_channel stub_acl_tdt_queue stub_acl_prof stub_error_manager ascend_hal_stub
+        LIBRARY DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/devlib/linux/${TARGET_ARCH} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+        ARCHIVE DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/devlib/linux/${TARGET_ARCH} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+)
+
+install(FILES
+    ${CMAKE_BINARY_DIR}/lib_acl/stub/linux/${TARGET_ARCH}/libascendcl.so
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/devlib/linux/${TARGET_ARCH}
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+# cpu scheduler targets 
+install(TARGETS ${SCHED_TARGETS}
+    LIBRARY DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+    ARCHIVE DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+)
+
+install(TARGETS alog unified_dlog
+    LIBRARY DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+    ARCHIVE DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+)
+
+install(TARGETS adcore ascend_dump adump_server ascend_dump_static
+    LIBRARY DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+    ARCHIVE DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+)
+
+install(TARGETS profapi_share msprofiler_fwk_share profimpl_fwk_share
+    LIBRARY DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+    ARCHIVE DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+)
+
+install(TARGETS atrace_share
+    LIBRARY DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+    ARCHIVE DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+)
+
+install(TARGETS asc_dumper
+    RUNTIME DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/bin
+    ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+)
+
+install(FILES
+    ${PROTOBUF_SHARED_LIB_DIR}/libascend_protobuf.so.3.13.0.0
+    DESTINATION ${INSTALL_DIR}
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+install(CODE
+    "execute_process(
+        COMMAND ${CMAKE_COMMAND} -E create_symlink 
+        libascend_protobuf.so.3.13.0.0 
+        libascend_protobuf.so
+        WORKING_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/${INSTALL_DIR}\"
+    )"
+    COMPONENT npu-runtime
+)
+
+install(FILES
+    ${CMAKE_BINARY_DIR}/lib_acl/libascendcl.so
+    ${CMAKE_BINARY_DIR}/lib_acl/libdatatransfer.so
+    ${CMAKE_BINARY_DIR}/lib_acl/libindextransform.so
+    DESTINATION ${INSTALL_DIR}
+    ${INSTALL_OPTIONAL}
+    COMPONENT npu-runtime
+)
+
+install(FILES
+    ${CMAKE_BINARY_DIR}/lib_acl/dcache_lock_mix_ascend950.o
+    ${CMAKE_BINARY_DIR}/lib_acl/dcache_lock_mix.o
+    ${CMAKE_BINARY_DIR}/lib_acl/libascend_kms.so
+    DESTINATION ${INSTALL_DIR}
     OPTIONAL
+    COMPONENT npu-runtime
 )
 
-set(AICPU_TAR_DIR ${RUNTIME_DIR}/build/lib_aicpu)
-install(FILES
-    ${AICPU_TAR_DIR}/host_queue_schedule
-    DESTINATION runtime/bin
+install(TARGETS queue_schedule_so
+    LIBRARY DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
+    ARCHIVE DESTINATION ${INSTALL_DIR} ${INSTALL_OPTIONAL} COMPONENT npu-runtime
 )
-install(FILES
-    ${AICPU_TAR_DIR}/libhost_aicpu_scheduler.so
-    ${AICPU_TAR_DIR}/libhost_queue_schedule.so
-    ${AICPU_TAR_DIR}/libdgw_client.so
-    ${AICPU_TAR_DIR}/libtsdclient.so
-    DESTINATION runtime/lib
+ 
+install(TARGETS queue_schedule
+    RUNTIME DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/bin
+    ${INSTALL_OPTIONAL} COMPONENT npu-runtime
 )
-
-if(DEFINED ENV{TOOLCHAIN_DIR})
-    install(FILES 
-        ${CHILD_INSTALL_DIR}/lib/libc_sec.so
-        ${CHILD_INSTALL_DIR}/lib/libascendalog.so
-        ${CHILD_INSTALL_DIR}/lib/libunified_dlog.so
-        ${CMAKE_BINARY_DIR}/device_build/protobuf_static/lib/libascend_protobuf.a
-        ${CHILD_INSTALL_DIR}/lib/libmmpa.so
-        ${CHILD_INSTALL_DIR}/lib/stub/libascend_hal.so
-        ${CHILD_INSTALL_DIR}/lib/libplatform_static.a
-        ${CHILD_INSTALL_DIR}/lib/libkernel_load_platform.so
-        DESTINATION runtime/lib/device
-    )
-
-    install(FILES
-        ${CHILD_INSTALL_DIR}/runtime/cann-tsch-compat.tar.gz
-        DESTINATION runtime
-    )
-endif()
-
-# ============= CPack =============
-set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}")
-
-set(CPACK_INSTALL_PREFIX "/")
-
-set(CPACK_CMAKE_SOURCE_DIR "${CMAKE_SOURCE_DIR}")
-set(CPACK_CMAKE_BINARY_DIR "${CMAKE_BINARY_DIR}")
-set(CPACK_CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-set(CPACK_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-set(CPACK_ARCH "${ARCH}")
-set(CPACK_SET_DESTDIR ON)
-set(CPACK_GENERATOR External)
-set(CPACK_EXTERNAL_PACKAGE_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/makeself.cmake")
-set(CPACK_EXTERNAL_ENABLE_STAGING true)
-set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}")
-include(CPack)

@@ -14,26 +14,53 @@
 #include "nlohmann/json.hpp"
 
 namespace Adx {
-    class JsonParser {
-    public:
-        static int32_t ParseJsonFromFile(const char *const fileName, nlohmann::json &js);
-        static int32_t ParseJsonFromMemory(const char *dumpConfigData, size_t dumpConfigSize, nlohmann::json &js);
-        static const nlohmann::json& GetCfgJsonByKey(const nlohmann::json &js, const std::string &key) {
-            return js.at(key);
-        }
-        static bool ContainKey(const nlohmann::json &js, const std::string &key) {
-            return (js.find(key) != js.end());
-        }
-        static std::string GetCfgStrByKey(const nlohmann::json &js , const std::string &key) {
-            return js.at(key).get<std::string>();
-        }
+class JsonParser {
+public:
+    static int32_t ParseJsonFromMemory(
+        const char* dumpConfigData, size_t dumpConfigSize, nlohmann::json& js, std::string& errMsg);
+    static const nlohmann::json& GetCfgJsonByKey(const nlohmann::json& js, const std::string& key)
+    {
+        return js.at(key);
+    }
+    static bool ContainKey(const nlohmann::json& js, const std::string& key) { return js.contains(key); }
+    static std::string GetCfgStrByKey(const nlohmann::json& js, const std::string& key)
+    {
+        return js.at(key).get<std::string>();
+    }
 
-    private:
-        static void GetMaxNestedLayers(const char *const fileName, const size_t length,
-                                       size_t &maxObjDepth, size_t &maxArrayDepth);
-        static bool IsValidFileName(const char *const fileName);
+    static bool GetStringIfExist(const nlohmann::json& js, const std::string& key, std::string& value)
+    {
+        auto it = js.find(key);
+        if (it == js.end()) {
+            return false;
+        }
+        if (it->is_string()) {
+            value = it->get<std::string>();
+            return true;
+        }
+        return false;
+    }
 
-        static bool ParseJson(const char *const fileName, nlohmann::json &js, const size_t fileLength);
-    };
-}
+    static std::string GetStringOrDefault(
+        const nlohmann::json& js, const std::string& key, const std::string& defaultValue)
+    {
+        auto it = js.find(key);
+        if (it == js.end()) {
+            return defaultValue;
+        }
+        if (it->is_string()) {
+            std::string value = it->get<std::string>();
+            return value.empty() ? defaultValue : value;
+        }
+        return defaultValue;
+    }
+
+private:
+    static void GetMaxNestedLayers(
+        const char* const fileName, const size_t length, size_t& maxObjDepth, size_t& maxArrayDepth);
+    static bool IsValidFileName(const char* const fileName);
+
+    static bool ParseJson(const char* const fileName, nlohmann::json& js, const size_t fileLength);
+};
+} // namespace Adx
 #endif

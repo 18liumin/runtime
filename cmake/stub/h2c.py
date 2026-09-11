@@ -21,10 +21,11 @@ import sys
 import argparse
 import re
 
-PATTERN_FUNCTION = re.compile(r'.+\w+\([^;]*\);')
-PATTERN_FUNCTION_WEAK = re.compile(r'.+\w+\([^;]*\) ASCEND_HAL_WEAK;')
+PATTERN_FUNCTION = re.compile(r'.+\w+\([^;]*\)\s*;')
+PATTERN_FUNCTION_WEAK = re.compile(r'.+\w+\([^;]*\)\s+ASCEND_HAL_WEAK\s*;')
 INGORE_LIST = ["#ifndef __ASCEND_HAL_H__", "#ifndef ASCEND_EXTERNAL_H", 
-    "#ifndef __ASCEND_INPACKAGE_HAL_H__", "#ifndef TS_API_H", "#ifndef __DRV_INTERNAL_H__"]
+    "#ifndef __ASCEND_INPACKAGE_HAL_H__", "#ifndef TS_API_H", "#ifndef __DRV_INTERNAL_H__",
+    "#ifndef ASCEND_HAL_BASE_H"]
 
 def collect_content(file_path):
     """
@@ -47,13 +48,15 @@ def collect_content(file_path):
             left += i.count('(')
             right += i.count(')')
             i = i.replace('extern', '').replace('SECUREC_API', '')
+            is_exported_declaration = i.lstrip().startswith("DLLEXPORT")
+            is_declaration_prefix = is_exported_declaration and '(' not in i
             if change_line == 0:
-                contents.append(i.strip(" "))
+                contents.append(i.rstrip('\r\n') + ' ' if is_declaration_prefix else i.strip(" "))
             elif change_line == 1:
                 contents[-1] = contents[-1] + i
-            if left != right:
+            if left != right or (is_exported_declaration and not i.strip().endswith(";")):
                 change_line = 1
-            if i.strip().endswith(";") or (change_line == 1 and left == right):
+            if i.strip().endswith(";"):
                 change_line = 0
                 left = 0
                 right = 0
@@ -87,7 +90,7 @@ def collect_functions(file_path):
                     signatures.append(i)
                     endif_num += 1
 
-        match = PATTERN_FUNCTION.match(i) or PATTERN_FUNCTION_WEAK.match(i)
+        match = PATTERN_FUNCTION_WEAK.match(i) or PATTERN_FUNCTION.match(i)
         if match:
             signatures.append(i)
     return signatures
@@ -99,16 +102,26 @@ def implement_function(func):
     参    数 : 调用脚本的传参
     返  回 值 : 解析后的参数值
     """
+    void_pointer_prefixes = (
+        "void *",
+        "void*",
+        "const void *",
+        "const void*",
+        "DLLEXPORT void *",
+        "DLLEXPORT void*",
+        "DLLEXPORT const void *",
+        "DLLEXPORT const void*",
+    )
+    void_prefixes = ("void", "DLLEXPORT void")
     function_def = func[:len(func) - 1].replace(";", "")
     function_def += '\n'
     function_def += '{\n'
-    if not func.startswith("void"):
-        if not func.startswith("DLLEXPORT void"):
-            function_def += '    return 0;'
-    if func.startswith("DLLEXPORT void *"):
+    is_void_pointer = any(func.startswith(prefix) for prefix in void_pointer_prefixes)
+    is_void_function = any(func.startswith(prefix) for prefix in void_prefixes)
+    if is_void_pointer:
         function_def += '    return NULL;'
-    if func.startswith("DLLEXPORT void*"):
-        function_def += '    return NULL;'
+    elif not is_void_function:
+        function_def += '    return 0;'
     function_def += '\n'
     function_def += '}'
     return function_def
@@ -140,8 +153,6 @@ def generate_function(header_files):
         print("include concent build success")
         content.append('\n')
         # generate implement
-        if header_file.find("git") >= 0:
-            continue
         if not header_file.endswith('.h'):
             continue
         content.append("// stub for " + os.path.basename(header_file) + "\n")
@@ -149,11 +160,11 @@ def generate_function(header_files):
 
         print("inc file:{}, functions numbers:{}".format(header_file, len(functions)))
         for func in functions:
-            if PATTERN_FUNCTION.match(func):
-                content.append(implement_function(func) + "\n")
-            elif PATTERN_FUNCTION_WEAK.match(func):
-                delete_weak_func = func.replace(" ASCEND_HAL_WEAK", "")
+            if PATTERN_FUNCTION_WEAK.match(func):
+                delete_weak_func = re.sub(r'\s+ASCEND_HAL_WEAK(?=\s*;)', '', func)
                 content.append(implement_function(delete_weak_func) + "\n")
+            elif PATTERN_FUNCTION.match(func):
+                content.append(implement_function(func) + "\n")
             else:
                 content.append(func)
                 content.append("\n")

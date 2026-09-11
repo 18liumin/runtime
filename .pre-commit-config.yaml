@@ -1,0 +1,35 @@
+repos:
+  - repo: https://gitcode.com/pre-commit-clang/mirrors-clang-format
+    rev: v16.0.0
+    hooks:
+      - id: clang-format
+        types_or: [c++, c]
+        files: \.(c|h|cpp|hpp|cc|hh|cxx|hxx)$
+        exclude: |
+          (?x)^(
+            include/external/acl/(?:
+              acl_prof
+              | acl_rt
+              | acl_rt_allocator
+              | acl_tdt
+              | acl_tdt_queue
+            )\.h$
+          )
+        args:
+          - "--style=file"
+          - "--verbose"
+          - "-i"
+
+
+  # OAT compliance check (Open Source Audit Tool)
+  - repo: local
+    hooks:
+      - id: oat-check
+        name: OAT Compliance Check
+        entry: bash scripts/oat_check.sh
+        exclude: '^(\.pre-commit-config\.yaml|README\.md|\.devcontainer/Dockerfile|Third_Party_Open_Source_Software_List\.yaml)$'
+        language: system
+        pass_filenames: true
+        types: [file]
+        stages: [pre-commit]
+        verbose: true

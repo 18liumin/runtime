@@ -51,13 +51,14 @@ protected:
         JsonParser::instance()->UnInit();
         GlobalMockObject::verify();
         system(JSON_RM_RF);
+        GlobalMockObject::reset();
     }
     void TestProfJson(std::string testcase)
     {
         // milan: TaskTime
         nlohmann::json data;
         data["output"] = JSON_OUTPUT_DIR;
-        std::string filename = LLT_DATA_DIR "json/" + testcase + ".json";
+        std::string filename = LLT_DATA_DIR "/json/" + testcase + ".json";
         JsonParser::instance()->Init(filename);
         EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().AclJsonStart(0, data));
     }

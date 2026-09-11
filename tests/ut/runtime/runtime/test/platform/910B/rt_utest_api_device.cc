@@ -24,117 +24,101 @@
 #include "stars_engine.hpp"
 #include "raw_device.hpp"
 #include "platform/platform_info.h"
+#include "platform_manager_v2.h"
+#include "soma.hpp"
 #undef private
-
 
 using namespace testing;
 using namespace cce::runtime;
 
-class CloudV2ApiDeviceTest : public testing::Test
-{
+extern int64_t g_device_driver_chassis_id_stub;
+
+class CloudV2ApiDeviceTest : public testing::Test {
 protected:
-    static void SetUpTestCase()
-    {
-        std::cout<<"CloudV2ApiDeviceTest test start start. "<<std::endl;
-    }
+    static void SetUpTestCase() { std::cout << "CloudV2ApiDeviceTest test start start. " << std::endl; }
 
-    static void TearDownTestCase()
-    {
-        std::cout<<"CloudV2ApiDeviceTest test start end. "<<std::endl;
+    static void TearDownTestCase() { std::cout << "CloudV2ApiDeviceTest test start end. " << std::endl; }
 
-    }
-
-    virtual void SetUp()
-    {
-        (void)rtSetDevice(0);
-    }
+    virtual void SetUp() { (void)rtSetDevice(0); }
 
     virtual void TearDown()
     {
         GlobalMockObject::verify();
         rtDeviceReset(0);
     }
+
 private:
 };
 
-drvError_t drvGetPlatformInfo_rts1(uint32_t *info)
+drvError_t drvGetPlatformInfo_rts1(uint32_t* info)
 {
     *info = RT_RUN_MODE_ONLINE;
     return DRV_ERROR_NONE;
 }
 
-drvError_t drvGetPlatformInfo_rts2(uint32_t *info)
+drvError_t drvGetPlatformInfo_rts2(uint32_t* info)
 {
     *info = RT_RUN_MODE_AICPU_SCHED;
     return DRV_ERROR_NONE;
 }
 
-drvError_t halGetDeviceSplitMode_rts1(unsigned int dev_id, unsigned int *split_mode)
+drvError_t halGetDeviceSplitMode_rts1(unsigned int dev_id, unsigned int* split_mode)
 {
     *split_mode = 0;
     return DRV_ERROR_NONE;
 }
 
-drvError_t halGetDeviceSplitMode_rts2(unsigned int dev_id, unsigned int *split_mode)
+drvError_t halGetDeviceSplitMode_rts2(unsigned int dev_id, unsigned int* split_mode)
 {
     *split_mode = 1;
     return DRV_ERROR_NONE;
 }
 
-drvError_t halGetDeviceSplitMode_rts3(unsigned int dev_id, unsigned int *split_mode)
+drvError_t halGetDeviceSplitMode_rts3(unsigned int dev_id, unsigned int* split_mode)
 {
     *split_mode = 2;
     return DRV_ERROR_NONE;
 }
 
-drvError_t halGetDeviceSplitMode_rts4(unsigned int dev_id, unsigned int *split_mode)
+drvError_t halGetDeviceSplitMode_rts4(unsigned int dev_id, unsigned int* split_mode)
 {
     *split_mode = 3;
     return DRV_ERROR_NONE;
 }
 
-TEST_F(CloudV2ApiDeviceTest, TestRtsSetOpWaitTimeOut)
-{
-    rtError_t error;
-    error = rtsSetOpWaitTimeOut(1);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-}
+class ScopedNpuArchProps {
+public:
+    explicit ScopedNpuArchProps(const int64_t npuArch)
+    {
+        rt_ = Runtime::Instance();
+        EXPECT_NE(rt_, nullptr);
+        if (rt_ == nullptr) {
+            return;
+        }
+        EXPECT_EQ(GET_DEV_PROPERTIES(rt_->GetChipType(), origProps_), RT_ERROR_NONE);
+        testProps_ = origProps_;
+        testProps_.npuArch = npuArch;
+        SET_DEV_PROPERTIES(rt_->GetChipType(), testProps_);
+        valid_ = true;
+    }
 
-TEST_F(CloudV2ApiDeviceTest, TestWaitForParsePrint)
-{
-    rtError_t error;
-    Device* device = ((Runtime *)Runtime::Instance())->DeviceRetain(0, 0);
-    RawDevice* rawdevice = dynamic_cast<RawDevice*>(device);
-    void * const printf = ValueToPtr(THREAD_PRINTF);
-    constexpr const char_t* threadName = "PRINTF";
-    auto * stars_engine = dynamic_cast<StarsEngine*>(rawdevice->engine_);
-    stars_engine->printfThread_.reset(OsalFactory::CreateThread(threadName, stars_engine, printf));
-    rawdevice->WaitForParsePrintf();
-    stars_engine->printfThread_.reset(nullptr);
-    ((Runtime *)Runtime::Instance())->DeviceRelease(device);
-}
+    ~ScopedNpuArchProps()
+    {
+        if (valid_) {
+            SET_DEV_PROPERTIES(rt_->GetChipType(), origProps_);
+        }
+    }
 
-TEST_F(CloudV2ApiDeviceTest, AddAddrKernelNameMapTableTest)
-{
-    RawDevice dev(0);
-    dev.Init();
-    dev.platformConfig_ = 0x500;
-    rtAddrKernelName_t mapInfo;
-    mapInfo.addr = 0;
-    mapInfo.kernelName = "testKernel";
-    dev.AddAddrKernelNameMapTable(mapInfo);
-    string ret = dev.LookupKernelNameByAddr(1);
-    EXPECT_EQ(ret, "not found kernel name");
-    ret = dev.LookupKernelNameByAddr(0);
-    EXPECT_EQ(ret, "testKernel");
-}
+private:
+    Runtime* rt_{nullptr};
+    DevProperties origProps_{};
+    DevProperties testProps_{};
+    bool valid_{false};
+};
 
-TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo)
+void CheckDeviceInfoCommonAttrs(int32_t devid, int64_t& val)
 {
-    rtError_t error;
-    int32_t devid = 0;
-    int64_t val = 0;
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_AICPU_CORE_NUM, &val);
+    rtError_t error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_AICPU_CORE_NUM, &val);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_MAX, &val);
@@ -147,56 +131,47 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo)
     EXPECT_EQ(error, RT_ERROR_NONE);
 
     std::string literalStr = "20";
-    MOCKER_CPP(&fe::PlatFormInfos::GetPlatformResWithLock,
-        bool(fe::PlatFormInfos::*)(const std::string &, const std::string &, std::string &))
+    MOCKER_CPP(
+        &fe::PlatFormInfos::GetPlatformResWithLock,
+        bool(fe::PlatFormInfos::*)(const std::string&, const std::string&, std::string&))
         .stubs()
         .with(mockcpp::any(), mockcpp::any(), outBound(literalStr))
         .will(returnValue(true));
 
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_CUBE_CORE_NUM, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
+    constexpr rtDevAttr attrs[] = {
+        RT_DEV_ATTR_CUBE_CORE_NUM,
+        RT_DEV_ATTR_VECTOR_CORE_NUM,
+        RT_DEV_ATTR_WARP_SIZE,
+        RT_DEV_ATTR_MAX_THREAD_PER_VECTOR_CORE,
+        RT_DEV_ATTR_UBUF_PER_VECTOR_CORE,
+        RT_DEV_ATTR_TOTAL_GLOBAL_MEM_SIZE,
+        RT_DEV_ATTR_L2_CACHE_SIZE,
+        RT_DEV_ATTR_SMP_ID,
+        RT_DEV_ATTR_PHY_CHIP_ID,
+        RT_DEV_ATTR_SUPER_POD_DEVICE_ID,
+        RT_DEV_ATTR_SUPER_POD_SERVER_ID,
+        RT_DEV_ATTR_SUPER_POD_ID,
+        RT_DEV_ATTR_CUST_OP_PRIVILEGE,
+        RT_DEV_ATTR_MAINBOARD_ID,
+        RT_DEV_ATTR_SUPER_POD_CHASSIS_ID};
+    for (const auto attr : attrs) {
+        error = rtsDeviceGetInfo(devid, attr, &val);
+        EXPECT_EQ(error, RT_ERROR_NONE);
+    }
+}
 
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_VECTOR_CORE_NUM, &val);
+void CheckDeviceInfoNpuArch(int32_t devid, int64_t& val)
+{
+    ScopedNpuArchProps propsGuard(2201);
+    const rtError_t error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_NPU_ARCH, &val);
     EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_GT(val, static_cast<int64_t>(0));
+}
 
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_WARP_SIZE, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_MAX_THREAD_PER_VECTOR_CORE, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_LOCAL_MEM_PER_VECTOR_CORE, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_TOTAL_GLOBAL_MEM_SIZE, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_L2_CACHE_SIZE, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_SMP_ID, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
- 
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_PHY_CHIP_ID, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
- 
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_SUPER_POD_DEVICE_ID, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
- 
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_SUPER_POD_SERVER_ID, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
- 
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_SUPER_POD_ID, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
- 
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_CUST_OP_PRIVILEGE, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
- 
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_MAINBOARD_ID, &val);
-    EXPECT_EQ(error, RT_ERROR_NONE);
-
+void CheckDeviceInfoVirtualAttrs(int32_t devid, int64_t& val)
+{
     MOCKER(halGetDeviceSplitMode).stubs().will(invoke(halGetDeviceSplitMode_rts1));
-    error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_IS_VIRTUAL, &val);
+    rtError_t error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_IS_VIRTUAL, &val);
     EXPECT_EQ(error, RT_ERROR_NONE);
     EXPECT_EQ(val, static_cast<int64_t>(0));
     GlobalMockObject::verify();
@@ -218,15 +193,132 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo)
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
 
+TEST_F(CloudV2ApiDeviceTest, TestRtsSetOpWaitTimeOut)
+{
+    rtError_t error;
+    error = rtsSetOpWaitTimeOut(1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2ApiDeviceTest, TestWaitForParsePrint)
+{
+    rtError_t error;
+    Device* device = ((Runtime*)Runtime::Instance())->DeviceRetain(0, 0);
+    RawDevice* rawdevice = dynamic_cast<RawDevice*>(device);
+    void* const printf = ValueToPtr(THREAD_PRINTF);
+    constexpr const char_t* threadName = "PRINTF";
+    auto* stars_engine = dynamic_cast<StarsEngine*>(rawdevice->engine_);
+    stars_engine->printfThread_.reset(OsalFactory::CreateThread(threadName, stars_engine, printf));
+    rawdevice->WaitForParsePrintf();
+    stars_engine->printfThread_.reset(nullptr);
+    ((Runtime*)Runtime::Instance())->DeviceRelease(device);
+}
+
+TEST_F(CloudV2ApiDeviceTest, AddAddrKernelNameMapTableTest)
+{
+    RawDevice dev(0);
+    dev.Init();
+    dev.chipType_ = static_cast<rtChipType_t>(PLAT_GET_CHIP(static_cast<uint64_t>(0x500)));
+    rtAddrKernelName_t mapInfo;
+    mapInfo.addr = 0;
+    mapInfo.kernelName = "testKernel";
+    dev.AddAddrKernelNameMapTable(mapInfo);
+    string ret = dev.LookupKernelNameByAddr(0);
+    EXPECT_EQ(ret, "not found kernel name");
+    mapInfo.addr = 1;
+    mapInfo.kernelName = "testKernel2";
+    dev.AddAddrKernelNameMapTable(mapInfo);
+    ret = dev.LookupKernelNameByAddr(1);
+    EXPECT_EQ(ret, "testKernel2");
+}
+
+TEST_F(CloudV2ApiDeviceTest, streamMemPoolCreate_failed)
+{
+    RawDevice* device = new RawDevice(0);
+    device->Init();
+
+    rtMemPool_t memPool = nullptr;
+    rtMemPoolProps poolProps = {
+        .side = 1, .devId = 0, .handleType = RT_MEM_HANDLE_TYPE_POSIX, .maxSize = 0, .reserve = 0};
+    size_t totalSize = (20U * 1024 * 1024 * 1024);
+    Segment* seg = nullptr;
+    MOCKER_CPP_VIRTUAL(*device->driver_, &Driver::MemGetInfoEx)
+        .stubs()
+        .with(mockcpp::any(), mockcpp::any(), mockcpp::any(), outBoundP(&totalSize, sizeof(totalSize)))
+        .will(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(*device->driver_, &Driver::StreamMemPoolCreate)
+        .stubs()
+        .will(returnValue(RT_ERROR_MEM_POOL_ALLOC));
+    rtError_t error = SomaApi::StreamMemPoolCreate(&memPool, &poolProps);
+    EXPECT_EQ(error, RT_ERROR_MEM_POOL_ALLOC);
+    rtMemPoolProps poolProps_new = {
+        .side = 1,
+        .devId = 0,
+        .handleType = RT_MEM_HANDLE_TYPE_POSIX,
+        .maxSize = (30U * 1024 * 1024 * 1024),
+        .reserve = 0};
+    error = SomaApi::StreamMemPoolCreate(&memPool, &poolProps_new);
+    EXPECT_NE(error, RT_ERROR_NONE);
+    delete device;
+}
+
+TEST_F(CloudV2ApiDeviceTest, StreamMemPoolSetAttr_failed)
+{
+    RawDevice* device = new RawDevice(0);
+    device->Init();
+
+    rtMemPool_t memPool = nullptr;
+    void* ptr = RtPtrToPtr<void*>(0x1234);
+    MOCKER_CPP(&PoolRegistry::QueryMemPool)
+        .stubs()
+        .with(mockcpp::any())
+        .will(returnValue(std::shared_ptr<SegmentManager>(nullptr)));
+    rtError_t error = SomaApi::StreamMemPoolSetAttr(&memPool, rtMemPoolReuseFollowEventDependencies, ptr);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+    delete device;
+}
+
+TEST_F(CloudV2ApiDeviceTest, StreamMemPoolGetAttr_failed)
+{
+    RawDevice* device = new RawDevice(0);
+    device->Init();
+
+    rtMemPool_t memPool = nullptr;
+    void* ptr = RtPtrToPtr<void*>(0x1234);
+    MOCKER_CPP(&PoolRegistry::QueryMemPool)
+        .stubs()
+        .with(mockcpp::any())
+        .will(returnValue(std::shared_ptr<SegmentManager>(nullptr)));
+    rtError_t error = SomaApi::StreamMemPoolGetAttr(&memPool, rtMemPoolReuseFollowEventDependencies, ptr);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+    delete device;
+}
+
+TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo)
+{
+    constexpr int32_t devid = 0;
+    int64_t val = 0;
+    CheckDeviceInfoCommonAttrs(devid, val);
+    CheckDeviceInfoNpuArch(devid, val);
+    CheckDeviceInfoVirtualAttrs(devid, val);
+}
+
+TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfoSuperPodChassisIdMapping)
+{
+    constexpr int32_t devid = 0;
+    int64_t val = 0;
+    const rtError_t error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_SUPER_POD_CHASSIS_ID, &val);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(val, g_device_driver_chassis_id_stub);
+}
+
 TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo_abnormal_1)
 {
     rtError_t error;
     int32_t devid = 0;
     int64_t val = 0;
 
-    MOCKER_CPP(&fe::PlatformInfoManager::InitRuntimePlatformInfos)
-        .stubs()
-        .will(returnValue(0xFFFFFFFF));
+    MOCKER_CPP(&fe::PlatformInfoManager::InitRuntimePlatformInfos).stubs().will(returnValue(0xFFFFFFFF));
 
     error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_L2_CACHE_SIZE, &val);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
@@ -239,9 +331,7 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo_abnormal_2)
     int64_t val = 0;
 
     std::string literalStr = "20";
-    MOCKER_CPP(&fe::PlatformInfoManager::GetRuntimePlatformInfosByDevice)
-        .stubs()
-        .will(returnValue(0xFFFFFFFF));
+    MOCKER_CPP(&fe::PlatformInfoManager::GetRuntimePlatformInfosByDevice).stubs().will(returnValue(0xFFFFFFFF));
 
     error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_L2_CACHE_SIZE, &val);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
@@ -254,8 +344,9 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo_abnormal_3)
     int64_t val = 0;
 
     std::string literalStr = "20";
-    MOCKER_CPP(&fe::PlatFormInfos::GetPlatformResWithLock,
-        bool(fe::PlatFormInfos::*)(const std::string &, const std::string &, std::string &))
+    MOCKER_CPP(
+        &fe::PlatFormInfos::GetPlatformResWithLock,
+        bool(fe::PlatFormInfos::*)(const std::string&, const std::string&, std::string&))
         .stubs()
         .will(returnValue(false));
 
@@ -268,16 +359,58 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo_abnormal_4)
     rtError_t error;
     int32_t devid = 0;
     int64_t val = 0;
-    
+
     std::string literalStr = "xyz";
-    MOCKER_CPP(&fe::PlatFormInfos::GetPlatformResWithLock,
-        bool(fe::PlatFormInfos::*)(const std::string &, const std::string &, std::string &))
+    MOCKER_CPP(
+        &fe::PlatFormInfos::GetPlatformResWithLock,
+        bool(fe::PlatFormInfos::*)(const std::string&, const std::string&, std::string&))
         .stubs()
         .with(mockcpp::any(), mockcpp::any(), outBound(literalStr))
         .will(returnValue(true));
 
     error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_L2_CACHE_SIZE, &val);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+}
+
+TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo_npu_arch_repeat_query)
+{
+    constexpr int32_t devid = 0;
+    int64_t firstVal = 0;
+    int64_t secondVal = 0;
+    ScopedNpuArchProps propsGuard(2201);
+
+    EXPECT_EQ(rtsDeviceGetInfo(devid, RT_DEV_ATTR_NPU_ARCH, &firstVal), RT_ERROR_NONE);
+    EXPECT_EQ(rtsDeviceGetInfo(devid, RT_DEV_ATTR_NPU_ARCH, &secondVal), RT_ERROR_NONE);
+    EXPECT_EQ(firstVal, secondVal);
+    EXPECT_GT(firstVal, static_cast<int64_t>(0));
+}
+
+TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo_npu_arch_without_set_device)
+{
+    constexpr int32_t devid = 0;
+    int64_t val = 0;
+    ScopedNpuArchProps propsGuard(2201);
+    EXPECT_EQ(rtDeviceReset(devid), RT_ERROR_NONE);
+    EXPECT_EQ(rtsDeviceGetInfo(devid, RT_DEV_ATTR_NPU_ARCH, &val), RT_ERROR_NONE);
+    EXPECT_GT(val, static_cast<int64_t>(0));
+}
+
+TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo_npu_arch_not_initialized)
+{
+    Runtime* rt = Runtime::Instance();
+    ASSERT_NE(rt, nullptr);
+    DevProperties origProps;
+    ASSERT_EQ(GET_DEV_PROPERTIES(rt->GetChipType(), origProps), RT_ERROR_NONE);
+    DevProperties testProps = origProps;
+    testProps.npuArch = 0;
+    SET_DEV_PROPERTIES(rt->GetChipType(), testProps);
+
+    constexpr int32_t devid = 0;
+    int64_t val = 0;
+    const rtError_t error = rtsDeviceGetInfo(devid, RT_DEV_ATTR_NPU_ARCH, &val);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    SET_DEV_PROPERTIES(rt->GetChipType(), origProps);
 }
 
 TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetInfo_abnormal_5)
@@ -294,7 +427,7 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetCapabilityUpdate)
 {
     rtError_t error;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     int32_t value = 0;
 
     error = rtsDeviceGetCapability(0, RT_FEATURE_TSCPU_TASK_UPDATE_SUPPORT_AIC_AIV, &value);
@@ -306,7 +439,7 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetCapabilityCross)
 {
     rtError_t error;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     int32_t value = 0;
 
     error = rtsDeviceGetCapability(0, RT_FEATURE_SYSTEM_MEMQ_EVENT_CROSS_DEV, &value);
@@ -316,7 +449,7 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetCapabilityCross)
 
 TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetCapabilityTaskIdBitWidth)
 {
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     int32_t value = 0;
 
     rtError_t error = rtsDeviceGetCapability(0, RT_FEATURE_SYSTEM_TASKID_BIT_WIDTH, &value);
@@ -328,7 +461,7 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetCapabilityInvalied)
 {
     rtError_t error;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     int32_t value = 0;
 
     error = rtsDeviceGetCapability(0, 20, &value);
@@ -339,7 +472,7 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetCapabilityFailed)
 {
     rtError_t error;
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     int32_t value = 0;
 
     error = rtsDeviceGetCapability(0, -1, &value);
@@ -356,11 +489,11 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetStreamPriorityRange)
     EXPECT_EQ(error, RT_ERROR_NONE);
 }
 
-TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetCapabilityTaskIdBitWidthOnStarsV2)
+TEST_F(CloudV2ApiDeviceTest, TestRtsDeviceGetCapabilityTaskIdBitWidthOnDavid)
 {
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     int32_t value = 0;
- 
+
     rtError_t error = rtsDeviceGetCapability(0, RT_FEATURE_SYSTEM_TASKID_BIT_WIDTH, &value);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
     EXPECT_EQ(value, 16);
@@ -408,9 +541,7 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsGetDeviceUtilizations)
 {
     rtError_t error;
     uint8_t utilValue = 0;
-    MOCKER(halGetDeviceInfo)
-        .stubs()
-        .will(returnValue(DRV_ERROR_NONE));
+    MOCKER(halGetDeviceInfo).stubs().will(returnValue(DRV_ERROR_NONE));
     error = rtsGetDeviceUtilizations(0, RT_UTIL_TYPE_AICORE, &utilValue);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
@@ -420,7 +551,7 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsGetDeviceUtilizations)
     error = rtsGetDeviceUtilizations(0, RT_UTIL_TYPE_AICPU, &utilValue);
     EXPECT_EQ(error, ACL_RT_SUCCESS);
 
-    Runtime *rtInstance = (Runtime *)Runtime::Instance();
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
     error = rtsGetDeviceUtilizations(0, RT_UTIL_TYPE_MAX, &utilValue);
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 }
@@ -483,7 +614,7 @@ TEST_F(CloudV2ApiDeviceTest, TestRtsNewDeviceId)
     EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
 }
 
-rtError_t ApiGetDeviceUuidStub(Api *api, int32_t devId, rtUuid_t *uuid)
+rtError_t ApiGetDeviceUuidStub(Api* api, int32_t devId, rtUuid_t* uuid)
 {
     UNUSED(api);
     UNUSED(devId);
@@ -493,13 +624,11 @@ rtError_t ApiGetDeviceUuidStub(Api *api, int32_t devId, rtUuid_t *uuid)
 }
 
 TEST_F(CloudV2ApiDeviceTest, get_device_uuid_success)
-{ 
+{
     int32_t devId = 0;
     rtUuid_t uuid;
 
-    MOCKER_CPP_VIRTUAL(Runtime::Instance()->Api_(), &Api::GetDeviceUuid)
-        .stubs()
-        .will(invoke(ApiGetDeviceUuidStub));
+    MOCKER_CPP_VIRTUAL(Runtime::Instance()->Api_(), &Api::GetDeviceUuid).stubs().will(invoke(ApiGetDeviceUuidStub));
 
     auto error = rtGetDeviceUuid(devId, &uuid);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -529,4 +658,189 @@ TEST_F(CloudV2ApiDeviceTest, get_device_uuid_fail)
 
     error = rtGetDeviceUuid(devId, &uuid);
     EXPECT_EQ(error, ACL_ERROR_RT_INVALID_DEVICEID);
+}
+
+rtError_t ApiGetDevicePCIBusIdStub(Api* api, int32_t devId, char* pciBusId, int32_t len)
+{
+    UNUSED(api);
+    UNUSED(devId);
+    UNUSED(len);
+    const char sampleBdf[] = "0000:3d:00.0";
+    (void)memcpy_s(pciBusId, len, sampleBdf, sizeof(sampleBdf));
+    return RT_ERROR_NONE;
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_pci_bus_id_success)
+{
+    int32_t devId = 0;
+    char pciBusId[20] = {0};
+
+    MOCKER_CPP_VIRTUAL(Runtime::Instance()->Api_(), &Api::GetDevicePCIBusId)
+        .stubs()
+        .will(invoke(ApiGetDevicePCIBusIdStub));
+
+    auto error = rtDeviceGetPCIBusId(devId, pciBusId, sizeof(pciBusId));
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_STREQ(pciBusId, "0000:3d:00.0");
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_pci_bus_id_feature_not_support)
+{
+    int32_t devId = 0;
+    char pciBusId[20] = {0};
+
+    MOCKER_CPP_VIRTUAL(Runtime::Instance()->Api_(), &Api::GetDevicePCIBusId)
+        .stubs()
+        .will(returnValue(RT_ERROR_FEATURE_NOT_SUPPORT));
+
+    auto error = rtDeviceGetPCIBusId(devId, pciBusId, sizeof(pciBusId));
+    EXPECT_EQ(error, ACL_ERROR_RT_FEATURE_NOT_SUPPORT);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_pci_bus_id_fail)
+{
+    int32_t devId = 0;
+    char pciBusId[20] = {0};
+
+    MOCKER_CPP_VIRTUAL(Runtime::Instance()->Api_(), &Api::GetDevicePCIBusId)
+        .stubs()
+        .will(returnValue(RT_ERROR_DEVICE_ID));
+
+    auto error = rtDeviceGetPCIBusId(devId, pciBusId, sizeof(pciBusId));
+    EXPECT_EQ(error, ACL_ERROR_RT_INVALID_DEVICEID);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_by_pci_bus_id_success)
+{
+    const char* pciBusId = "0000:3d:00.0";
+    int32_t devId = -1;
+
+    MOCKER_CPP_VIRTUAL(Runtime::Instance()->Api_(), &Api::GetDeviceByPCIBusId).stubs().will(returnValue(RT_ERROR_NONE));
+
+    auto error = rtDeviceGetByPCIBusId(pciBusId, &devId);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_by_pci_bus_id_feature_not_support)
+{
+    const char* pciBusId = "0000:3d:00.0";
+    int32_t devId = 0;
+
+    MOCKER_CPP_VIRTUAL(Runtime::Instance()->Api_(), &Api::GetDeviceByPCIBusId)
+        .stubs()
+        .will(returnValue(RT_ERROR_FEATURE_NOT_SUPPORT));
+
+    auto error = rtDeviceGetByPCIBusId(pciBusId, &devId);
+    EXPECT_EQ(error, ACL_ERROR_RT_FEATURE_NOT_SUPPORT);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_pci_bus_id_dec_invalid_dev_id)
+{
+    int32_t devId = -1;
+    char pciBusId[20] = {0};
+
+    auto error = rtDeviceGetPCIBusId(devId, pciBusId, sizeof(pciBusId));
+    EXPECT_EQ(error, ACL_ERROR_RT_INVALID_DEVICEID);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_pci_bus_id_dec_invalid_ptr)
+{
+    int32_t devId = 0;
+
+    auto error = rtDeviceGetPCIBusId(devId, nullptr, 20);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_pci_bus_id_dec_len_too_small)
+{
+    int32_t devId = 0;
+    char pciBusId[20] = {0};
+
+    auto error = rtDeviceGetPCIBusId(devId, pciBusId, static_cast<int32_t>(RT_PCI_BUS_ID_MIN_LEN) - 1);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_pci_bus_id_dec_success)
+{
+    int32_t devId = 0;
+    char pciBusId[20] = {0};
+
+    auto error = rtDeviceGetPCIBusId(devId, pciBusId, sizeof(pciBusId));
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_STREQ(pciBusId, "0000:3d:00.0");
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_by_pci_bus_id_dec_invalid_ptr)
+{
+    int32_t devId = 0;
+
+    auto error = rtDeviceGetByPCIBusId(nullptr, &devId);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_by_pci_bus_id_dec_invalid_dev_id_ptr)
+{
+    auto error = rtDeviceGetByPCIBusId("0000:3d:00.0", nullptr);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_by_pci_bus_id_dec_success)
+{
+    const char* pciBusId = "0000:3d:00.0";
+    int32_t devId = -1;
+
+    auto error = rtDeviceGetByPCIBusId(pciBusId, &devId);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_EQ(devId, 0);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rt_device_get_by_pci_bus_id_dec_no_match)
+{
+    const char* pciBusId = "0000:ff:00.0";
+    int32_t devId = -1;
+
+    auto error = rtDeviceGetByPCIBusId(pciBusId, &devId);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rtDeviceGetHostAtomicCapabilities)
+{
+    rtError_t error;
+    int32_t devId = 0;
+    uint32_t capabilities[1] = {0};
+    rtAtomicOperation operations[1] = {RT_ATOMIC_OPERATION_INTEGER_ADD};
+
+    int64_t topoType = HOST_DEVICE_CONNECT_TYPE_PCIE;
+    Driver* driver_ = ((Runtime*)Runtime::Instance())->driverFactory_.GetDriver(NPU_DRIVER);
+    MOCKER_CPP_VIRTUAL(driver_, &Driver::GetDevInfo)
+        .stubs()
+        .with(mockcpp::any(), mockcpp::any(), mockcpp::any(), outBoundP(&topoType, sizeof(topoType)))
+        .will(returnValue(RT_ERROR_NONE));
+
+    error = rtDeviceGetHostAtomicCapabilities(capabilities, operations, 1, devId);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(capabilities[0], 0U);
+}
+
+TEST_F(CloudV2ApiDeviceTest, rtDeviceGetP2PAtomicCapabilities)
+{
+    rtError_t error;
+    int32_t devId = 0;
+    uint32_t capabilities[3] = {0};
+    rtAtomicOperation operations[3] = {
+        RT_ATOMIC_OPERATION_DMA_ADD, RT_ATOMIC_OPERATION_DMA_MIN, RT_ATOMIC_OPERATION_INTEGER_ADD};
+
+    int64_t topoType = TOPOLOGY_HCCS;
+    Driver* driver_ = ((Runtime*)Runtime::Instance())->driverFactory_.GetDriver(NPU_DRIVER);
+    MOCKER_CPP_VIRTUAL(driver_, &Driver::GetPairDevicesInfo)
+        .stubs()
+        .with(mockcpp::any(), mockcpp::any(), mockcpp::any(), outBoundP(&topoType, sizeof(topoType)))
+        .will(returnValue(RT_ERROR_NONE));
+
+    error = rtDeviceGetP2PAtomicCapabilities(capabilities, operations, 3, devId, 1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    EXPECT_EQ(capabilities[0], 57U);
+    EXPECT_EQ(capabilities[1], 57U);
+    EXPECT_EQ(capabilities[2], 0U);
 }

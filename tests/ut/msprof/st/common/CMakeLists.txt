@@ -26,6 +26,7 @@ set(msprofSrcList
     ${MSPROF_SOURCE_DIR}/basic/osal/osal.c
     ${MSPROF_SOURCE_DIR}/dvvp/depend/stub/error_manager/msprof_error_manager_stub.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dev_api.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/msprof_drv_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dsmi_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/channel/ai_drv_prof_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/message/codec.cpp
@@ -52,6 +53,7 @@ set(msprofSrcList
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_channel_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_stars_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_biu_perf_job.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_collect_info.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/acp/src/acp_compute_device_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/acp/src/acp_pipe_transfer.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/base_analyzer.cpp
@@ -86,7 +88,7 @@ target_include_directories(common_stest PRIVATE
     ${TOP_DIR}/abl/libc_sec/include
     ${TOP_DIR}/inc/driver
     ${TOP_DIR}/inc/external
-    ${TOP_DIR}/abl/adump
+    ${TOP_DIR}/runtime/src/dfx/adump
     ${TOP_DIR}/ace/npuruntime/inc
     ${TOP_DIR}/abl/msprof/inc
     ${TOP_DIR}/metadef/inc
@@ -122,7 +124,7 @@ target_compile_options(common_stest PRIVATE
     -g
     -pipe
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Wfloat-equal
     -Wextra
@@ -183,7 +185,7 @@ target_compile_options(osal_linux_stest PRIVATE
     -g
     -pipe
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Wfloat-equal
     -Wextra
@@ -246,7 +248,7 @@ target_compile_options(osal_liteos_stest PRIVATE
     -g
     -pipe
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Wfloat-equal
     -Wextra

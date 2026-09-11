@@ -8,3 +8,5 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 add_subdirectory(runtime)
+add_subdirectory(runtime_c/testcase)
+#add_subdirectory(driver-stub)

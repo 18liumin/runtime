@@ -23,6 +23,8 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/analyzer_hwts.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/analyzer_ts.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/analyzer_rt.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/stats_analyzer_api.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/stats_analyzer.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/op_desc_parser.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/cmd_log/cmd_log.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/socket/local_socket.cpp
@@ -34,12 +36,14 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/common/thread/thread.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/thread/thread_pool.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/utils/utils.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/common/utils/llc_event_utils.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/validation/param_validation.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/json/json.cpp
     ${MSPROF_SOURCE_DIR}/basic/osal/osal.c
     ${MSPROF_SOURCE_DIR}/dvvp/depend/stub/error_manager/msprof_error_manager_stub.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/channel/ai_drv_prof_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dev_api.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/msprof_drv_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/mini/ai_drv_dsmi_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/collection_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/collection_register.cpp
@@ -58,6 +62,7 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_hwts_log_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_instr_perf_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_biu_perf_job.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_collect_info.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_aicore_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_aicpu_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_adprof_job.cpp
@@ -86,8 +91,6 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/src/msprof_tx_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/src/msprof_tx_reporter.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/src/prof_stamp_pool.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profhal/halimpl/prof_hdc_server.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profhal/halimpl/prof_helper_server.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profhal/halimpl/prof_server_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profhal/halimpl/prof_hal_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/command_handle.cpp
@@ -100,6 +103,7 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/transport/file_slice.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/file_ageing.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/file_transport.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/stats_transport.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/hdc/hdc_transport.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/hdc/helper_transport.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/hdc/platform/soc/dev_mgr_api.cpp
@@ -108,10 +112,12 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/transport/uploader.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/uploader_mgr.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/hash_data.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/injection_transport.cpp
     ${CppPath}
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msproftx_adaptor.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msprofiler_adaptor.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msprofiler_impl.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/compute_profiling_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msprofiler_acl_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/json_parser.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/report/prof_reporter_mgr.cpp
@@ -123,7 +129,6 @@ set(src_file
 
 add_executable(prof_hal_stest
     test/main.cpp
-    test/hal_server_stest.cpp
     test/aicpu_plugin_stest.cpp
     stub/mmpa_stub.cpp
     ../stub/mmpa_stub.cpp
@@ -203,7 +208,7 @@ target_compile_options(prof_hal_stest PRIVATE
     -g
     -pipe
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Wfloat-equal
     -Wextra

@@ -1,0 +1,409 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include "stream_with_dqs.hpp"
+#include "ioctl_utils.hpp"
+#include "profiler.hpp"
+
+namespace cce {
+namespace runtime {
+StreamWithDqs::~StreamWithDqs()
+{
+    DestroyDqsCtrlSpace();
+    DestroyDqsInterChipSpace();
+    (void)DestroyAccSubInfo();
+
+    DELETE_O(dqsNotify_);
+    DELETE_O(dqsCountNotify_);
+}
+
+rtError_t StreamWithDqs::SetupByFlagAndCheck(void)
+{
+    rtError_t error = DavidStream::SetupByFlagAndCheck();
+    COND_RETURN_WITH_NOLOG(error != RT_ERROR_NONE, error);
+
+    if ((flags_ & RT_STREAM_DQS_CTRL) != 0U) {
+        error = CreateDqsCtrlSpace(); // use stream id to alloc
+        ERROR_RETURN(error, "Failed to create dqs ctrl space, retCode=%#x.", static_cast<uint32_t>(error));
+    }
+
+    if ((flags_ & RT_STREAM_DQS_INTER_CHIP) != 0U) {
+        error = CreateDqsInterChipSpace();
+        ERROR_RETURN(error, "Failed to init dqs inter chip space, retCode=%#x.", static_cast<uint32_t>(error));
+    }
+
+    return RT_ERROR_NONE;
+}
+
+rtError_t StreamWithDqs::Setup()
+{
+    rtError_t error = SetupByFlagAndCheck();
+    COND_RETURN_WITH_NOLOG(error != RT_ERROR_NONE, error);
+
+    SetMaxTaskId(true);
+    ClearFlowCtrlFlag();
+
+    error = EschedManage(true);
+    COND_RETURN_WITH_NOLOG(error != RT_ERROR_NONE, error);
+
+    InitEmbeddedInnerHandle<Stream>(this);
+
+    RT_LOG(
+        RT_LOG_INFO, "stream setup end, stream_id=%d, sq_id=%u, cq_id=%u, device_id=%u, isHasArgPool_=%d.", streamId_,
+        sqId_, cqId_, device_->Id_(), isHasArgPool_);
+
+    // report create streamId_/sqId_
+    ReportStreamSqInfoForProfiling(this, STREAM_STATUS_CREATE);
+
+    return RT_ERROR_NONE;
+}
+
+rtError_t StreamWithDqs::TearDown(const bool terminal, bool flag)
+{
+    // report destroy streamId_/sqId_
+    ReportStreamSqInfoForProfiling(this, STREAM_STATUS_DESTROY);
+
+    /* dqs ctrl stream and dqs inter chip stream are special. cannot be destroyed in normal way. */
+    if (((flags_ & RT_STREAM_DQS_CTRL) != 0U) || ((flags_ & RT_STREAM_DQS_INTER_CHIP) != 0U)) {
+        flag = true; /* force destroy */
+    }
+    return DavidStream::TearDown(terminal, flag);
+}
+
+static rtError_t InvokeCreateDqsCtrlSpace(
+    const bool isInterChip, const int32_t streamId, const uint32_t tsId, void*& ctrlSpacePtr)
+{
+    stars_ioctl_cmd_args_t args = {};
+    stars_dqs_ctrl_space_param_t param = {};
+    param.stream_id = static_cast<uint8_t>(streamId);
+    param.ts_id = static_cast<uint8_t>(tsId);
+    param.op_type = 0U; // create
+    stars_dqs_ctrl_space_result_t res = {};
+    args.input_ptr = &param;
+    args.input_len = static_cast<uint32_t>(sizeof(stars_dqs_ctrl_space_param_t));
+    args.output_ptr = &res;
+    args.output_len = static_cast<uint32_t>(sizeof(stars_dqs_ctrl_space_result_t));
+
+    const auto cmd = isInterChip ? STARS_IOCTL_CMD_DQS_INTER_CHIP_SPACE : STARS_IOCTL_CMD_DQS_CONTROL_SPACE;
+    const rtError_t error = IoctlUtil::GetInstance().IoctlByCmd(cmd, &args);
+    COND_RETURN_ERROR((error != RT_ERROR_NONE), error, "ioctl failed, retCode=%#x", static_cast<uint32_t>(error));
+
+    COND_RETURN_ERROR_MSG_INNER(
+        (res.cs_va == nullptr) || (res.status != 0U), RT_ERROR_DRV_IOCTRL,
+        "Ioctl failed, res.cs_va cannot be a NULL pointer and res.status must be 0, retCode=%#x.",
+        static_cast<uint32_t>(RT_ERROR_DRV_IOCTRL));
+
+    ctrlSpacePtr = res.cs_va;
+    RT_LOG(RT_LOG_INFO, "ioctl success, status=%u, stream_id=%u, isInterChip=%d", res.status, streamId, isInterChip);
+    return RT_ERROR_NONE;
+}
+
+rtError_t StreamWithDqs::CreateDqsCtrlSpace(void)
+{
+    void* ctrlSpacePtr = nullptr;
+    const auto ret = InvokeCreateDqsCtrlSpace(false, streamId_, Device_()->DevGetTsId(), ctrlSpacePtr);
+    COND_RETURN_WITH_NOLOG((ret != RT_ERROR_NONE), ret);
+
+    SetDqsCtrlSpace(RtPtrToPtr<stars_dqs_ctrl_space_t*>(ctrlSpacePtr));
+    return RT_ERROR_NONE;
+}
+
+rtError_t StreamWithDqs::CreateDqsInterChipSpace(void)
+{
+    void* ctrlSpacePtr = nullptr;
+    const auto ret = InvokeCreateDqsCtrlSpace(true, streamId_, Device_()->DevGetTsId(), ctrlSpacePtr);
+    COND_RETURN_WITH_NOLOG((ret != RT_ERROR_NONE), ret);
+
+    SetDqsInterChipSpace(RtPtrToPtr<stars_dqs_inter_chip_space_t*>(ctrlSpacePtr));
+    return RT_ERROR_NONE;
+}
+
+rtError_t StreamWithDqs::DestroyAccSubInfo()
+{
+    // If the subscription is not performed,
+    // the system does not need to be moved down to the kernel mode for judgment and no error is reported.
+    COND_RETURN_WITH_NOLOG(accSubInfo_.count == 0U, RT_ERROR_NONE);
+
+    stars_ioctl_cmd_args_t args = {};
+    stars_queue_subscribe_acc_param_t accSubInfo = {};
+    accSubInfo = accSubInfo_;
+    accSubInfo.op_type = 1U; // destroy
+    accSubInfo.stream_id = static_cast<uint8_t>(streamId_);
+    args.input_ptr = &accSubInfo;
+    args.input_len = sizeof(stars_queue_subscribe_acc_param_t);
+    args.output_len = 0U;
+
+    const rtError_t error = IoctlUtil::GetInstance().IoctlByCmd(STARS_IOCTL_CMD_ACC_SUBSCRIBE_QUEUE, &args);
+    COND_RETURN_ERROR(
+        (error != RT_ERROR_NONE), error, "acc subscribe queue ioctl failed, retCode=%#x", static_cast<uint32_t>(error));
+
+    return RT_ERROR_NONE;
+}
+
+static void InvokeDestroyDqsCtrlSpace(const bool isInterChip, const int32_t streamId, const uint32_t tsId)
+{
+    stars_ioctl_cmd_args_t args = {};
+    stars_dqs_ctrl_space_param_t param = {};
+    param.stream_id = static_cast<uint8_t>(streamId);
+    param.ts_id = static_cast<uint8_t>(tsId);
+    param.op_type = 1U; // destroy
+    stars_dqs_ctrl_space_result_t res = {};
+    args.input_ptr = &param;
+    args.input_len = static_cast<uint32_t>(sizeof(stars_dqs_ctrl_space_param_t));
+    args.output_ptr = &res;
+    args.output_len = static_cast<uint32_t>(sizeof(stars_dqs_ctrl_space_result_t));
+
+    const stars_ioctl_cmd_t cmd =
+        isInterChip ? STARS_IOCTL_CMD_DQS_INTER_CHIP_SPACE : STARS_IOCTL_CMD_DQS_CONTROL_SPACE;
+    const rtError_t error = IoctlUtil::GetInstance().IoctlByCmd(cmd, &args);
+    COND_LOG_ERROR((error != RT_ERROR_NONE), "ioctl failed, retCode=%#x", static_cast<uint32_t>(error))
+}
+
+void StreamWithDqs::DestroyDqsCtrlSpace(void)
+{
+    if (dqsCtrlSpace_ != nullptr) {
+        InvokeDestroyDqsCtrlSpace(false, streamId_, Device_()->DevGetTsId());
+        dqsCtrlSpace_ = nullptr;
+    }
+}
+
+void StreamWithDqs::DestroyDqsInterChipSpace(void)
+{
+    if (dqsInterChipSpace_ != nullptr) {
+        InvokeDestroyDqsCtrlSpace(true, streamId_, Device_()->DevGetTsId());
+        dqsInterChipSpace_ = nullptr;
+    }
+}
+
+static rtError_t UpdateCtrlSpaceFrameAlignInfo(const uint8_t inputQueNum, const int32_t streamId, const uint32_t tsId)
+{
+    // 1代表单路, 单路不适用帧对齐信息，不用刷新，直接返回
+    COND_RETURN_WITH_NOLOG(inputQueNum <= 1U, RT_ERROR_NONE);
+
+    stars_ioctl_cmd_args_t args = {};
+    stars_dqs_update_cs_frame_align_info_t param = {};
+    param.stream_id = static_cast<uint8_t>(streamId);
+    param.ts_id = static_cast<uint8_t>(tsId);
+    args.input_ptr = &param;
+    args.input_len = static_cast<uint32_t>(sizeof(stars_dqs_update_cs_frame_align_info_t));
+    args.output_len = 0U;
+
+    const rtError_t error = IoctlUtil::GetInstance().IoctlByCmd(STARS_IOCTL_CMD_UPDATE_CS_FRAME_ALIGN_INFO, &args);
+    COND_RETURN_ERROR((error != RT_ERROR_NONE), error, "ioctl failed, retCode=%#x", static_cast<uint32_t>(error));
+
+    return RT_ERROR_NONE;
+}
+
+static rtError_t TryToFlushCsMbufTraceCfg(const int32_t streamId, const uint32_t tsId)
+{
+    stars_ioctl_cmd_args_t args = {};
+    stars_dqs_update_cs_mbuf_trace_cfg_t param = {};
+    param.stream_id = static_cast<uint8_t>(streamId);
+    param.ts_id = static_cast<uint8_t>(tsId);
+    args.input_ptr = &param;
+    args.input_len = sizeof(stars_dqs_update_cs_mbuf_trace_cfg_t);
+    args.output_len = 0U;
+
+    const rtError_t error = IoctlUtil::GetInstance().IoctlByCmd(STARS_IOCTL_CMD_UPDATE_CS_MBUF_TRACE_CFG, &args);
+    COND_RETURN_ERROR((error != RT_ERROR_NONE), error, "ioctl failed, retCode=%#x", static_cast<uint32_t>(error));
+
+    return RT_ERROR_NONE;
+}
+
+rtError_t StreamWithDqs::SetCtrlSpaceInputQueInfo(const rtDqsSchedCfg_t* const dqsSchedCfg)
+{
+    dqsCtrlSpace_->input_queue_num = dqsSchedCfg->inputQueueNum;
+
+    const errno_t err = memcpy_s(
+        dqsCtrlSpace_->input_queue_ids, sizeof(dqsCtrlSpace_->input_queue_ids), dqsSchedCfg->inputQueueIds,
+        sizeof(dqsSchedCfg->inputQueueIds));
+    COND_RETURN_ERROR_MSG_INNER(
+        err != EOK, RT_ERROR_SEC_HANDLE,
+        "Failed to call memcpy_s to copy input queue ids, dest=%p, dest_max=%zu, src=%p, count=%zu, retCode=%d.",
+        dqsCtrlSpace_->input_queue_ids, sizeof(dqsCtrlSpace_->input_queue_ids), dqsSchedCfg->inputQueueIds,
+        sizeof(dqsSchedCfg->inputQueueIds), err);
+
+    // set input queue gqm base addr to control space
+    DqsQueueInfo queInfo = {};
+    const auto dev = Device_();
+    rtError_t ret = RT_ERROR_NONE;
+    for (uint32_t i = 0U; i < dqsSchedCfg->inputQueueNum; i++) {
+        const uint32_t qid = dqsCtrlSpace_->input_queue_ids[i];
+        ret = dev->Driver_()->GetDqsQueInfo(dev->Id_(), qid, &queInfo);
+        ERROR_RETURN(ret, "get dqs que info failed, ret=%#x.", static_cast<uint32_t>(ret));
+        COND_RETURN_ERROR_MSG_INNER(
+            queInfo.queType != GQM_ENTITY_TYPE, RT_ERROR_INVALID_VALUE,
+            "queInfo.queType %u is not equal to %u(GQM_ENTITY_TYPE), qid=%u.", static_cast<uint32_t>(queInfo.queType),
+            GQM_ENTITY_TYPE, qid);
+        dqsCtrlSpace_->input_queue_gqm_base_addrs[i] = queInfo.dequeOpAddr;
+        RT_LOG(RT_LOG_INFO, "input queue id=%hu, gqm base=%#llx", qid, dqsCtrlSpace_->input_queue_gqm_base_addrs[i]);
+    }
+
+    const uint32_t tsId = Device_()->DevGetTsId();
+    // 内核态会从ctrl space中读取input queue id，所以此处的接口应该放在input_queue_ids更新之后
+    ret = UpdateCtrlSpaceFrameAlignInfo(dqsCtrlSpace_->input_queue_num, streamId_, tsId);
+    ERROR_RETURN(ret, "update ctrl space frame align info failed, ret=%#x.", static_cast<uint32_t>(ret));
+
+    ret = TryToFlushCsMbufTraceCfg(streamId_, tsId);
+    ERROR_RETURN(ret, "update ctrl space mbuf trace cfg, ret=%#x.", static_cast<uint32_t>(ret));
+
+    return RT_ERROR_NONE;
+}
+
+static rtError_t GetOutputQueMbufPoolInfo(
+    const uint16_t* queueIds, uint8_t queueNum, stars_dqs_queue_mbuf_pool_result_t* res)
+{
+    stars_ioctl_cmd_args_t args = {};
+    stars_get_queue_mbuf_pool_info_param_t param = {};
+    param.count = queueNum;
+    errno_t err = memcpy_s(param.queue_list, sizeof(param.queue_list), queueIds, sizeof(param.queue_list));
+    COND_RETURN_ERROR_MSG_INNER(
+        err != EOK, RT_ERROR_SEC_HANDLE,
+        "Failed to call memcpy_s to copy queue list, dest=%p, dest_max=%zu, src=%p, count=%zu, retCode=%d.",
+        param.queue_list, sizeof(param.queue_list), queueIds, sizeof(param.queue_list), err);
+
+    args.input_ptr = &param;
+    args.input_len = static_cast<uint32_t>(sizeof(stars_get_queue_mbuf_pool_info_param_t));
+    args.output_ptr = res;
+    args.output_len = static_cast<uint32_t>(sizeof(stars_dqs_queue_mbuf_pool_result_t));
+
+    const rtError_t error = IoctlUtil::GetInstance().IoctlByCmd(STARS_IOCTL_CMD_GET_QUEUE_MBUF_POOL, &args);
+    COND_RETURN_ERROR((error != RT_ERROR_NONE), error, "ioctl failed, retCode=%#x", static_cast<uint32_t>(error));
+
+    COND_RETURN_ERROR_MSG_INNER(
+        (res->count == 0U) || (res->count > STARS_DQS_MAX_OUTPUT_QUEUE_NUM), RT_ERROR_DRV_IOCTRL,
+        "res->count %u is invalid. expected value: (0, %u].", res->count, STARS_DQS_MAX_OUTPUT_QUEUE_NUM);
+
+    return RT_ERROR_NONE;
+}
+
+static stars_queue_bind_mbuf_pool_item_t* GetMbufPoolInfoByQid(
+    const uint16_t qid, stars_dqs_queue_mbuf_pool_result_t& result)
+{
+    for (uint8_t idx = 0U; idx < result.count; idx++) {
+        if (result.queue_mbuf_pool_list[idx].qid == qid) {
+            return &result.queue_mbuf_pool_list[idx];
+        }
+    }
+
+    return nullptr;
+}
+
+static void DumpCtrlSpaceDfx(
+    const uint32_t qid, const int32_t streamId, uint32_t idx, const stars_dqs_ctrl_space_t* const ctrlSpace)
+{
+    RT_LOG(
+        RT_LOG_INFO,
+        "output queue info: qid=%u, queue manager enqueue addr=%#llx, queue ow addr=%#llx;"
+        "output mbuf pool info: stream_id=%d, pool_id=%u, head_pool_base_addr=%#llx, head_pool_block_size=%u,"
+        " data_pool_base_addr=%#llx, data_pool_block_size=%u, mbuf_alloc_addr=%#llx, mbuf_free_addr=%#llx",
+        qid, ctrlSpace->output_qmngr_enqueue_addrs[idx], ctrlSpace->output_qmngr_ow_addrs[idx], streamId,
+        ctrlSpace->output_mbuf_pool_ids[idx], ctrlSpace->output_head_pool_base_addrs[idx],
+        ctrlSpace->output_head_pool_block_size_list[idx], ctrlSpace->output_data_pool_base_addrs[idx],
+        ctrlSpace->output_data_pool_block_size_list[idx], ctrlSpace->output_mbuf_alloc_addrs[idx],
+        ctrlSpace->output_mbuf_free_addrs[idx]);
+
+    RT_LOG(
+        RT_LOG_INFO, "trace info: output_trace_base_addrs=%#llx, mbuf_trace_blk_size=%u.",
+        ctrlSpace->output_trace_base_addrs[idx], ctrlSpace->output_mbuf_trace_block_size_list[idx]);
+
+    return;
+}
+
+rtError_t StreamWithDqs::SetCtrlSpaceOutputQueInfo(const rtDqsSchedCfg_t* const dqsSchedCfg)
+{
+    // dss 不支持output 直接返回成功
+    COND_RETURN_WITH_NOLOG((dqsSchedCfg->type == static_cast<uint8_t>(RT_DQS_SCHED_TYPE_DSS)), RT_ERROR_NONE);
+    dqsCtrlSpace_->output_queue_num = dqsSchedCfg->outputQueueNum;
+    const errno_t err = memcpy_s(
+        dqsCtrlSpace_->output_queue_ids, sizeof(dqsCtrlSpace_->output_queue_ids), dqsSchedCfg->outputQueueIds,
+        sizeof(dqsSchedCfg->outputQueueIds));
+    COND_RETURN_ERROR_MSG_INNER(
+        err != EOK, RT_ERROR_SEC_HANDLE,
+        "Failed to call memcpy_s to copy output queue ids, dest=%p, dest_max=%zu, src=%p, count=%zu, retCode=%d.",
+        dqsCtrlSpace_->output_queue_ids, sizeof(dqsCtrlSpace_->output_queue_ids), dqsSchedCfg->outputQueueIds,
+        sizeof(dqsSchedCfg->outputQueueIds), err);
+
+    stars_dqs_queue_mbuf_pool_result_t result = {};
+    rtError_t ret = GetOutputQueMbufPoolInfo(dqsSchedCfg->outputQueueIds, dqsCtrlSpace_->output_queue_num, &result);
+    ERROR_RETURN(ret, "get output que mbuf failed, ret=%#x.", static_cast<uint32_t>(ret));
+
+    // set output mbuf pool detail info to control space
+    DqsQueueInfo queInfo = {};
+    const auto dev = Device_();
+    for (uint32_t i = 0U; i < dqsCtrlSpace_->output_queue_num; i++) {
+        const uint32_t qid = dqsCtrlSpace_->output_queue_ids[i];
+        ret = dev->Driver_()->GetDqsQueInfo(dev->Id_(), qid, &queInfo);
+        ERROR_RETURN(ret, "get dqs que info failed, ret=%#x.", static_cast<uint32_t>(ret));
+        COND_RETURN_ERROR(
+            queInfo.queType != QMNGR_ENTITY_TYPE, RT_ERROR_INVALID_VALUE,
+            "queInfo.queType %u is not equal to %u(QMNGR_ENTITY_TYPE), qid=%u.", static_cast<uint32_t>(queInfo.queType),
+            QMNGR_ENTITY_TYPE, qid);
+        dqsCtrlSpace_->output_qmngr_enqueue_addrs[i] = queInfo.enqueOpAddr;
+        dqsCtrlSpace_->output_qmngr_ow_addrs[i] = queInfo.prodqOwAddr;
+
+        const stars_queue_bind_mbuf_pool_item_t* const item = GetMbufPoolInfoByQid(static_cast<uint16_t>(qid), result);
+        COND_RETURN_ERROR_MSG_INNER(
+            item == nullptr, RT_ERROR_INVALID_VALUE,
+            "The mbuf pool info corresponding to qid %u does not exist. Check the configuration process.", qid);
+
+        dqsCtrlSpace_->output_mbuf_pool_ids[i] = item->mbuf_pool_id;
+        dqsCtrlSpace_->output_head_pool_base_addrs[i] = item->mbuf_head_pool_base_addr + item->mbuf_head_pool_offset;
+        dqsCtrlSpace_->output_head_pool_block_size_list[i] = item->mbuf_head_pool_blk_size;
+        dqsCtrlSpace_->output_mbuf_alloc_addrs[i] = item->mbuf_alloc_op_addr;
+        dqsCtrlSpace_->output_data_pool_base_addrs[i] = item->mbuf_data_pool_base_addr + item->mbuf_data_pool_offset;
+        dqsCtrlSpace_->output_data_pool_block_size_list[i] = item->mbuf_data_pool_blk_size;
+        dqsCtrlSpace_->output_mbuf_free_addrs[i] = item->mbuf_free_op_addr;
+        dqsCtrlSpace_->output_trace_base_addrs[i] = item->mbuf_trace_base_addr + item->mbuf_trace_blk_offset;
+        dqsCtrlSpace_->output_mbuf_trace_block_size_list[i] = item->mbuf_trace_blk_size;
+        DumpCtrlSpaceDfx(qid, streamId_, i, dqsCtrlSpace_);
+    }
+
+    return RT_ERROR_NONE;
+}
+
+void StreamWithDqs::InitCtrlSpaceMbufHandleInfo(void) const
+{
+    if (dqsCtrlSpace_->type != static_cast<uint8_t>(RT_DQS_SCHED_TYPE_DSS)) {
+        return;
+    }
+    for (uint32_t i = 0U; i < dqsCtrlSpace_->input_queue_num; i++) {
+        dqsCtrlSpace_->input_mbuf_cache_list[i].last_used_handle = UINT32_MAX;
+        dqsCtrlSpace_->input_mbuf_list[i] = UINT32_MAX;
+    }
+}
+
+rtError_t StreamWithDqs::SetStreamCtrlSpaceInfo(const rtDqsSchedCfg_t* const dqsSchedCfg)
+{
+    NULL_PTR_RETURN(dqsCtrlSpace_, RT_ERROR_INVALID_VALUE);
+    dqsCtrlSpace_->type = static_cast<uint8_t>(dqsSchedCfg->type);
+
+    rtError_t error = SetCtrlSpaceInputQueInfo(dqsSchedCfg);
+    COND_RETURN_WITH_NOLOG((error != RT_ERROR_NONE), error);
+
+    error = SetCtrlSpaceOutputQueInfo(dqsSchedCfg);
+    COND_RETURN_WITH_NOLOG((error != RT_ERROR_NONE), error);
+
+    InitCtrlSpaceMbufHandleInfo();
+    return RT_ERROR_NONE;
+}
+
+rtError_t StreamWithDqs::SetDqsSchedCfg(const rtDqsSchedCfg_t* const cfg)
+{
+    const rtError_t ret = SetStreamCtrlSpaceInfo(cfg);
+    ERROR_RETURN(ret, "set stream ctrl space info failed, ret=%#x.", static_cast<uint32_t>(ret));
+
+    RT_LOG(RT_LOG_INFO, "set dqs cfg and ctrl space info success");
+
+    return RT_ERROR_NONE;
+}
+
+} // namespace runtime
+} // namespace cce

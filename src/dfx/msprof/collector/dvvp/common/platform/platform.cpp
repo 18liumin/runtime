@@ -8,6 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include "platform.h"
+#include <sstream>
 #include "errno/error_code.h"
 #include "ai_drv_dev_api.h"
 #include "platform/platform.h"
@@ -24,24 +25,29 @@ using namespace analysis::dvvp::common::utils;
 using namespace analysis::dvvp::common::config;
 
 const std::string ASCEND_HAL_LIB = "libascend_hal.so";
-constexpr uint32_t SUPPORT_OSC_FREQ_API_VERSION = 0x071905;
+
+bool IsDrvApiVersionSupport(DrvFunctionVersion version)
+{
+    return Platform::instance()->DrvGetApiVersion() >= static_cast<uint32_t>(version);
+}
 
 template <class T>
-inline T LoadDlsymApi(VOID_PTR hanle, const std::string &name)
+inline T LoadDlsymApi(VOID_PTR hanle, const std::string& name)
 {
     return reinterpret_cast<T>(OsalDlsym(hanle, name.c_str()));
 }
 
 Platform::Platform()
-    : platformType_(SysPlatformType::INVALID), runSide_(SysPlatformType::INVALID),
-    enableHostOscFreq_(false), hostOscFreq_(""), platform_(nullptr),
-    isHelperHostSide_(false), isRpcHelper_(false)
-{
-}
+    : platformType_(SysPlatformType::INVALID),
+      runSide_(SysPlatformType::INVALID),
+      enableHostOscFreq_(false),
+      hostOscFreq_(""),
+      platform_(nullptr),
+      isHelperHostSide_(false),
+      isRpcHelper_(false)
+{}
 
-Platform::~Platform()
-{
-}
+Platform::~Platform() {}
 
 int32_t Platform::Init()
 {
@@ -52,9 +58,12 @@ int32_t Platform::Init()
         return PROFILING_SUCCESS;
     }
     if (ascendHalAdaptor_.Init() != PROFILING_SUCCESS) {
-        return PROFILING_FAILED;
+        // 通用服务器场景：未安装驱动包，libascend_hal.so 加载失败。
+        // 此时不返回失败，置通用服务器标记，仅打印 INFO，保证 host 侧采集初始化可以继续。
+        isGeneralServer_ = true;
+        MSPROF_LOGI("Ascend hal library is unavailable, running as general server scenario.");
     }
-    if (DrvGetApiVersion() >= SUPPORT_OSC_FREQ_API_VERSION) {
+    if (IsDrvApiVersionSupport(OSC_FREQ_API_VERSION)) {
 #ifndef CPU_CYCLE_NO_SUPPORT
         enableHostOscFreq_ = analysis::dvvp::driver::DrvGetHostFreq(hostOscFreq_);
 #else
@@ -118,15 +127,11 @@ bool Platform::PlatformIsNeedHelperServer() const
     return false;
 }
 
-bool Platform::CheckIfRpcHelper() const
-{
-    return isRpcHelper_;
-}
+bool Platform::PlatformIsGeneralServer() const { return isGeneralServer_; }
 
-bool Platform::PlatformIsHelperHostSide() const
-{
-    return analysis::dvvp::driver::DrvCheckIfHelperHost();
-}
+bool Platform::CheckIfRpcHelper() const { return isRpcHelper_; }
+
+bool Platform::PlatformIsHelperHostSide() const { return analysis::dvvp::driver::DrvCheckIfHelperHost(); }
 
 bool Platform::RunSocSide() const
 {
@@ -142,10 +147,7 @@ void Platform::SetPlatformSoc()
     platformType_ = SysPlatformType::DEVICE;
 }
 
-uint32_t Platform::GetPlatform(void) const
-{
-    return platformType_;
-}
+uint32_t Platform::GetPlatform(void) const { return platformType_; }
 
 int32_t Platform::PlatformInitByDriver()
 {
@@ -159,28 +161,22 @@ int32_t Platform::PlatformInitByDriver()
     return PROFILING_SUCCESS;
 }
 
-std::string Platform::PlatformGetHostOscFreq() const
-{
-    return hostOscFreq_;
-}
+std::string Platform::PlatformGetHostOscFreq() const { return hostOscFreq_; }
 
-bool Platform::PlatformHostFreqIsEnable() const
-{
-    return enableHostOscFreq_;
-}
+bool Platform::PlatformHostFreqIsEnable() const { return enableHostOscFreq_; }
 
-std::string Platform::PlatformGetDeviceOscFreq(uint32_t deviceId, const std::string &freq) const
+std::string Platform::PlatformGetDeviceOscFreq(uint32_t deviceId, const std::string& freq) const
 {
     std::string deviceOscFreq;
     bool enableDeviceOscFreq = false;
-    if (DrvGetApiVersion() >= SUPPORT_OSC_FREQ_API_VERSION) {
+    if (IsDrvApiVersionSupport(OSC_FREQ_API_VERSION)) {
         enableDeviceOscFreq = analysis::dvvp::driver::DrvGetDeviceFreq(deviceId, deviceOscFreq);
     }
 
     return enableDeviceOscFreq ? deviceOscFreq : freq;
 }
 
-int32_t Platform::GetAicoreEvents(const std::string &aicoreMetricsType, std::string &aicoreEvents) const
+int32_t Platform::GetAicoreEvents(const std::string& aicoreMetricsType, std::string& aicoreEvents) const
 {
     if (platform_ != nullptr) {
         return platform_->GetAiPmuMetrics(aicoreMetricsType, aicoreEvents);
@@ -190,10 +186,10 @@ int32_t Platform::GetAicoreEvents(const std::string &aicoreMetricsType, std::str
 }
 
 /**
-* @brief Check whether feature/switch are supported. Currently other platform will return true.
-* @param PlatformFeature or string , representing feature to be checked.
-* @return true: feature is supported. false: feature is not supported.
-*/
+ * @brief Check whether feature/switch are supported. Currently other platform will return true.
+ * @param PlatformFeature or string , representing feature to be checked.
+ * @return true: feature is supported. false: feature is not supported.
+ */
 bool Platform::CheckIfSupport(const PlatformFeature feature) const
 {
     if (platform_ == nullptr) {
@@ -244,12 +240,44 @@ uint64_t Platform::PlatformSysCycleTime() const
     return Utils::GetClockMonotonicRaw();
 }
 
-PlatformFeature Platform::PmuToFeature(const std::string &key) const
+PlatformFeature Platform::PmuToFeature(const std::string& key) const
 {
     if (platform_ == nullptr) {
         return PlatformFeature::PLATFORM_FEATURE_INVALID;
     }
     return platform_->PmuMetricsToFeature(key);
+}
+
+PlatformFeature Platform::PmuToFeatureInMap(const std::string& key) const
+{
+    const auto it = METRIC_FEATURE_MAP.find(key);
+    if (it != METRIC_FEATURE_MAP.cend()) {
+        return it->second;
+    }
+    return PlatformFeature::PLATFORM_FEATURE_INVALID;
+}
+
+std::string Platform::GenerateAicoreMetricsPrompt() const
+{
+    std::stringstream result;
+    bool isFirstMetrics = true;
+
+    result << "[";
+    for (const auto& metricsFeature : METRIC_FEATURE_MAP) {
+        if (!CheckIfSupport(metricsFeature.second)) {
+            continue;
+        }
+        if (!isFirstMetrics) {
+            result << "|";
+        }
+        isFirstMetrics = false;
+        result << metricsFeature.first;
+    }
+    if (isFirstMetrics) {
+        return "No aic_metrics supported on current platform";
+    }
+    result << "]";
+    return result.str();
 }
 
 uint32_t Platform::DrvGetApiVersion() const
@@ -263,13 +291,13 @@ uint32_t Platform::DrvGetApiVersion() const
     return 0;
 }
 
-int32_t Platform::HalGetDeviceInfoByBuff(uint32_t deviceId, int32_t moduleType,
-    int32_t infoType, VOID_PTR data, int32_t* length) const
+int32_t Platform::HalGetDeviceInfoByBuff(
+    uint32_t deviceId, int32_t moduleType, int32_t infoType, VOID_PTR data, int32_t* length) const
 {
     return ascendHalAdaptor_.HalGetDeviceInfoByBuff(deviceId, moduleType, infoType, data, length);
 }
 
-int32_t Platform::HalGetDeviceQosInfo(uint32_t deviceId, QosProfileInfo &info, int32_t* length) const
+int32_t Platform::HalGetDeviceQosInfo(uint32_t deviceId, QosProfileInfo& info, int32_t* length) const
 {
     int32_t ret = HalGetDeviceInfoByBuff(deviceId, MODULE_TYPE_QOS, INFO_TYPE_CONFIG, &info, length);
     if (ret != DRV_ERROR_NONE || info.streamNum == 0 || info.streamNum > QOS_STREAM_MAX_NUM) {
@@ -279,7 +307,7 @@ int32_t Platform::HalGetDeviceQosInfo(uint32_t deviceId, QosProfileInfo &info, i
     return PROFILING_SUCCESS;
 }
 
-void Platform::GetQosProfileInfo(uint32_t deviceId, std::string &qosEventInfo, std::vector<uint8_t> &qosEventId)
+void Platform::GetQosProfileInfo(uint32_t deviceId, std::string& qosEventInfo, std::vector<uint8_t>& qosEventId)
 {
     qosEventId.clear();
     if (platform_ == nullptr || !platform_->FeatureIsSupport(PLATFORM_SYS_DEVICE_QOS)) {
@@ -291,7 +319,8 @@ void Platform::GetQosProfileInfo(uint32_t deviceId, std::string &qosEventInfo, s
     info.devId = deviceId;
     if (qosEventInfo.empty()) {
         info.mode = 0; // get qos stream list
-        FUNRET_CHECK_EXPR_ACTION(HalGetDeviceQosInfo(deviceId, info, &infoLength) != PROFILING_SUCCESS, return,
+        FUNRET_CHECK_EXPR_ACTION(
+            HalGetDeviceQosInfo(deviceId, info, &infoLength) != PROFILING_SUCCESS, return,
             "halGetDeviceInfoFunc failed.");
         uint16_t streamNum = std::min(platform_->GetQosMonitorNumber(), info.streamNum);
         QosProfileInfo infoName = {0, 0, 0, {}, {}};
@@ -301,8 +330,8 @@ void Platform::GetQosProfileInfo(uint32_t deviceId, std::string &qosEventInfo, s
             infoName.streamNum = 0;
             infoName.mpamId[0] = info.mpamId[i];
             infoName.mode = 1; // get stream name by mpamId
-            int32_t ret = Platform::instance()->HalGetDeviceInfoByBuff(deviceId, MODULE_TYPE_QOS, INFO_TYPE_CONFIG,
-                &infoName, &infoLength);
+            int32_t ret = Platform::instance()->HalGetDeviceInfoByBuff(
+                deviceId, MODULE_TYPE_QOS, INFO_TYPE_CONFIG, &infoName, &infoLength);
             if (ret != DRV_ERROR_NONE) {
                 continue;
             }
@@ -319,11 +348,12 @@ void Platform::GetQosProfileInfo(uint32_t deviceId, std::string &qosEventInfo, s
             MSPROF_LOGE("Invalid qosEventInfo %s", qosEventInfo.c_str());
             return;
         }
-        for (auto &qosEvent : qosEvents) {
+        for (auto& qosEvent : qosEvents) {
             info.mode = modeGetMpamIdByStreamName;
             errno_t ret = strcpy_s(info.streamName, QOS_STREAM_NAME_MAX_LENGTH, qosEvent.c_str());
             FUNRET_CHECK_EXPR_ACTION(ret != EOK, return, "strcpy_s %s qosEventInfo failed.", qosEvent.c_str());
-            FUNRET_CHECK_EXPR_ACTION(HalGetDeviceQosInfo(deviceId, info, &infoLength) != PROFILING_SUCCESS, return,
+            FUNRET_CHECK_EXPR_ACTION(
+                HalGetDeviceQosInfo(deviceId, info, &infoLength) != PROFILING_SUCCESS, return,
                 "Failed to get mpamId by streamName from halGetDeviceInfoFunc.");
             qosEventId.push_back(info.mpamId[0]);
         }
@@ -340,6 +370,15 @@ uint16_t Platform::GetMaxMonitorNumber() const
     return platform_->GetMaxMonitorNumber();
 }
 
+std::vector<BiuPerfChannelInfo> Platform::GetBiuPerfChannelInfos(
+    const std::vector<uint32_t>& groupVector, uint32_t groupNum) const
+{
+    if (platform_ == nullptr) {
+        return {};
+    }
+    return platform_->GetBiuPerfChannelInfos(groupVector, groupNum);
+}
+
 int32_t Platform::InitOnlineAnalyzer()
 {
     if (platform_ == nullptr) {
@@ -348,7 +387,7 @@ int32_t Platform::InitOnlineAnalyzer()
     return platform_->InitOnlineAnalyzer();
 }
 
-uint32_t Platform::GetMetricsPmuNum(const std::string &name) const
+uint32_t Platform::GetMetricsPmuNum(const std::string& name) const
 {
     if (platform_ == nullptr) {
         return 0;
@@ -356,7 +395,7 @@ uint32_t Platform::GetMetricsPmuNum(const std::string &name) const
     return platform_->GetMetricsPmuNum(name);
 }
 
-std::string Platform::GetMetricsTopName(const std::string &name) const
+std::string Platform::GetMetricsTopName(const std::string& name) const
 {
     if (platform_ == nullptr) {
         return "";
@@ -364,7 +403,7 @@ std::string Platform::GetMetricsTopName(const std::string &name) const
     return platform_->GetMetricsTopName(name);
 }
 
-PmuCalculationAttr* Platform::GetMetricsFunc(const std::string &name, uint32_t index) const
+PmuCalculationAttr* Platform::GetMetricsFunc(const std::string& name, uint32_t index) const
 {
     if (platform_ == nullptr) {
         return nullptr;
@@ -380,7 +419,7 @@ float Platform::GetTotalTime(uint64_t cycle, double freq, uint16_t blockDim, int
     return platform_->GetTotalTime(cycle, freq, blockDim, coreNum);
 }
 
-void Platform::L2CacheAdaptor(std::string &npuEvents, std::string &l2Switch, std::string &l2Events) const
+void Platform::L2CacheAdaptor(std::string& npuEvents, std::string& l2Switch, std::string& l2Events) const
 {
     if (platform_ == nullptr) {
         return;
@@ -390,6 +429,9 @@ void Platform::L2CacheAdaptor(std::string &npuEvents, std::string &l2Switch, std
         l2Events = platform_->GetL2CacheEvents();
         if (CheckIfSupport(PLATFORM_TASK_SOC_PMU)) {
             npuEvents = "HA:" + GetL2CacheEvents() + ";SMMU:" + GetSmmuEventStr();
+            if (GetSmmuDFXOffset() != 0 && GetSmmuDFXRegMask() != 0) {
+                npuEvents += ";SMMU_DFX:";
+            }
         }
         MSPROF_LOGI("Platform get l2 cache events: %s, soc pmu events: %s.", l2Events.c_str(), npuEvents.c_str());
         return;
@@ -402,30 +444,46 @@ void Platform::L2CacheAdaptor(std::string &npuEvents, std::string &l2Switch, std
     }
 }
 
-std::string Platform::GetL2CacheEvents() const
+std::string Platform::GetL2CacheEvents() const { return platform_->GetL2CacheEvents(); }
+
+std::string Platform::GetSmmuEventStr() const { return platform_->GetSmmuEventStr(); }
+
+uint32_t Platform::GetSmmuDFXOffset() const
 {
-    return platform_->GetL2CacheEvents();
+    if (platform_ == nullptr) {
+        return 0;
+    }
+    return platform_->GetSmmuDFXOffset();
 }
 
-std::string Platform::GetSmmuEventStr() const
+uint32_t Platform::GetSmmuDFXRegMask() const
 {
-    return platform_->GetSmmuEventStr();
+    if (platform_ == nullptr) {
+        return 0;
+    }
+    return platform_->GetSmmuDFXRegMask();
 }
 
-int32_t Platform::HalEschedQueryInfo(uint32_t devId, ESCHED_QUERY_TYPE type,
-    struct esched_input_info *inPut, struct esched_output_info *outPut) const
+std::string Platform::GetNtsEvents(const std::string& metrics) const
+{
+    if (platform_ == nullptr) {
+        return "";
+    }
+    return platform_->GetNtsEvents(metrics);
+}
+
+int32_t Platform::HalEschedQueryInfo(
+    uint32_t devId, ESCHED_QUERY_TYPE type, struct esched_input_info* inPut, struct esched_output_info* outPut) const
 {
     return ascendHalAdaptor_.HalEschedQueryInfo(devId, type, inPut, outPut);
 }
 
-int32_t Platform::HalEschedCreateGrpEx(uint32_t devId, struct esched_grp_para *grpPara, uint32_t *grpId) const
+int32_t Platform::HalEschedCreateGrpEx(uint32_t devId, struct esched_grp_para* grpPara, uint32_t* grpId) const
 {
     return ascendHalAdaptor_.HalEschedCreateGrpEx(devId, grpPara, grpId);
 }
 
-AscendHalAdaptor::AscendHalAdaptor()
-{
-}
+AscendHalAdaptor::AscendHalAdaptor() {}
 AscendHalAdaptor::~AscendHalAdaptor()
 {
     if (ascendHalLibHandle_ != nullptr) {
@@ -437,7 +495,13 @@ int32_t AscendHalAdaptor::Init()
 {
     ascendHalLibHandle_ = OsalDlopen(ASCEND_HAL_LIB.c_str(), RTLD_LAZY | RTLD_NODELETE);
     if (ascendHalLibHandle_ == nullptr) {
-        MSPROF_LOGE("Open ascend_hal api failed, dlopen error: %s", OsalDlerror());
+        // 通用服务器场景：未安装驱动包时 dlopen 失败，不报 ERROR/WARN，仅打印 INFO，
+        // 由上层 Platform::Init() 置通用服务器标记并继续初始化，不导致初始化失败。
+        // OsalDlerror() 在无错误记录时可能返回 nullptr（POSIX dlerror 语义），对 %s 做空指针保护。
+        const char* dlErrMsg = OsalDlerror();
+        MSPROF_LOGI(
+            "Unable to open %s, running as general server scenario. dlopen info: %s", ASCEND_HAL_LIB.c_str(),
+            (dlErrMsg != nullptr) ? dlErrMsg : "unknown");
         return PROFILING_FAILED;
     }
     LoadApi();
@@ -447,15 +511,15 @@ int32_t AscendHalAdaptor::Init()
 void AscendHalAdaptor::LoadApi()
 {
     halGetAPIVersion_ = LoadDlsymApi<decltype(halGetAPIVersion_)>(ascendHalLibHandle_, "halGetAPIVersion");
-    drvGetDeviceSplitMode_ = LoadDlsymApi<decltype(drvGetDeviceSplitMode_)>(ascendHalLibHandle_,
-        "drvGetDeviceSplitMode");
-    halGetDeviceInfoByBuff_ = LoadDlsymApi<decltype(halGetDeviceInfoByBuff_)>(ascendHalLibHandle_,
-        "halGetDeviceInfoByBuff");
+    drvGetDeviceSplitMode_ =
+        LoadDlsymApi<decltype(drvGetDeviceSplitMode_)>(ascendHalLibHandle_, "drvGetDeviceSplitMode");
+    halGetDeviceInfoByBuff_ =
+        LoadDlsymApi<decltype(halGetDeviceInfoByBuff_)>(ascendHalLibHandle_, "halGetDeviceInfoByBuff");
     halEschedQueryInfo_ = LoadDlsymApi<decltype(halEschedQueryInfo_)>(ascendHalLibHandle_, "halEschedQueryInfo");
     halEschedCreateGrpEx_ = LoadDlsymApi<decltype(halEschedCreateGrpEx_)>(ascendHalLibHandle_, "halEschedCreateGrpEx");
 }
 
-int32_t AscendHalAdaptor::HalGetAPIVersion(int32_t *version) const
+int32_t AscendHalAdaptor::HalGetAPIVersion(int32_t* version) const
 {
     if (halGetAPIVersion_ != nullptr) {
         return halGetAPIVersion_(version);
@@ -463,7 +527,7 @@ int32_t AscendHalAdaptor::HalGetAPIVersion(int32_t *version) const
     return 0;
 }
 
-int32_t AscendHalAdaptor::DrvGetDeviceSplitMode(uint32_t deviceId, uint32_t *mode) const
+int32_t AscendHalAdaptor::DrvGetDeviceSplitMode(uint32_t deviceId, uint32_t* mode) const
 {
     if (drvGetDeviceSplitMode_ != nullptr) {
         return drvGetDeviceSplitMode_(deviceId, mode);
@@ -471,8 +535,8 @@ int32_t AscendHalAdaptor::DrvGetDeviceSplitMode(uint32_t deviceId, uint32_t *mod
     return 0;
 }
 
-int32_t AscendHalAdaptor::HalGetDeviceInfoByBuff(uint32_t deviceId, int32_t moduleType,
-    int32_t infoType, VOID_PTR data, int32_t* length) const
+int32_t AscendHalAdaptor::HalGetDeviceInfoByBuff(
+    uint32_t deviceId, int32_t moduleType, int32_t infoType, VOID_PTR data, int32_t* length) const
 {
     if (halGetDeviceInfoByBuff_ != nullptr) {
         return halGetDeviceInfoByBuff_(deviceId, moduleType, infoType, data, length);
@@ -482,8 +546,8 @@ int32_t AscendHalAdaptor::HalGetDeviceInfoByBuff(uint32_t deviceId, int32_t modu
     return DRV_ERROR_NOT_SUPPORT;
 }
 
-int32_t AscendHalAdaptor::HalEschedQueryInfo(uint32_t devId, ESCHED_QUERY_TYPE type,
-    struct esched_input_info *inPut, struct esched_output_info *outPut) const
+int32_t AscendHalAdaptor::HalEschedQueryInfo(
+    uint32_t devId, ESCHED_QUERY_TYPE type, struct esched_input_info* inPut, struct esched_output_info* outPut) const
 {
     if (halEschedQueryInfo_ != nullptr) {
         return halEschedQueryInfo_(devId, type, inPut, outPut);
@@ -493,7 +557,7 @@ int32_t AscendHalAdaptor::HalEschedQueryInfo(uint32_t devId, ESCHED_QUERY_TYPE t
     return DRV_ERROR_NOT_SUPPORT;
 }
 
-int32_t AscendHalAdaptor::HalEschedCreateGrpEx(uint32_t devId, struct esched_grp_para *grpPara, uint32_t *grpId) const
+int32_t AscendHalAdaptor::HalEschedCreateGrpEx(uint32_t devId, struct esched_grp_para* grpPara, uint32_t* grpId) const
 {
     if (halEschedCreateGrpEx_ != nullptr) {
         return halEschedCreateGrpEx_(devId, grpPara, grpId);
@@ -502,7 +566,40 @@ int32_t AscendHalAdaptor::HalEschedCreateGrpEx(uint32_t devId, struct esched_grp
     MSPROF_LOGI("Can't find halEschedCreateGrpEx from ascend_hal library.");
     return DRV_ERROR_NOT_SUPPORT;
 }
+
+ProfAicoreMetrics Platform::GetDefaultAicoreMetrics() const { return platform_->GetDefaultAicoreMetrics(); }
+
+uint64_t Platform::GetDefaultDataTypeConfig() const { return platform_->GetDefaultDataTypeConfig(); }
+
+bool Platform::CheckIfSupportAdprof(uint32_t deviceId) const
+{
+    if (deviceId == DEFAULT_HOST_ID) {
+        return false;
+    }
+
+    if (!IsDrvApiVersionSupport(ADPROF_API_VERSION)
+#ifndef BUILD_PROFILING_OPEN_PROJECT
+        || GetPlatformType() == CHIP_MINI
+#endif // BUILD_PROFILING_OPEN_PROJECT
+    ) {
+        MSPROF_LOGI("Current version not support driver channel.");
+        return false;
+    }
+    constexpr uint32_t vmngNormalNoneSplitMode = 0;
+    uint32_t mode = 0;
+    int32_t ret = ascendHalAdaptor_.DrvGetDeviceSplitMode(deviceId, &mode);
+    if (ret != DRV_ERROR_NONE) {
+        MSPROF_LOGE("Call drvGetDeviceSplitMode failed, return:%d.", ret);
+        return false;
+    }
+    if ((GetPlatformType() == CHIP_DC || GetPlatformType() == CHIP_CLOUD) && mode != vmngNormalNoneSplitMode) {
+        MSPROF_LOGI("This chip not support driver channel in split mode.");
+        return false;
+    }
+
+    return true;
 }
-}
-}
-}
+} // namespace Platform
+} // namespace Common
+} // namespace Dvvp
+} // namespace Analysis

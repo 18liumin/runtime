@@ -9,42 +9,45 @@
  */
 #ifndef PROF_ACL_PLUGIN_H
 #define PROF_ACL_PLUGIN_H
+#include <atomic>
 #include <stdint.h>
 #include "singleton/singleton.h"
 #include "prof_utils.h"
 #include "transport.h"
 namespace ProfAPI {
-using VOID_PTR = void *;
-using CHAR_PTR = char *;
-using PROFAPI_SUBSCRIBECONFIG_CONST_PTR = const void *;
-using PROFAPI_CONFIG_CONST_PTR = const void *;
-using ProfAclInitFunc = int32_t (*) (uint32_t type, const char *path, uint32_t len);
-using ProfAclCtrlFunc = int32_t (*) (uint32_t type, PROFAPI_CONFIG_CONST_PTR config);
-using ProfAclFinalizeFunc = int32_t (*) (uint32_t type);
-using ProfAclSetConfigFunc = int32_t (*) (uint32_t type, const char *config, uint32_t len);
-using ProfAclSubscribeFunc = int32_t (*) (uint32_t type, uint32_t modelId, PROFAPI_SUBSCRIBECONFIG_CONST_PTR config);
-using ProfAclUnSubscribeFunc = int32_t (*) (uint32_t type, uint32_t modelId);
-using ProfOpSubscribeFunc = int32_t (*) (uint32_t devId, PROFAPI_SUBSCRIBECONFIG_CONST_PTR config);
-using ProfOpUnSubscribeFunc = int32_t (*) (uint32_t devId);
-using ProfAclDrvGetDevNumFunc = int32_t (*) ();
-using ProfAclGetOpTimeFunc = uint64_t (*) (uint32_t type, const void *opInfo, size_t opInfoLen, uint32_t index);
-using ProfAclGetIdFunc = size_t (*) (uint32_t type, const void *opInfo, size_t opInfoLen, uint32_t index);
-using ProfAclGetOpValFunc = int32_t (*) (uint32_t type, const void *opInfo, size_t opInfoLen,
-                                     uint32_t index, void *data, size_t len);
-using ProfGetOpExecutionTimeFunc = uint64_t (*) (const void *data, uint32_t len, uint32_t index);
-using ProfGetOpAttriValFunc = const char *(*) (uint32_t type, const void *opInfo, size_t opInfoLen,
-                                               uint32_t index, uint32_t attri);
+using VOID_PTR = void*;
+using CHAR_PTR = char*;
+using PROFAPI_SUBSCRIBECONFIG_CONST_PTR = const void*;
+using PROFAPI_CONFIG_CONST_PTR = const void*;
+using ProfAclInitFunc = int32_t (*)(uint32_t type, const char* path, uint32_t len);
+using ProfAclCtrlFunc = int32_t (*)(uint32_t type, PROFAPI_CONFIG_CONST_PTR config);
+using ProfAclFinalizeFunc = int32_t (*)(uint32_t type);
+using ProfAclSetConfigFunc = int32_t (*)(uint32_t type, const char* config, uint32_t len);
+using ProfAclSubscribeFunc = int32_t (*)(uint32_t type, uint32_t modelId, PROFAPI_SUBSCRIBECONFIG_CONST_PTR config);
+using ProfAclUnSubscribeFunc = int32_t (*)(uint32_t type, uint32_t modelId);
+using ProfOpSubscribeFunc = int32_t (*)(uint32_t devId, PROFAPI_SUBSCRIBECONFIG_CONST_PTR config);
+using ProfOpUnSubscribeFunc = int32_t (*)(uint32_t devId);
+using ProfAclDrvGetDevNumFunc = int32_t (*)();
+using ProfAclGetOpTimeFunc = uint64_t (*)(uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index);
+using ProfAclGetIdFunc = size_t (*)(uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index);
+using ProfAclGetOpValFunc =
+    int32_t (*)(uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index, void* data, size_t len);
+using ProfGetOpExecutionTimeFunc = uint64_t (*)(const void* data, uint32_t len, uint32_t index);
+using ProfGetOpAttriValFunc = const char* (*)(uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index,
+                                              uint32_t attri);
 using ProfCreateTransportFunc = SHARED_PTR_ALIA<analysis::dvvp::transport::ITransport> (*)();
 using ProfCreateTransportTypeFunc = ProfCreateTransportFunc (*)();
 using ProfRegisterTransportFunc = void (*)(ProfCreateTransportFunc callback);
-using ProfAclGetCompatibleFeaturesFunc = int32_t (*) (size_t *featuresSize, void **featuresData);
-using ProfAclGetCompatibleFeaturesV2Func = int32_t (*) (size_t *featuresSize, void **featuresData);
-using ProfAclRegisterDeviceCallbackFunc = int (*) ();
+using ProfAclGetCompatibleFeaturesFunc = int32_t (*)(size_t* featuresSize, void** featuresData);
+using ProfAclGetCompatibleFeaturesV2Func = int32_t (*)(size_t* featuresSize, void** featuresData);
+using ProfAclRegisterDeviceCallbackFunc = int (*)();
+using ProfIsInitedFunc = bool (*)();
+using ProfGetResultPathFunc = int32_t (*)(char*, uint32_t);
 
 class ProfAclPlugin : public analysis::dvvp::common::singleton::Singleton<ProfAclPlugin> {
 public:
     void ProfAclApiInit(VOID_PTR handle);
-    int32_t ProfAclInit(uint32_t type, const char *profilerPath, uint32_t len);
+    int32_t ProfAclInit(uint32_t type, const char* profilerPath, uint32_t len);
     int32_t ProfAclWarmup(uint32_t type, PROFAPI_CONFIG_CONST_PTR profilerConfig);
     int32_t ProfAclStart(uint32_t type, PROFAPI_CONFIG_CONST_PTR profilerConfig);
     int32_t ProfAclStop(uint32_t type, PROFAPI_CONFIG_CONST_PTR profilerConfig);
@@ -54,19 +57,21 @@ public:
     int32_t ProfOpSubscribe(uint32_t devId, PROFAPI_SUBSCRIBECONFIG_CONST_PTR config);
     int32_t ProfOpUnSubscribe(uint32_t type);
     int32_t ProfAclDrvGetDevNum();
-    int32_t ProfAclSetConfig(uint32_t configType, const char *config, size_t configLength);
-    uint64_t ProfAclGetOpTime(uint32_t type, const void *opInfo, size_t opInfoLen, uint32_t index);
-    size_t ProfAclGetId(uint32_t type, const void *opInfo, size_t opInfoLen, uint32_t index);
-    int32_t ProfAclGetOpVal(uint32_t type, const void *opInfo, size_t opInfoLen,
-                            uint32_t index, void *data, size_t len);
-    uint64_t ProfGetOpExecutionTime(const void *data, uint32_t len, uint32_t index);
-    const char *ProfGetOpAttriVal(uint32_t type, const void *opInfo, size_t opInfoLen,
-                                  uint32_t index, uint32_t attri);
-    int32_t ProfAclGetCompatibleFeatures(size_t *featuresSize, void **featuresData);
-    int32_t ProfAclGetCompatibleFeaturesV2(size_t *featuresSize, void **featuresData);
+    int32_t ProfAclSetConfig(uint32_t configType, const char* config, size_t configLength);
+    uint64_t ProfAclGetOpTime(uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index);
+    size_t ProfAclGetId(uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index);
+    int32_t ProfAclGetOpVal(
+        uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index, void* data, size_t len);
+    uint64_t ProfGetOpExecutionTime(const void* data, uint32_t len, uint32_t index);
+    const char* ProfGetOpAttriVal(uint32_t type, const void* opInfo, size_t opInfoLen, uint32_t index, uint32_t attri);
+    int32_t ProfAclGetCompatibleFeatures(size_t* featuresSize, void** featuresData);
+    int32_t ProfAclGetCompatibleFeaturesV2(size_t* featuresSize, void** featuresData);
     int32_t ProfAclRegisterDeviceCallback();
+    bool IsInited();
+    std::string GetResultPath();
+
 private:
-    VOID_PTR msProfLibHandle_{nullptr};
+    std::atomic<VOID_PTR> msProfLibHandle_{nullptr};
 
     PTHREAD_ONCE_T profAclInitFlag_;
     PTHREAD_ONCE_T profAclWarmupFlag_;
@@ -87,6 +92,7 @@ private:
     PTHREAD_ONCE_T profAclGetCompatibleFeaturesFlags_;
     PTHREAD_ONCE_T profAclGetCompatibleFeaturesV2Flags_;
     PTHREAD_ONCE_T profAclRegisterDeviceCallbackFlag_;
+    PTHREAD_ONCE_T profGetResultPathFlag_;
 
     ProfAclInitFunc profAclInit_;
     ProfAclCtrlFunc profAclWarmup_;
@@ -109,6 +115,8 @@ private:
     ProfAclGetCompatibleFeaturesFunc profAclGetCompatibleFeatures_;
     ProfAclGetCompatibleFeaturesV2Func profAclGetCompatibleFeaturesV2_;
     ProfAclRegisterDeviceCallbackFunc profAclRegisterDeviceCallback_;
+    std::atomic<ProfIsInitedFunc> profIsInited_{nullptr};
+    ProfGetResultPathFunc profGetResultPath_{nullptr};
 
     void LoadProfAclInit();
     void LoadProfAclWarmup();
@@ -131,6 +139,8 @@ private:
     void LoadProfAclGetCompatibleFeatures();
     void LoadProfAclGetCompatibleFeaturesV2();
     void LoadProfAclRegisterDeviceCallback();
+    void LoadProfIsInited();
+    void LoadProfGetResultPath();
 };
-}
+} // namespace ProfAPI
 #endif

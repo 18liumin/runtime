@@ -12,17 +12,14 @@
 namespace Analysis {
 namespace Dvvp {
 namespace MsprofErrMgr {
-error_message::Context MsprofErrorManager::errorContext_ = {0UL, "", "", ""};
+error_message::ErrorManagerContext MsprofErrorManager::errorContext_{};
 
-error_message::Context &MsprofErrorManager::GetErrorManagerContext() const
-{
-    return errorContext_;
-}
+error_message::ErrorManagerContext& MsprofErrorManager::GetErrorManagerContext() const { return errorContext_; }
 
-void MsprofErrorManager::SetErrorContext(const error_message::Context errorContext) const
+void MsprofErrorManager::SetErrorContext(const error_message::ErrorManagerContext errorContext) const
 {
     (void)(errorContext);
 }
-}  // ErrorManager
-}  // Dvvp
-}  // namespace Analysis
+} // namespace MsprofErrMgr
+} // namespace Dvvp
+} // namespace Analysis

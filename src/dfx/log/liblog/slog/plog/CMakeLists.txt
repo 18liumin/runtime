@@ -12,6 +12,7 @@ set(plogSrcFiles
     ${CMAKE_CURRENT_SOURCE_DIR}/plog_core.c
     ${CMAKE_CURRENT_SOURCE_DIR}/plog_device_log.c
     ${CMAKE_CURRENT_SOURCE_DIR}/plog_api.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plog_callback.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plog_host_log.c
     ${CMAKE_CURRENT_SOURCE_DIR}/plog_driver_log.c
     ${CMAKE_CURRENT_SOURCE_DIR}/plog_thread.c
@@ -27,14 +28,15 @@ set(plogSrcFiles
 set(plogHeaderDir
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${LIBC_SEC_HEADER}
-    ${TOOLAHCIN_LOG_DIR}/../../../include/driver
+    ${TOOLAHCIN_LOG_DIR}/../../../pkg_inc/driver
+    ${TOOLAHCIN_LOG_DIR}/../../../include/dfx/base
     ${TOOLAHCIN_LOG_DIR}/inc/toolchain
     ${TOOLAHCIN_LOG_DIR}/shared
     ${TOOLAHCIN_LOG_DIR}/utils
     ${TOOLAHCIN_LOG_DIR}/liblog/slog
-    ${TOOLAHCIN_LOG_DIR}/../../mmpa/inc/mmpa
+    ${TOOLAHCIN_LOG_DIR}/../../../pkg_inc/mmpa
     ${TOOLAHCIN_LOG_DIR}/../../../pkg_inc
-    ${TOOLAHCIN_LOG_DIR}/../../../pkg_inc/dump
+    ${TOOLAHCIN_LOG_DIR}/../adump/inc/adump
 )
 
 add_library(static_plog_cpp STATIC

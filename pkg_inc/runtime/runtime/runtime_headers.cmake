@@ -21,3 +21,27 @@ target_include_directories(npu_runtime_headers INTERFACE
     $<INSTALL_INTERFACE:include/runtime/external>
     $<INSTALL_INTERFACE:include/runtime/external/runtime>
 )
+
+if(ENABLE_OPEN_SRC)
+    add_library(runtime_headers INTERFACE)
+    target_include_directories(runtime_headers INTERFACE
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/include/external>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/include/external/acl>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/include/external/acl/error_codes>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc/profiling>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc/runtime>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc/runtime/runtime>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc/aicpu_sched>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc/aicpu_sched/common>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc/aicpu_sched/aicpu_schedule>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc/aicpu_sched/cpu_kernels>
+    )
+
+    add_library(datagw_headers INTERFACE)
+    target_include_directories(datagw_headers INTERFACE
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc/queue_schedule>
+        $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc/tsd>
+    )
+endif()

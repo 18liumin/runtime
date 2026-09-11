@@ -20,17 +20,18 @@
 #undef private
 #endif
 
-class UTEST_ACL_compatibility_enum_check : public testing::Test
-{
-    public:
-        UTEST_ACL_compatibility_enum_check() {}
-    protected:
-        virtual void SetUp() {}
-        virtual void TearDown() {}
+class UTEST_ACL_compatibility_enum_check : public testing::Test {
+public:
+    UTEST_ACL_compatibility_enum_check() {}
+
+protected:
+    virtual void SetUp() {}
+    virtual void TearDown() {}
 };
 
 // 测试aclrtErrorType枚举值
-TEST_F(UTEST_ACL_compatibility_enum_check, aclrtErrorType) {
+TEST_F(UTEST_ACL_compatibility_enum_check, aclrtErrorType)
+{
     aclrtErrorType type;
 
     type = (aclrtErrorType)0;
@@ -53,7 +54,8 @@ TEST_F(UTEST_ACL_compatibility_enum_check, aclrtErrorType) {
 }
 
 // 测试aclrtAicoreErrorType枚举值
-TEST_F(UTEST_ACL_compatibility_enum_check, aclrtAicoreErrorType) {
+TEST_F(UTEST_ACL_compatibility_enum_check, aclrtAicoreErrorType)
+{
     aclrtAicoreErrorType type;
 
     type = (aclrtAicoreErrorType)0;
@@ -424,6 +426,9 @@ TEST_F(UTEST_ACL_compatibility_enum_check, aclSysParamOpt)
 
     sysParamOpt = (aclSysParamOpt)2;
     EXPECT_EQ(sysParamOpt, ACL_OPT_STRONG_CONSISTENCY);
+
+    sysParamOpt = (aclSysParamOpt)3;
+    EXPECT_EQ(sysParamOpt, ACL_OPT_ENABLE_KERNEL_EARLY_START);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtMemMallocPolicy)
@@ -558,7 +563,6 @@ TEST_F(UTEST_ACL_compatibility_enum_check, aclrtFloatOverflowMode)
     EXPECT_EQ(mode, RT_OVERFLOW_MODE_UNDEF);
 }
 
-
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtMemLocationType)
 {
     aclrtMemLocationType memLocationType;
@@ -672,9 +676,9 @@ TEST_F(UTEST_ACL_compatibility_enum_check, aclCmoType)
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtLastErrLevel)
 {
-  aclrtLastErrLevel level;
-  level = (aclrtLastErrLevel)0;
-  EXPECT_EQ(level, ACL_RT_THREAD_LEVEL);
+    aclrtLastErrLevel level;
+    level = (aclrtLastErrLevel)0;
+    EXPECT_EQ(level, ACL_RT_THREAD_LEVEL);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtBinaryLoadOptionType)
@@ -698,6 +702,9 @@ TEST_F(UTEST_ACL_compatibility_enum_check, aclrtLaunchKernelAttrId)
     aclrtLaunchKernelAttrId id;
     id = (aclrtLaunchKernelAttrId)1;
     EXPECT_EQ(id, ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE);
+
+    id = (aclrtLaunchKernelAttrId)2;
+    EXPECT_EQ(id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
 
     id = (aclrtLaunchKernelAttrId)3;
     EXPECT_EQ(id, ACL_RT_LAUNCH_KERNEL_ATTR_ENGINE_TYPE);
@@ -732,7 +739,7 @@ TEST_F(UTEST_ACL_compatibility_enum_check, aclrtBinaryLoadOptionValue)
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtLaunchKernelAttrValue)
 {
     EXPECT_EQ(sizeof(aclrtLaunchKernelAttrValue::schemMode), sizeof(uint8_t));
-    EXPECT_EQ(sizeof(aclrtLaunchKernelAttrValue::localMemorySize), sizeof(uint32_t));
+    EXPECT_EQ(sizeof(aclrtLaunchKernelAttrValue::dynUBufSize), sizeof(uint32_t));
     EXPECT_EQ(sizeof(aclrtLaunchKernelAttrValue::engineType), sizeof(aclrtEngineType));
     EXPECT_EQ(sizeof(aclrtLaunchKernelAttrValue::blockDimOffset), sizeof(uint32_t));
     EXPECT_EQ(sizeof(aclrtLaunchKernelAttrValue::isBlockTaskPrefetch), sizeof(uint8_t));
@@ -745,246 +752,376 @@ TEST_F(UTEST_ACL_compatibility_enum_check, aclrtLaunchKernelAttrValue)
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtHostRegisterType)
 {
-  aclrtHostRegisterType value;
-  value = (aclrtHostRegisterType)0;
-  EXPECT_EQ(value, ACL_HOST_REGISTER_MAPPED);
+    aclrtHostRegisterType value;
+    value = (aclrtHostRegisterType)0;
+    EXPECT_EQ(value, ACL_HOST_REGISTER_MAPPED);
 
-  EXPECT_EQ(sizeof(aclrtHostRegisterType), 4);
+    EXPECT_EQ(sizeof(aclrtHostRegisterType), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtMallocAttrType)
 {
-  aclrtMallocAttrType value;
-  value = (aclrtMallocAttrType)0;
-  EXPECT_EQ(value, ACL_RT_MEM_ATTR_RSV);
+    aclrtMallocAttrType value;
+    value = (aclrtMallocAttrType)0;
+    EXPECT_EQ(value, ACL_RT_MEM_ATTR_RSV);
 
-  value = (aclrtMallocAttrType)1;
-  EXPECT_EQ(value, ACL_RT_MEM_ATTR_MODULE_ID);
+    value = (aclrtMallocAttrType)1;
+    EXPECT_EQ(value, ACL_RT_MEM_ATTR_MODULE_ID);
 
-  value = (aclrtMallocAttrType)2;
-  EXPECT_EQ(value, ACL_RT_MEM_ATTR_DEVICE_ID);
+    value = (aclrtMallocAttrType)2;
+    EXPECT_EQ(value, ACL_RT_MEM_ATTR_DEVICE_ID);
 
-  EXPECT_EQ(sizeof(aclrtMallocAttrType), 4);
+    EXPECT_EQ(sizeof(aclrtMallocAttrType), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtStreamAttr)
 {
-  aclrtStreamAttr value;
-  value = (aclrtStreamAttr)1;
-  EXPECT_EQ(value, ACL_STREAM_ATTR_FAILURE_MODE);
+    aclrtStreamAttr value;
+    value = (aclrtStreamAttr)1;
+    EXPECT_EQ(value, ACL_STREAM_ATTR_FAILURE_MODE);
 
-  value = (aclrtStreamAttr)2;
-  EXPECT_EQ(value, ACL_STREAM_ATTR_FLOAT_OVERFLOW_CHECK);
+    value = (aclrtStreamAttr)2;
+    EXPECT_EQ(value, ACL_STREAM_ATTR_FLOAT_OVERFLOW_CHECK);
 
-  value = (aclrtStreamAttr)3;
-  EXPECT_EQ(value, ACL_STREAM_ATTR_USER_CUSTOM_TAG);
+    value = (aclrtStreamAttr)3;
+    EXPECT_EQ(value, ACL_STREAM_ATTR_USER_CUSTOM_TAG);
 
-  value = (aclrtStreamAttr)4;
-  EXPECT_EQ(value, ACL_STREAM_ATTR_CACHE_OP_INFO);
+    value = (aclrtStreamAttr)4;
+    EXPECT_EQ(value, ACL_STREAM_ATTR_CACHE_OP_INFO);
 
-  EXPECT_EQ(sizeof(aclrtStreamAttr), 4);
+    EXPECT_EQ(sizeof(aclrtStreamAttr), 4);
+}
+
+TEST_F(UTEST_ACL_compatibility_enum_check, aclrtAtomicOperationCapability)
+{
+    aclrtAtomicOperationCapability cap;
+    cap = (aclrtAtomicOperationCapability)(1U << 0);
+    EXPECT_EQ(cap, ACL_RT_ATOMIC_CAPABILITY_SIGNED);
+
+    cap = (aclrtAtomicOperationCapability)(1U << 1);
+    EXPECT_EQ(cap, ACL_RT_ATOMIC_CAPABILITY_UNSIGNED);
+
+    cap = (aclrtAtomicOperationCapability)(1U << 2);
+    EXPECT_EQ(cap, ACL_RT_ATOMIC_CAPABILITY_REDUCATION);
+    EXPECT_EQ(cap, ACL_RT_ATOMIC_CAPABILITY_REDUCTION);
+
+    cap = (aclrtAtomicOperationCapability)(1U << 3);
+    EXPECT_EQ(cap, ACL_RT_ATOMIC_CAPABILITY_SCALAR8);
+
+    cap = (aclrtAtomicOperationCapability)(1U << 4);
+    EXPECT_EQ(cap, ACL_RT_ATOMIC_CAPABILITY_SCALAR16);
+
+    cap = (aclrtAtomicOperationCapability)(1U << 5);
+    EXPECT_EQ(cap, ACL_RT_ATOMIC_CAPABILITY_SCALAR32);
+
+    cap = (aclrtAtomicOperationCapability)(1U << 6);
+    EXPECT_EQ(cap, ACL_RT_ATOMIC_CAPABILITY_SCALAR64);
+
+    cap = (aclrtAtomicOperationCapability)(1U << 7);
+    EXPECT_EQ(cap, ACL_RT_ATOMIC_CAPABILITY_SCALAR128);
+
+    cap = (aclrtAtomicOperationCapability)(1U << 8);
+    EXPECT_EQ(cap, ACL_RT_ATOMIC_CAPABILITY_VECTOR32X4);
+
+    EXPECT_EQ(sizeof(aclrtAtomicOperationCapability), sizeof(uint32_t));
+}
+
+TEST_F(UTEST_ACL_compatibility_enum_check, aclrtAtomicOperation)
+{
+    aclrtAtomicOperation op;
+    op = (aclrtAtomicOperation)0;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_INTEGER_ADD);
+
+    op = (aclrtAtomicOperation)1;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_INTEGER_MIN);
+
+    op = (aclrtAtomicOperation)2;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_INTEGER_MAX);
+
+    op = (aclrtAtomicOperation)3;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_INTEGER_INCREMENT);
+
+    op = (aclrtAtomicOperation)4;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_INTEGER_DECREMENT);
+
+    op = (aclrtAtomicOperation)5;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_AND);
+
+    op = (aclrtAtomicOperation)6;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_OR);
+
+    op = (aclrtAtomicOperation)7;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_XOR);
+
+    op = (aclrtAtomicOperation)8;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_EXCHANGE);
+
+    op = (aclrtAtomicOperation)9;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_CAS);
+
+    op = (aclrtAtomicOperation)10;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_FLOAT_ADD);
+
+    op = (aclrtAtomicOperation)11;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_FLOAT_MIN);
+
+    op = (aclrtAtomicOperation)12;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_FLOAT_MAX);
+
+    op = (aclrtAtomicOperation)30;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_DMA_ADD);
+
+    op = (aclrtAtomicOperation)31;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_DMA_MIN);
+
+    op = (aclrtAtomicOperation)32;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_DMA_MAX);
+
+    op = (aclrtAtomicOperation)40;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_SIMD_SCALAR_ADD);
+
+    op = (aclrtAtomicOperation)41;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_SIMD_SCALAR_MIN);
+
+    op = (aclrtAtomicOperation)42;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_SIMD_SCALAR_MAX);
+
+    op = (aclrtAtomicOperation)43;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_SIMD_SCALAR_CAS);
+
+    op = (aclrtAtomicOperation)44;
+    EXPECT_EQ(op, ACL_RT_ATOMIC_OPERATION_SIMD_SCALAR_EXCH);
+
+    EXPECT_EQ(sizeof(aclrtAtomicOperation), sizeof(uint32_t));
+}
+
+TEST_F(UTEST_ACL_compatibility_enum_check, aclmdlRICondHandleFlag)
+{
+    aclmdlRICondHandleFlag value;
+    value = (aclmdlRICondHandleFlag)1;
+    EXPECT_EQ(value, ACL_MODEL_RI_COND_HANDLE_ASSIGN_DEFAULT);
+    EXPECT_EQ(sizeof(aclmdlRICondHandleFlag), 4);
+}
+
+TEST_F(UTEST_ACL_compatibility_enum_check, aclmdlRICondTaskType)
+{
+    aclmdlRICondTaskType value;
+    value = (aclmdlRICondTaskType)0;
+    EXPECT_EQ(value, ACL_MODEL_RI_COND_TYPE_IF);
+    value = (aclmdlRICondTaskType)1;
+    EXPECT_EQ(value, ACL_MODEL_RI_COND_TYPE_WHILE);
+    value = (aclmdlRICondTaskType)2;
+    EXPECT_EQ(value, ACL_MODEL_RI_COND_TYPE_SWITCH);
+    EXPECT_EQ(sizeof(aclmdlRICondTaskType), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtDevAttr)
 {
-  aclrtDevAttr value;
-  value = (aclrtDevAttr)1U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_AICPU_CORE_NUM);
+    aclrtDevAttr value;
+    value = (aclrtDevAttr)1U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_AICPU_CORE_NUM);
 
-  value = (aclrtDevAttr)101U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_AICORE_CORE_NUM);
+    value = (aclrtDevAttr)101U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_AICORE_CORE_NUM);
 
-  value = (aclrtDevAttr)102U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_CUBE_CORE_NUM);
+    value = (aclrtDevAttr)102U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_CUBE_CORE_NUM);
 
-  value = (aclrtDevAttr)201U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_VECTOR_CORE_NUM);
+    value = (aclrtDevAttr)201U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_VECTOR_CORE_NUM);
 
-  value = (aclrtDevAttr)202U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_WARP_SIZE);
+    value = (aclrtDevAttr)202U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_WARP_SIZE);
 
-  value = (aclrtDevAttr)203U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_MAX_THREAD_PER_VECTOR_CORE);
+    value = (aclrtDevAttr)203U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_MAX_THREAD_PER_VECTOR_CORE);
 
-  value = (aclrtDevAttr)204U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_LOCAL_MEM_PER_VECTOR_CORE);
+    value = (aclrtDevAttr)204U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_UBUF_PER_VECTOR_CORE);
 
-  value = (aclrtDevAttr)301U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_TOTAL_GLOBAL_MEM_SIZE);
+    value = (aclrtDevAttr)301U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_TOTAL_GLOBAL_MEM_SIZE);
 
-  value = (aclrtDevAttr)302U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_L2_CACHE_SIZE);
+    value = (aclrtDevAttr)302U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_L2_CACHE_SIZE);
 
-  value = (aclrtDevAttr)401U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_SMP_ID);
+    value = (aclrtDevAttr)401U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_SMP_ID);
 
-  value = (aclrtDevAttr)402U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_PHY_CHIP_ID);
+    value = (aclrtDevAttr)402U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_PHY_CHIP_ID);
 
-  value = (aclrtDevAttr)403U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_SUPER_POD_DEVIDE_ID);
+    value = (aclrtDevAttr)403U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_SUPER_POD_DEVICE_ID);
 
-  value = (aclrtDevAttr)404U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_SUPER_POD_SERVER_ID);
+    value = (aclrtDevAttr)404U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_SUPER_POD_SERVER_ID);
 
-  value = (aclrtDevAttr)405U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_SUPER_POD_ID);
+    value = (aclrtDevAttr)405U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_SUPER_POD_ID);
 
-  value = (aclrtDevAttr)406U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_CUST_OP_PRIVILEGE);
+    value = (aclrtDevAttr)406U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_CUST_OP_PRIVILEGE);
 
-  value = (aclrtDevAttr)407U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_MAINBOARD_ID);
+    value = (aclrtDevAttr)407U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_MAINBOARD_ID);
 
-  value = (aclrtDevAttr)501U;
-  EXPECT_EQ(value, ACL_DEV_ATTR_IS_VIRTUAL);
+    value = (aclrtDevAttr)410U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_SUPER_POD_CHASSIS_ID);
 
-  EXPECT_EQ(sizeof(aclrtDevAttr), 4);
+    value = (aclrtDevAttr)501U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_IS_VIRTUAL);
+
+    value = (aclrtDevAttr)601U;
+    EXPECT_EQ(value, ACL_DEV_ATTR_NPU_ARCH);
+
+    EXPECT_EQ(sizeof(aclrtDevAttr), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtDevFeatureType)
 {
-  aclrtDevFeatureType value;
-  value = (aclrtDevFeatureType)1U;
-  EXPECT_EQ(value, ACL_FEATURE_TSCPU_TASK_UPDATE_SUPPORT_AIC_AIV);
+    aclrtDevFeatureType value;
+    value = (aclrtDevFeatureType)1U;
+    EXPECT_EQ(value, ACL_FEATURE_TSCPU_TASK_UPDATE_SUPPORT_AIC_AIV);
 
-  value = (aclrtDevFeatureType)21U;
-  EXPECT_EQ(value, ACL_FEATURE_SYSTEM_MEMQ_EVENT_CROSS_DEV);
+    value = (aclrtDevFeatureType)21U;
+    EXPECT_EQ(value, ACL_FEATURE_SYSTEM_MEMQ_EVENT_CROSS_DEV);
 
-  EXPECT_EQ(sizeof(aclrtDevFeatureType), 4);
+    EXPECT_EQ(sizeof(aclrtDevFeatureType), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtReduceKind)
 {
-  aclrtReduceKind value;
-  value = (aclrtReduceKind)10U;
-  EXPECT_EQ(value, ACL_RT_MEMCPY_SDMA_AUTOMATIC_SUM);
+    aclrtReduceKind value;
+    value = (aclrtReduceKind)10U;
+    EXPECT_EQ(value, ACL_RT_MEMCPY_SDMA_AUTOMATIC_SUM);
 
-  value = (aclrtReduceKind)11U;
-  EXPECT_EQ(value, ACL_RT_MEMCPY_SDMA_AUTOMATIC_MAX);
+    value = (aclrtReduceKind)11U;
+    EXPECT_EQ(value, ACL_RT_MEMCPY_SDMA_AUTOMATIC_MAX);
 
-  value = (aclrtReduceKind)12U;
-  EXPECT_EQ(value, ACL_RT_MEMCPY_SDMA_AUTOMATIC_MIN);
+    value = (aclrtReduceKind)12U;
+    EXPECT_EQ(value, ACL_RT_MEMCPY_SDMA_AUTOMATIC_MIN);
 
-  value = (aclrtReduceKind)13U;
-  EXPECT_EQ(value, ACL_RT_MEMCPY_SDMA_AUTOMATIC_EQUAL);
+    value = (aclrtReduceKind)13U;
+    EXPECT_EQ(value, ACL_RT_MEMCPY_SDMA_AUTOMATIC_EQUAL);
 
-  EXPECT_EQ(sizeof(aclrtReduceKind), 4);
+    EXPECT_EQ(sizeof(aclrtReduceKind), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtDevResLimitType)
 {
-  aclrtDevResLimitType value;
-  value = (aclrtDevResLimitType)0U;
-  EXPECT_EQ(value, ACL_RT_DEV_RES_CUBE_CORE);
+    aclrtDevResLimitType value;
+    value = (aclrtDevResLimitType)0U;
+    EXPECT_EQ(value, ACL_RT_DEV_RES_CUBE_CORE);
 
-  value = (aclrtDevResLimitType)1U;
-  EXPECT_EQ(value, ACL_RT_DEV_RES_VECTOR_CORE);
+    value = (aclrtDevResLimitType)1U;
+    EXPECT_EQ(value, ACL_RT_DEV_RES_VECTOR_CORE);
 
-  EXPECT_EQ(sizeof(aclrtDevResLimitType), 4);
+    EXPECT_EQ(sizeof(aclrtDevResLimitType), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtCondition)
 {
-  aclrtCondition value;
-  value = (aclrtCondition)0U;
-  EXPECT_EQ(value, ACL_RT_EQUAL);
+    aclrtCondition value;
+    value = (aclrtCondition)0U;
+    EXPECT_EQ(value, ACL_RT_EQUAL);
 
-  value = (aclrtCondition)1U;
-  EXPECT_EQ(value, ACL_RT_NOT_EQUAL);
+    value = (aclrtCondition)1U;
+    EXPECT_EQ(value, ACL_RT_NOT_EQUAL);
 
-  value = (aclrtCondition)2U;
-  EXPECT_EQ(value, ACL_RT_GREATER);
+    value = (aclrtCondition)2U;
+    EXPECT_EQ(value, ACL_RT_GREATER);
 
-  value = (aclrtCondition)3U;
-  EXPECT_EQ(value, ACL_RT_GREATER_OR_EQUAL);
+    value = (aclrtCondition)3U;
+    EXPECT_EQ(value, ACL_RT_GREATER_OR_EQUAL);
 
-  value = (aclrtCondition)4U;
-  EXPECT_EQ(value, ACL_RT_LESS);
+    value = (aclrtCondition)4U;
+    EXPECT_EQ(value, ACL_RT_LESS);
 
-  value = (aclrtCondition)5U;
-  EXPECT_EQ(value, ACL_RT_LESS_OR_EQUAL);
+    value = (aclrtCondition)5U;
+    EXPECT_EQ(value, ACL_RT_LESS_OR_EQUAL);
 
-  EXPECT_EQ(sizeof(aclrtCondition), 4);
+    EXPECT_EQ(sizeof(aclrtCondition), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtCompareDataType)
 {
-  aclrtCompareDataType value;
-  value = (aclrtCompareDataType)0U;
-  EXPECT_EQ(value, ACL_RT_SWITCH_INT32);
+    aclrtCompareDataType value;
+    value = (aclrtCompareDataType)0U;
+    EXPECT_EQ(value, ACL_RT_SWITCH_INT32);
 
-  value = (aclrtCompareDataType)1U;
-  EXPECT_EQ(value, ACL_RT_SWITCH_INT64);
+    value = (aclrtCompareDataType)1U;
+    EXPECT_EQ(value, ACL_RT_SWITCH_INT64);
 
-  EXPECT_EQ(sizeof(aclrtCompareDataType), 4);
+    EXPECT_EQ(sizeof(aclrtCompareDataType), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtEngineType)
 {
-  aclrtEngineType value;
-  value = (aclrtEngineType)0U;
-  EXPECT_EQ(value, ACL_RT_ENGINE_TYPE_AIC);
+    aclrtEngineType value;
+    value = (aclrtEngineType)0U;
+    EXPECT_EQ(value, ACL_RT_ENGINE_TYPE_AIC);
 
-  value = (aclrtEngineType)1U;
-  EXPECT_EQ(value, ACL_RT_ENGINE_TYPE_AIV);
+    value = (aclrtEngineType)1U;
+    EXPECT_EQ(value, ACL_RT_ENGINE_TYPE_AIV);
 
-  EXPECT_EQ(sizeof(aclrtEngineType), 4);
+    EXPECT_EQ(sizeof(aclrtEngineType), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, AclProfType)
 {
-  acl::AclProfType value;
-  value = (acl::AclProfType)0x300DCU;
-  EXPECT_EQ(value, acl::AclrtMemExportToShareableHandleV2);
+    acl::AclProfType value;
+    value = (acl::AclProfType)0x300DBU;
+    EXPECT_EQ(value, acl::AclrtMemExportToShareableHandleV2);
 
-  value = (acl::AclProfType)0x300DDU;
-  EXPECT_EQ(value, acl::AclrtMemImportFromShareableHandleV2);
+    value = (acl::AclProfType)0x300DCU;
+    EXPECT_EQ(value, acl::AclrtMemImportFromShareableHandleV2);
 
-  value = (acl::AclProfType)0x300DEU;
-  EXPECT_EQ(value, acl::AclrtMemSetPidToShareableHandleV2);
+    value = (acl::AclProfType)0x300DDU;
+    EXPECT_EQ(value, acl::AclrtMemSetPidToShareableHandleV2);
 
-  EXPECT_EQ(sizeof(acl::AclProfType), 4);
+    EXPECT_EQ(acl::AclrtHostGetDevicePointerAddrRange > acl::AclrtExceptionInfoCallbackUnregister, true);
+
+    EXPECT_EQ(sizeof(acl::AclProfType), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtCntNotifyRecordMode)
 {
-  aclrtCntNotifyRecordMode value;
-  value = (aclrtCntNotifyRecordMode)0U;
-  EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_RECORD_SET_VALUE_MODE);
+    aclrtCntNotifyRecordMode value;
+    value = (aclrtCntNotifyRecordMode)0U;
+    EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_RECORD_SET_VALUE_MODE);
 
-  value = (aclrtCntNotifyRecordMode)1U;
-  EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_RECORD_ADD_MODE);
+    value = (aclrtCntNotifyRecordMode)1U;
+    EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_RECORD_ADD_MODE);
 
-  value = (aclrtCntNotifyRecordMode)2U;
-  EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_RECORD_BIT_OR_MODE);
+    value = (aclrtCntNotifyRecordMode)2U;
+    EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_RECORD_BIT_OR_MODE);
 
-  value = (aclrtCntNotifyRecordMode)4U;
-  EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_RECORD_BIT_AND_MODE);
+    value = (aclrtCntNotifyRecordMode)4U;
+    EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_RECORD_BIT_AND_MODE);
 
-  EXPECT_EQ(sizeof(aclrtCntNotifyRecordMode), 4);
+    EXPECT_EQ(sizeof(aclrtCntNotifyRecordMode), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtCntNotifyWaitMode)
 {
-  aclrtCntNotifyWaitMode value;
-  value = (aclrtCntNotifyWaitMode)0U;
-  EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_WAIT_LESS_MODE);
+    aclrtCntNotifyWaitMode value;
+    value = (aclrtCntNotifyWaitMode)0U;
+    EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_WAIT_LESS_MODE);
 
-  value = (aclrtCntNotifyWaitMode)1U;
-  EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_WAIT_EQUAL_MODE);
+    value = (aclrtCntNotifyWaitMode)1U;
+    EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_WAIT_EQUAL_MODE);
 
-  value = (aclrtCntNotifyWaitMode)2U;
-  EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_WAIT_BIGGER_MODE);
+    value = (aclrtCntNotifyWaitMode)2U;
+    EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_WAIT_BIGGER_MODE);
 
-  value = (aclrtCntNotifyWaitMode)3U;
-  EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_WAIT_BIGGER_OR_EQUAL_MODE);
+    value = (aclrtCntNotifyWaitMode)3U;
+    EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_WAIT_BIGGER_OR_EQUAL_MODE);
 
-  value = (aclrtCntNotifyWaitMode)4U;
-  EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_WAIT_EQUAL_WITH_BITMASK_MODE);
+    value = (aclrtCntNotifyWaitMode)4U;
+    EXPECT_EQ(value, ACL_RT_CNT_NOTIFY_WAIT_EQUAL_WITH_BITMASK_MODE);
 
-  EXPECT_EQ(sizeof(aclrtCntNotifyWaitMode), 4);
-
+    EXPECT_EQ(sizeof(aclrtCntNotifyWaitMode), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtMemAccessFlags)
@@ -1002,44 +1139,177 @@ TEST_F(UTEST_ACL_compatibility_enum_check, aclrtMemAccessFlags)
     EXPECT_EQ(sizeof(aclrtMemAccessFlags), 4);
 }
 
+TEST_F(UTEST_ACL_compatibility_enum_check, aclrtHacType)
+{
+    aclrtHacType value;
+    value = (aclrtHacType)0;
+    EXPECT_EQ(value, ACL_RT_HAC_TYPE_STARS);
+
+    value = (aclrtHacType)1;
+    EXPECT_EQ(value, ACL_RT_HAC_TYPE_AICPU);
+
+    value = (aclrtHacType)2;
+    EXPECT_EQ(value, ACL_RT_HAC_TYPE_AIC);
+
+    value = (aclrtHacType)3;
+    EXPECT_EQ(value, ACL_RT_HAC_TYPE_AIV);
+
+    value = (aclrtHacType)4;
+    EXPECT_EQ(value, ACL_RT_HAC_TYPE_PCIEDMA);
+
+    value = (aclrtHacType)5;
+    EXPECT_EQ(value, ACL_RT_HAC_TYPE_RDMA);
+
+    value = (aclrtHacType)6;
+    EXPECT_EQ(value, ACL_RT_HAC_TYPE_SDMA);
+
+    value = (aclrtHacType)7;
+    EXPECT_EQ(value, ACL_RT_HAC_TYPE_DVPP);
+
+    value = (aclrtHacType)8;
+    EXPECT_EQ(value, ACL_RT_HAC_TYPE_UDMA);
+
+    value = (aclrtHacType)9;
+    EXPECT_EQ(value, ACL_RT_HAC_TYPE_CCU);
+}
+
+TEST_F(UTEST_ACL_compatibility_enum_check, aclrtHostMemMapCapability)
+{
+    aclrtHostMemMapCapability value;
+    value = (aclrtHostMemMapCapability)0;
+    EXPECT_EQ(value, ACL_RT_HOST_MEM_MAP_NOT_SUPPORTED);
+    value = (aclrtHostMemMapCapability)1;
+    EXPECT_EQ(value, ACL_RT_HOST_MEM_MAP_SUPPORTED);
+}
+
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtProcessState)
 {
-  aclrtProcessState value;
-  value = (aclrtProcessState)0U;
-  EXPECT_EQ(value, ACL_RT_PROCESS_STATE_RUNNING);
+    aclrtProcessState value;
+    value = (aclrtProcessState)0U;
+    EXPECT_EQ(value, ACL_RT_PROCESS_STATE_RUNNING);
 
-  value = (aclrtProcessState)1U;
-  EXPECT_EQ(value, ACL_RT_PROCESS_STATE_LOCKED);
+    value = (aclrtProcessState)1U;
+    EXPECT_EQ(value, ACL_RT_PROCESS_STATE_LOCKED);
 
-  EXPECT_EQ(sizeof(aclrtProcessState), 4);
+    EXPECT_EQ(sizeof(aclrtProcessState), 4);
+}
+
+TEST_F(UTEST_ACL_compatibility_enum_check, aclrtSnapShotStage)
+{
+    aclrtSnapShotStage value;
+    value = (aclrtSnapShotStage)0U;
+    EXPECT_EQ(value, ACL_RT_SNAPSHOT_LOCK_PRE);
+
+    value = (aclrtSnapShotStage)1U;
+    EXPECT_EQ(value, ACL_RT_SNAPSHOT_BACKUP_PRE);
+
+    value = (aclrtSnapShotStage)2U;
+    EXPECT_EQ(value, ACL_RT_SNAPSHOT_BACKUP_POST);
+
+    value = (aclrtSnapShotStage)3U;
+    EXPECT_EQ(value, ACL_RT_SNAPSHOT_RESTORE_PRE);
+
+    value = (aclrtSnapShotStage)4U;
+    EXPECT_EQ(value, ACL_RT_SNAPSHOT_RESTORE_POST);
+
+    value = (aclrtSnapShotStage)5U;
+    EXPECT_EQ(value, ACL_RT_SNAPSHOT_UNLOCK_POST);
+
+    EXPECT_EQ(sizeof(aclrtSnapShotStage), 4);
+}
+
+TEST_F(UTEST_ACL_compatibility_enum_check, aclrtSnapShotBackupArgs)
+{
+    aclrtSnapShotBackupArgs args;
+    EXPECT_EQ(sizeof(aclrtSnapShotBackupArgs), 64);
+    args.backupFlags = 0U;
+    args.backupFlags = static_cast<uint32_t>(1);
+    (void)args;
+}
+
+TEST_F(UTEST_ACL_compatibility_enum_check, aclrtSnapShotRestoreArgs)
+{
+    aclrtSnapShotRestoreArgs args;
+    EXPECT_EQ(sizeof(aclrtSnapShotRestoreArgs), 64);
+    args.restoreFlags = 0U;
+    args.restoreFlags = static_cast<uint32_t>(1);
+    (void)args;
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtKernelType)
 {
-  aclrtKernelType value;
-  value = (aclrtKernelType)0U;
-  EXPECT_EQ(value, ACL_KERNEL_TYPE_AICORE);
+    aclrtKernelType value;
+    value = (aclrtKernelType)0U;
+    EXPECT_EQ(value, ACL_KERNEL_TYPE_AICORE);
 
-  value = (aclrtKernelType)1U;
-  EXPECT_EQ(value, ACL_KERNEL_TYPE_CUBE);
+    value = (aclrtKernelType)1U;
+    EXPECT_EQ(value, ACL_KERNEL_TYPE_CUBE);
 
-  value = (aclrtKernelType)2U;
-  EXPECT_EQ(value, ACL_KERNEL_TYPE_VECTOR);
+    value = (aclrtKernelType)2U;
+    EXPECT_EQ(value, ACL_KERNEL_TYPE_VECTOR);
 
-  value = (aclrtKernelType)3U;
-  EXPECT_EQ(value, ACL_KERNEL_TYPE_MIX);
+    value = (aclrtKernelType)3U;
+    EXPECT_EQ(value, ACL_KERNEL_TYPE_MIX);
 
-  value = (aclrtKernelType)100U;
-  EXPECT_EQ(value, ACL_KERNEL_TYPE_AICPU);
+    value = (aclrtKernelType)100U;
+    EXPECT_EQ(value, ACL_KERNEL_TYPE_AICPU);
 
-  EXPECT_EQ(sizeof(aclrtKernelType), 4);
+    EXPECT_EQ(sizeof(aclrtKernelType), 4);
 }
 
 TEST_F(UTEST_ACL_compatibility_enum_check, aclrtFuncAttribute)
 {
-  aclrtFuncAttribute value;
-  value = (aclrtFuncAttribute)1U;
-  EXPECT_EQ(value, ACL_FUNC_ATTR_KERNEL_TYPE);
+    aclrtFuncAttribute value;
+    value = (aclrtFuncAttribute)1U;
+    EXPECT_EQ(value, ACL_FUNC_ATTR_KERNEL_TYPE);
 
-  EXPECT_EQ(sizeof(aclrtFuncAttribute), 4);
+    value = (aclrtFuncAttribute)2U;
+    EXPECT_EQ(value, ACL_FUNC_ATTR_KERNEL_RATIO);
+
+    value = (aclrtFuncAttribute)3U;
+    EXPECT_EQ(value, ACL_FUNC_ATTR_KERNEL_SCHED_MODE);
+
+    EXPECT_EQ(sizeof(aclrtFuncAttribute), 4);
+}
+
+TEST_F(UTEST_ACL_compatibility_enum_check, aclmdlRITaskType)
+{
+    aclmdlRITaskType value;
+    value = (aclmdlRITaskType)0;
+    EXPECT_EQ(value, ACL_MODEL_RI_TASK_DEFAULT);
+
+    value = (aclmdlRITaskType)1;
+    EXPECT_EQ(value, ACL_MODEL_RI_TASK_KERNEL);
+
+    value = (aclmdlRITaskType)2;
+    EXPECT_EQ(value, ACL_MODEL_RI_TASK_EVENT_RECORD);
+
+    value = (aclmdlRITaskType)3;
+    EXPECT_EQ(value, ACL_MODEL_RI_TASK_EVENT_WAIT);
+
+    value = (aclmdlRITaskType)4;
+    EXPECT_EQ(value, ACL_MODEL_RI_TASK_EVENT_RESET);
+
+    value = (aclmdlRITaskType)5;
+    EXPECT_EQ(value, ACL_MODEL_RI_TASK_VALUE_WRITE);
+
+    value = (aclmdlRITaskType)6;
+    EXPECT_EQ(value, ACL_MODEL_RI_TASK_VALUE_WAIT);
+}
+
+TEST_F(UTEST_ACL_compatibility_enum_check, aclrtMemLinkType)
+{
+    aclrtMemLinkType type;
+
+    type = (aclrtMemLinkType)0;
+    EXPECT_EQ(type, ACL_RT_MEM_ACCESS_LINK_SIO);
+
+    type = (aclrtMemLinkType)1;
+    EXPECT_EQ(type, ACL_RT_MEM_ACCESS_LINK_HCCS);
+
+    type = (aclrtMemLinkType)2;
+    EXPECT_EQ(type, ACL_RT_MEM_ACCESS_UB_ONE_PORT_PATH);
+
+    type = (aclrtMemLinkType)3;
+    EXPECT_EQ(type, ACL_RT_MEM_ACCESS_UB_MULTI_PORT_PATH);
 }

@@ -11,31 +11,6 @@
 #ifndef PROF_API_STUB
 #include "prof_api.h"
 
-int32_t profRegReporterCallback(MsprofReportHandle reporter)
-{
-    (void)reporter;
-    return 0;
-}
-
-int32_t profRegCtrlCallback(MsprofCtrlHandle handle)
-{
-    (void)handle;
-    return 0;
-}
-
-int32_t profRegDeviceStateCallback(MsprofSetDeviceHandle handle)
-{
-    (void)handle;
-    return 0;
-}
-
-int32_t profGetDeviceIdByGeModelIdx(const uint32_t modelIdx, uint32_t *deviceId)
-{
-    (void)modelIdx;
-    (void)deviceId;
-    return 0;
-}
-
 int32_t profSetProfCommand(VOID_PTR command, uint32_t len)
 {
     (void)command;
@@ -51,14 +26,14 @@ int32_t profSetStepInfo(const uint64_t indexId, const uint16_t tagId, void* cons
     return 0;
 }
 
-int32_t MsprofReportApi(uint32_t nonPersistantFlag, const MsprofApi *api)
+int32_t MsprofReportApi(uint32_t nonPersistantFlag, const MsprofApi* api)
 {
     (void)nonPersistantFlag;
     (void)api;
     return 0;
 }
 
-int32_t MsprofReportEvent(uint32_t nonPersistantFlag, const MsprofEvent *event)
+int32_t MsprofReportEvent(uint32_t nonPersistantFlag, const MsprofEvent* event)
 {
     (void)nonPersistantFlag;
     (void)event;
@@ -81,7 +56,7 @@ int32_t MsprofReportAdditionalInfo(uint32_t nonPersistantFlag, const VOID_PTR da
     return 0;
 }
 
-int32_t MsprofRegTypeInfo(uint16_t level, uint32_t typeId, const char *typeName)
+int32_t MsprofRegTypeInfo(uint16_t level, uint32_t typeId, const char* typeName)
 {
     (void)level;
     (void)typeId;
@@ -89,7 +64,7 @@ int32_t MsprofRegTypeInfo(uint16_t level, uint32_t typeId, const char *typeName)
     return 0;
 }
 
-int32_t MsprofRegDataFormat(uint16_t level, uint32_t typeId, const char *dataFormat)
+int32_t MsprofRegDataFormat(uint16_t level, uint32_t typeId, const char* dataFormat)
 {
     (void)level;
     (void)typeId;
@@ -97,14 +72,14 @@ int32_t MsprofRegDataFormat(uint16_t level, uint32_t typeId, const char *dataFor
     return 0;
 }
 
-uint64_t MsprofGetHashId(const char *hashInfo, size_t length)
+uint64_t MsprofGetHashId(const char* hashInfo, size_t length)
 {
     (void)hashInfo;
     (void)length;
     return 0;
 }
 
-uint64_t MsprofStr2Id(const char *hashInfo, size_t length)
+uint64_t MsprofStr2Id(const char* hashInfo, size_t length)
 {
     (void)hashInfo;
     (void)length;
@@ -119,15 +94,7 @@ int32_t MsprofInit(uint32_t dataType, VOID_PTR data, uint32_t dataLen)
     return 0;
 }
 
-int32_t MsprofStart(uint32_t dataType, const void *data, uint32_t length)
-{
-    (void)dataType;
-    (void)data;
-    (void)length;
-    return 0;
-}
- 
-int32_t MsprofStop(uint32_t dataType, const void *data, uint32_t length)
+int32_t MsprofStart(uint32_t dataType, const void* data, uint32_t length)
 {
     (void)dataType;
     (void)data;
@@ -135,8 +102,15 @@ int32_t MsprofStop(uint32_t dataType, const void *data, uint32_t length)
     return 0;
 }
 
-int32_t MsprofSetConfig(uint32_t configType, const char *config,
-    size_t configLength)
+int32_t MsprofStop(uint32_t dataType, const void* data, uint32_t length)
+{
+    (void)dataType;
+    (void)data;
+    (void)length;
+    return 0;
+}
+
+int32_t MsprofSetConfig(uint32_t configType, const char* config, size_t configLength)
 {
     (void)configType;
     (void)config;
@@ -182,15 +156,18 @@ int32_t MsprofUnsetDeviceIdByGeModelIdx(const uint32_t geModelIdx, const uint32_
     return 0;
 }
 
-int32_t MsprofFinalize()
+int32_t MsprofSetInjectionFunc(uint32_t funcType, void* func)
 {
-    return 0;
+    (void)funcType;
+    (void)func;
+    return 1;
 }
 
-uint64_t MsprofSysCycleTime()
-{
-    return 0;
-}
+int32_t MsprofInjectionInitialize() { return 1; }
+
+int32_t MsprofFinalize() { return 0; }
+
+uint64_t MsprofSysCycleTime() { return 0; }
 #else
 
 #include <string>

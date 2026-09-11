@@ -36,8 +36,7 @@ using namespace Analysis::Dvvp::TaskHandle;
 using namespace analysis::dvvp::common::validation;
 using namespace Analysis::Dvvp::MsprofErrMgr;
 
-Device::Device(SHARED_PTR_ALIA<analysis::dvvp::message::ProfileParams> params,
-               const std::string &devId)
+Device::Device(SHARED_PTR_ALIA<analysis::dvvp::message::ProfileParams> params, const std::string& devId)
     : params_(params),
       indexIdStr_(devId),
       indexId_(-1),
@@ -65,7 +64,6 @@ int32_t Device::Init()
     status_->status = analysis::dvvp::message::SUCCESS;
     if (!(params_->hostProfiling) && !ParamValidation::instance()->CheckDeviceIdIsValid(indexIdStr_)) {
         MSPROF_LOGE("[Device::Init] devId %s is not valid!", indexIdStr_.c_str());
-        MSPROF_INNER_ERROR("EK9999", "devId %s is not valid!", indexIdStr_.c_str());
         status_->info = "Device id is invalid";
         status_->status = analysis::dvvp::message::ERR;
         return PROFILING_FAILED;
@@ -75,23 +73,22 @@ int32_t Device::Init()
 
 int32_t Device::InitJobAdapter()
 {
-    FUNRET_CHECK_EXPR_ACTION(!Utils::StrToInt32(indexId_, indexIdStr_), return PROFILING_FAILED, 
-        "indexIdStr_ %s is invalid", indexIdStr_.c_str());
+    FUNRET_CHECK_EXPR_ACTION(
+        !Utils::StrToInt32(indexId_, indexIdStr_), return PROFILING_FAILED, "indexIdStr_ %s is invalid",
+        indexIdStr_.c_str());
     status_->dev_id = indexIdStr_;
 
-    if (Platform::instance()->PlatformIsSocSide()) {  // soc scene
+    if (Platform::instance()->PlatformIsSocSide()) { // soc scene
         MSPROF_LOGI("Init SOC JobAdapter");
         auto jobFactory = JobSocFactory();
         jobAdapter_ = jobFactory.CreateJobAdapter(indexId_);
     } else {
         const int32_t platform = Platform::instance()->GetPlatform();
         MSPROF_LOGE("[Device::Init]GetPlatform failed, platformInfo is %d", platform);
-        MSPROF_INNER_ERROR("EK9999", "GetPlatform failed, platformInfo is %d", platform);
         return PROFILING_FAILED;
     }
     if (jobAdapter_ == nullptr) {
         MSPROF_LOGE("[Device::Init]Create Job Adapter failed!");
-        MSPROF_INNER_ERROR("EK9999", "Create Job Adapter failed!");
         return PROFILING_FAILED;
     }
 
@@ -137,14 +134,14 @@ void Device::PostStopReplay()
     cvSyncStopReplay.notify_one();
 }
 
-void Device::Run(const struct error_message::Context &errorContext)
+void Device::Run(const error_message::ErrorManagerContext& errorContext)
 {
     MsprofErrorManager::instance()->SetErrorContext(errorContext);
     MSPROF_LOGI("Device(%d) ctrl thread is running", indexId_);
     int32_t ret = PROFILING_SUCCESS;
     do {
         ret = jobAdapter_->StartProf(params_);
-        if (deviceResponseCallack_ != nullptr) {  // call response when start profiling
+        if (deviceResponseCallack_ != nullptr) { // call cloud response when start profiling
             MSPROF_LOGI("Send response Device(%d)", indexId_);
             deviceResponseCallack_(indexId_);
         }
@@ -167,16 +164,12 @@ void Device::Run(const struct error_message::Context &errorContext)
     isQuited_ = true;
     if (ret != PROFILING_SUCCESS) {
         MSPROF_LOGE("Device(%d) ctrl thread status failed", indexId_);
-        MSPROF_INNER_ERROR("EK9999", "Device(%d) ctrl thread status failed", indexId_);
     } else {
         MSPROF_LOGI("Device(%d) ctrl thread exit", indexId_);
     }
 }
 
-int32_t Device::Stop()
-{
-    return 0;
-}
+int32_t Device::Stop() { return 0; }
 
 int32_t Device::Wait()
 {
@@ -190,10 +183,7 @@ int32_t Device::Wait()
     return 0;
 }
 
-const SHARED_PTR_ALIA<analysis::dvvp::message::StatusInfo> Device::GetStatus()
-{
-    return status_;
-}
-}  // namespace host
-}  // namespace dvvp
-}  // namespace analysis
+const SHARED_PTR_ALIA<analysis::dvvp::message::StatusInfo> Device::GetStatus() { return status_; }
+} // namespace host
+} // namespace dvvp
+} // namespace analysis

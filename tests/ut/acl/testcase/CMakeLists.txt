@@ -28,12 +28,14 @@ include_directories(${BASE_DIR}/pkg_inc/profiling)
 include_directories(${BASE_DIR}/pkg_inc/dump)
 include_directories(${BASE_DIR}/pkg_inc/watchdog)
 include_directories(${TOP_DIR}/src/dfx/log/inc)
+include_directories(${TOP_DIR}/src/inc)
 include_directories(${BASE_DIR}/src/acl)
 include_directories(${BASE_DIR}/src/acl/aclrt)
 include_directories(${BASE_DIR}/src/acl/aclrt_impl)
 include_directories(${BASE_DIR}/tests/depends/)
 include_directories(${BASE_DIR}/include/dfx)
-include_directories(${BASE_DIR}/src/runtime/feature/inc/kernel)
+include_directories(${BASE_DIR}/src/runtime/inc/kernel)
+include_directories(${BASE_DIR}/include/dfx)
 
 set(UT_FILES
     "test.cpp"
@@ -49,6 +51,7 @@ set(UT_FILES
     "acl_tensorDataTransfer_unittest.cpp"
     "acl_queue_unittest.cpp"
     "acl_mdlri_unittest.cpp"
+    "acl_rt_api_hook_unittest.cpp"
 )
 
 set(SRC_FILES
@@ -76,6 +79,7 @@ set(SRC_FILES
     ${BASE_DIR}/src/acl/aclrt_impl/allocator.cpp
     ${BASE_DIR}/src/acl/aclrt_impl/log.cpp
     ${BASE_DIR}/src/acl/aclrt_impl/toolchain/dump.cpp
+    ${BASE_DIR}/src/acl/aclrt_impl/toolchain/dump_shim.cpp
     ${BASE_DIR}/src/acl/aclrt_impl/toolchain/profiling.cpp
     ${BASE_DIR}/src/acl/aclrt_impl/toolchain/profiling_manager.cpp
     ${BASE_DIR}/src/acl/common/json_parser.cpp
@@ -93,7 +97,7 @@ set(SRC_FILES
 ######### tdt #########
     ${BASE_DIR}/src/acl/acl_tdt_channel/tensor_data_transfer.cpp
     ${BASE_DIR}/src/acl/acl_tdt_queue/queue.cpp
-    ${BASE_DIR}/src/acl/acl_tdt_queue/queue_manager.cpp
+    ${BASE_DIR}/src/acl/acl_tdt_queue/acl_tdt_queue_manager.cpp
     ${BASE_DIR}/src/acl/acl_tdt_queue/queue_process.cpp
     ${BASE_DIR}/src/acl/acl_tdt_queue/queue_process_host.cpp
     ${BASE_DIR}/src/acl/acl_tdt_queue/queue_process_sp.cpp
@@ -117,19 +121,20 @@ target_compile_definitions(ut_ascendcl_src PRIVATE
     google=ascend_private
     ENABLE_DVPP_INTERFACE
     RUN_TEST
+    ACL_RT_API_HOOK_ENABLE=1
     $<$<BOOL:${ENABLE_OPEN_SRC}>:ONLY_COMPILE_OPEN_SRC>
     $<$<BOOL:${ENABLE_UT}>:ONLY_ENABLE_ACL_UT>
 )
 
 target_compile_options(ut_ascendcl_src PRIVATE
-    -fsanitize=address -fsanitize=leak -fsanitize-recover=address
     -g --coverage -fprofile-arcs -ftest-coverage -fno-access-control
     -Wall -Wextra -Wfloat-equal -Werror
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wno-deprecated-declarations>
 )
 
 target_link_libraries(ut_ascendcl_src PRIVATE
     $<BUILD_INTERFACE:intf_pub>
-    -fsanitize=address -fsanitize=leak -fsanitize-recover=address
+    $<BUILD_INTERFACE:c_sec_headers>
     c_sec
     json
 )
@@ -145,10 +150,9 @@ target_include_directories(ascendcl_cpp_utest PRIVATE
 )
 
 target_compile_options(ascendcl_cpp_utest PRIVATE
-    -fsanitize=address -fsanitize=leak -fsanitize-recover=address
     -O0
     -g
-    -Wno-deprecated-declarations
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wno-deprecated-declarations>
     -Wall -Wfloat-equal -Werror -Wextra
     -fno-access-control
 )
@@ -157,17 +161,18 @@ target_compile_definitions(ascendcl_cpp_utest PRIVATE
     google=ascend_private
     ENABLE_DVPP_INTERFACE
     ACL_BASE_DIR=\"${BASE_DIR}\"
+    ACL_RT_API_HOOK_ENABLE=1
 )
 
 target_link_libraries(ascendcl_cpp_utest PRIVATE
     $<BUILD_INTERFACE:intf_pub>
-    -fsanitize=address -fsanitize=leak -fsanitize-recover=address
+    $<BUILD_INTERFACE:c_sec_headers>
     ut_ascendcl_src
     json
-    GTest::gtest
-    GTest::gtest_main
-    GTest::gmock
-    GTest::gmock_main
+    GTestShared::gtest
+    GTestShared::gtest_main
+    GTestShared::gmock
+    GTestShared::gmock_main
     slog_stub
     c_sec
     mmpa_stub

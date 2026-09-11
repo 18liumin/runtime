@@ -19,16 +19,16 @@
 extern "C" {
 #endif
 
-RTS_API rtError_t  rtGetNotifyAddress(rtNotify_t notify, uint64_t * const notifyAddres);
+RTS_API rtError_t rtGetNotifyAddress(rtNotify_t notify, uint64_t* const notifyAddres);
 
 /**
-* @ingroup rt_kernel
-* @brief set input argments size for exception
-* @param [in] sizeInfo argments size info
-* @return RT_ERROR_NONE for ok
-* @return RT_ERROR_INVALID_VALUE for error input
-*/
-RTS_API rtError_t rtSetExceptionExtInfo(const rtArgsSizeInfo_t * const sizeInfo);
+ * @ingroup rt_kernel
+ * @brief set input argments size for exception
+ * @param [in] sizeInfo argments size info
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ */
+RTS_API rtError_t rtSetExceptionExtInfo(const rtArgsSizeInfo_t* const sizeInfo);
 
 /**
  * @ingroup rt_kernel
@@ -56,7 +56,7 @@ RTS_API rtError_t rtKernelFusionEnd(rtStream_t stm);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtMetadataRegister(void *hdl, const char_t *metadata);
+RTS_API rtError_t rtMetadataRegister(void* hdl, const char_t* metadata);
 
 /**
  * @ingroup rt_kernel
@@ -81,6 +81,14 @@ RTS_API rtError_t rtMetadataRegister(void *hdl, const char_t *metadata);
  * @brief magic number of elf binary for aicube
  */
 #define RT_DEV_BINARY_MAGIC_ELF_AICUBE 0x41494343U
+
+typedef struct tagRtDevBinary {
+    uint32_t magic;   // magic number
+    uint32_t version; // version of binary
+    const void* data; // binary data
+    uint64_t length;  // binary length
+} rtDevBinary_t;
+
 /**
  * @ingroup rt_kernel_flags
  * @brief kernel op bit flags
@@ -91,10 +99,10 @@ RTS_API rtError_t rtMetadataRegister(void *hdl, const char_t *metadata);
 #define RT_FUSION_KERNEL_DUMPFLAG (0x04U)
 #define RT_KERNEL_CUSTOM_AICPU (0x08U)
 #define RT_KERNEL_FFTSPLUS_DYNAMIC_SHAPE_DUMPFLAG (0x10U)
-#define RT_KERNEL_FFTSPLUS_STATIC_SHAPE_DUMPFLAG  (0x20U)
+#define RT_KERNEL_FFTSPLUS_STATIC_SHAPE_DUMPFLAG (0x20U)
 // cmdlist does not need to be released by the runtime.
-#define RT_KERNEL_CMDLIST_NOT_FREE                (0x40U)
-#define RT_KERNEL_USE_SPECIAL_TIMEOUT             (0x100U)
+#define RT_KERNEL_CMDLIST_NOT_FREE (0x40U)
+#define RT_KERNEL_USE_SPECIAL_TIMEOUT (0x100U)
 
 /**
  * @ingroup rt_kernel
@@ -110,47 +118,169 @@ typedef struct rtHostInputInfo {
  * @brief args struct
  */
 typedef struct tagRtArgsEx {
-    void *args;                     // args host mem addr
-    rtHostInputInfo_t *hostInputInfoPtr;     // nullptr means no host mem input
-    uint32_t argsSize;              // input + output + tiling addr size + tiling data size + host mem
-    uint32_t tilingAddrOffset;      // tiling addr offset
-    uint32_t tilingDataOffset;      // tiling data offset
-    uint16_t hostInputInfoNum;      // hostInputInfo num
-    uint8_t hasTiling;              // if has tiling: 0 means no tiling
-    uint8_t isNoNeedH2DCopy;        // is no need host to device copy: 0 means need H2D copy,
-                                    // others means doesn't need H2D copy.
+    void* args;                          // args host mem addr
+    rtHostInputInfo_t* hostInputInfoPtr; // nullptr means no host mem input
+    uint32_t argsSize;                   // input + output + tiling addr size + tiling data size + host mem
+    uint32_t tilingAddrOffset;           // tiling addr offset
+    uint32_t tilingDataOffset;           // tiling data offset
+    uint16_t hostInputInfoNum;           // hostInputInfo num
+    uint8_t hasTiling;                   // if has tiling: 0 means no tiling
+    uint8_t isNoNeedH2DCopy;             // is no need host to device copy: 0 means need H2D copy,
+                                         // others means doesn't need H2D copy.
     uint8_t reserved[4];
 } rtArgsEx_t;
 
 typedef struct tagRtAicpuArgsEx {
-    void *args; // args host mem addr
-    rtHostInputInfo_t *hostInputInfoPtr; // nullptr means no host mem input
-    rtHostInputInfo_t *kernelOffsetInfoPtr; // KernelOffsetInfo, it is different for CCE Kernel and fwk kernel
+    void* args;                             // args host mem addr
+    rtHostInputInfo_t* hostInputInfoPtr;    // nullptr means no host mem input
+    rtHostInputInfo_t* kernelOffsetInfoPtr; // KernelOffsetInfo, it is different for CCE Kernel and fwk kernel
     uint32_t argsSize;
-    uint16_t hostInputInfoNum; // hostInputInfo num
-    uint16_t kernelOffsetInfoNum; // KernelOffsetInfo num
-    uint32_t soNameAddrOffset; // just for CCE Kernel, default value is 0xffff for FWK kernel
-    uint32_t kernelNameAddrOffset; // just for CCE Kernel, default value is 0xffff for FWK kernel
-    bool isNoNeedH2DCopy; // is no need host to device copy: 0 means need H2D copy,
-                               // other means doesn't need H2D copy.
-    uint16_t timeout;  // timeout for aicpu exit
+    uint16_t hostInputInfoNum;              // hostInputInfo num
+    uint16_t kernelOffsetInfoNum;           // KernelOffsetInfo num
+    uint32_t soNameAddrOffset;              // just for CCE Kernel, default value is 0xffff for FWK kernel
+    uint32_t kernelNameAddrOffset;          // just for CCE Kernel, default value is 0xffff for FWK kernel
+    bool isNoNeedH2DCopy;                   // is no need host to device copy: 0 means need H2D copy,
+                                            // other means doesn't need H2D copy.
+    uint16_t timeout;                       // timeout for aicpu exit
     uint8_t reserved;
 } rtAicpuArgsEx_t;
+
+#define FUSION_SUB_TASK_MAX_NUM (2U)
+#define FUSION_SUB_TASK_MAX_CPU_NUM (1U)
+typedef struct tagRtAicpuArgs {
+    uint16_t kfcArgsFmtOffset;     // default value is 0xffff
+    uint16_t soNameAddrOffset;     // just for CCE Kernel, default value is 0xffff for FWK kernel
+    uint16_t kernelNameAddrOffset; // just for CCE Kernel, default value is 0xffff for FWK kernel
+    uint16_t rev;
+} rtAicpuArgs_t;
+
+typedef struct tagRtFusionArgsEx {
+    void* args;                                           // args host mem addr
+    rtHostInputInfo_t* hostInputInfoPtr;                  // nullptr means no host mem input
+    uint32_t argsSize;                                    // input + output + host mem
+    uint16_t hostInputInfoNum;                            // hostInputInfo num
+    uint8_t aicpuNum;                                     // aicpu task num
+    uint8_t isNoNeedH2DCopy;                              // is no need host to device copy: 0 means need H2D copy,
+                                                          // others means doesn't need H2D copy.
+    rtAicpuArgs_t aicpuArgs[FUSION_SUB_TASK_MAX_CPU_NUM]; // aicpuArgsInfo
+} rtFusionArgsEx_t;
+
+typedef union rtLaunchAttributeValue_union {
+    uint32_t blockDim;
+    RT_DEPRECATED_MESSAGE("Use dynUBufSize instead")
+    uint32_t dynamicShareMemSize; // DEPRECATED: Use dynUBufSize
+    uint32_t dynUBufSize;
+    struct {
+        uint32_t groupDim;
+        uint32_t groupBlockDim;
+    } Group;
+    uint8_t qos;
+    uint8_t partId;
+    uint8_t schemMode; // rtschemModeType_t 0:normal;1:batch;2:sync
+    uint32_t blockDimOffset;
+    uint8_t dumpflag;  // dumpflag 0:fault 2:RT_KERNEL_DUMPFLAG
+} rtLaunchAttributeValue_t;
+
+typedef enum rtLaunchAttributeId {
+    RT_LAUNCH_ATTRIBUTE_BLOCKDIM = 0,
+    RT_LAUNCH_ATTRIBUTE_DYNAMIC_SHARE_MEM_SIZE RT_DEPRECATED_MESSAGE("Use RT_LAUNCH_ATTRIBUTE_DYN_UBUF_SIZE instead") =
+        1,
+    RT_LAUNCH_ATTRIBUTE_DYN_UBUF_SIZE = 1,
+    RT_LAUNCH_ATTRIBUTE_GROUP = 2,
+    RT_LAUNCH_ATTRIBUTE_QOS = 3,
+    RT_LAUNCH_ATTRIBUTE_PARTID = 4,
+    RT_LAUNCH_ATTRIBUTE_SCHEMMODE = 5,
+    RT_LAUNCH_ATTRIBUTE_BLOCKDIM_OFFSET = 6,
+    RT_LAUNCH_ATTRIBUTE_DUMPFLAG = 7,
+    RT_LAUNCH_ATTRIBUTE_MAX = 8,
+} rtLaunchAttributeId_t;
+
+typedef struct rtLaunchAttribute {
+    rtLaunchAttributeId_t id;
+    rtLaunchAttributeValue_t value;
+} rtLaunchAttribute_t;
+
+typedef struct rtLaunchConfig {
+    rtLaunchAttribute_t* attrs;
+    uint32_t numAttrs;
+} rtLaunchConfig_t;
+
+typedef struct tagRtAicoreTaskInfo {
+    void* hdl;
+    uint64_t tilingKey;
+    rtLaunchConfig_t* config;
+    void* stubFunc;
+} rtAicoreFusionInfo_t;
+
+typedef struct tagRtAicpuTaskInfo {
+    uint32_t kernelType;
+    uint32_t flags;
+    uint32_t blockDim;
+} rtAicpuFusionInfo_t;
+
+#define RT_CCU_INST_CNT_INVALID (0U)
+#define RT_CCU_INST_START_MAX (32768U)
+typedef struct tagRtCcuTaskInfo {
+    uint8_t dieId;
+    uint8_t missionId;
+    uint16_t timeout;
+    uint16_t instStartId;
+    uint16_t instCnt;
+    uint32_t key;
+    uint32_t argSize; // 1 or 13. 1 means 32B ccu sqe; 13 means 128B ccu sqe
+    uint64_t args[RT_CCU_SQE_ARGS_LEN];
+} rtCcuTaskInfo_t;
+
+typedef struct tagRtCcuTaskGroup {
+    uint32_t taskNum;
+    rtCcuTaskInfo_t ccuTaskInfo[FUSION_SUB_TASK_MAX_CCU_NUM];
+} rtCcuTaskGroup_t;
+
+typedef union {
+    rtAicoreFusionInfo_t aicoreInfo;
+    rtAicpuFusionInfo_t aicpuInfo;
+    rtCcuTaskGroup_t ccuInfo;
+} rtFusionSubTask_t;
+
+typedef enum {
+    RT_FUSION_HCOM_CPU = 0,
+    RT_FUSION_AICPU = 1,
+    RT_FUSION_AICORE = 2,
+    RT_FUSION_CCU = 3,
+    RT_FUSION_END
+} rtFusionType_t;
+
+typedef struct tagRtFusionSubTaskInfo {
+    rtFusionType_t type;
+    rtFusionSubTask_t task;
+} rtFusionSubTaskInfo_t;
+
+/*
+    fusion sub tasks' arrangement should be set as:
+    1.aicpu + aic
+    2.hcom  + aic
+    3.ccu
+    4.ccu + aic
+*/
+typedef struct tagRtFunsionTaskInfo {
+    uint32_t subTaskNum;
+    rtFusionSubTaskInfo_t subTask[FUSION_SUB_TASK_MAX_NUM];
+} rtFunsionTaskInfo_t;
 
 /**
  * @ingroup rt_kernel
  * @brief shared memory data control
  */
 typedef struct tagRtSmData {
-    uint64_t L2_mirror_addr;          // preload or swap source addr
-    uint32_t L2_data_section_size;    // every data size
-    uint8_t L2_preload;               // 1 - preload from mirrorAddr, 0 - no preload
-    uint8_t modified;                 // 1 - data will be modified by kernel, 0 - no modified
-    uint8_t priority;                 // data priority
-    int8_t prev_L2_page_offset_base;  // remap source section offset
-    uint8_t L2_page_offset_base;      // remap destination section offset
-    uint8_t L2_load_to_ddr;           // 1 - need load out, 0 - no need
-    uint8_t reserved[2];              // reserved
+    uint64_t L2_mirror_addr;         // preload or swap source addr
+    uint32_t L2_data_section_size;   // every data size
+    uint8_t L2_preload;              // 1 - preload from mirrorAddr, 0 - no preload
+    uint8_t modified;                // 1 - data will be modified by kernel, 0 - no modified
+    uint8_t priority;                // data priority
+    int8_t prev_L2_page_offset_base; // remap source section offset
+    uint8_t L2_page_offset_base;     // remap destination section offset
+    uint8_t L2_load_to_ddr;          // 1 - need load out, 0 - no need
+    uint8_t reserved[2];             // reserved
 } rtSmData_t;
 
 /**
@@ -158,11 +288,11 @@ typedef struct tagRtSmData {
  * @brief shared memory description
  */
 typedef struct tagRtSmCtrl {
-    rtSmData_t data[8];  // data description
-    uint64_t size;       // max page Num
-    uint8_t remap[64];   /* just using for static remap mode, default:0xFF
-                          array index: virtual l2 page id, array value: physic l2 page id */
-    uint8_t l2_in_main;  // 0-DDR, 1-L2, default:0xFF
+    rtSmData_t data[8]; // data description
+    uint64_t size;      // max page Num
+    uint8_t remap[64];  /* just using for static remap mode, default:0xFF
+                         array index: virtual l2 page id, array value: physic l2 page id */
+    uint8_t l2_in_main; // 0-DDR, 1-L2, default:0xFF
     uint8_t reserved[3];
 } rtSmDesc_t;
 
@@ -171,7 +301,7 @@ typedef struct tagRtSmCtrl {
  * @brief launch cpu kernel to device with dump identifier and kernelType
  * @param [in] kernelType    aicpu kernel type
  * @param [in] opName        address of op name
- * @param [in] blockDim      block dimensions
+ * @param [in] numBlocks      block dimensions
  * @param [in] argsInfo      argments address for kernel function
  * @param [in] smDesc        shared memory description
  * @param [in] stm           associated stream
@@ -179,10 +309,9 @@ typedef struct tagRtSmCtrl {
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtAicpuKernelLaunchExWithArgs(const uint32_t kernelType, const char_t * const opName,
-                                                const uint32_t blockDim, const rtAicpuArgsEx_t *argsInfo,
-                                                rtSmDesc_t * const smDesc, const rtStream_t stm,
-                                                const uint32_t flags);
+RTS_API rtError_t rtAicpuKernelLaunchExWithArgs(
+    const uint32_t kernelType, const char_t* const opName, const uint32_t numBlocks, const rtAicpuArgsEx_t* argsInfo,
+    rtSmDesc_t* const smDesc, const rtStream_t stm, const uint32_t flags);
 
 /**
  * @ingroup dvrt_mem
@@ -195,25 +324,11 @@ RTS_API rtError_t rtAicpuKernelLaunchExWithArgs(const uint32_t kernelType, const
  * @return RT_ERROR_INVALID_VALUE for error input
  * @return RT_ERROR_DRV_ERR for driver error
  */
-RTS_API rtError_t rtGetDevArgsAddr(rtStream_t stm, rtArgsEx_t *argsInfo, void **devArgsAddr, void **argsHandle);
+RTS_API rtError_t rtGetDevArgsAddr(rtStream_t stm, rtArgsEx_t* argsInfo, void** devArgsAddr, void** argsHandle);
 
 /**
  * @ingroup rt_kernel
- * @brief Get Stack Buffer
- * @param [in] binHandle    bin handle
- * @param [in] coreType     core type
- * @param [in] coreId       core id
- * @param [out] stack       stack buffer
- * @param [out] stackSize   stack size
- * @return RT_ERROR_NONE for ok
- * @return RT_ERROR_INVALID_VALUE for error input
- */
-RTS_API rtError_t rtGetStackBuffer(const rtBinHandle binHandle, const uint32_t coreType, const uint32_t coreId,
-                                   const void **stack, uint32_t *stackSize);
-
-/**
- * @ingroup rt_kernel
- * @brief L1 fusion dump addr transfered to device
+ * @brief L1 fusion dump addr transferred to device
  * @param [in] mdl    handle info
  * @param [in] addr     ddr address of L1 Fusion Dump
  * @param [in] dumpSize memory size
@@ -221,7 +336,7 @@ RTS_API rtError_t rtGetStackBuffer(const rtBinHandle binHandle, const uint32_t c
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtDumpAddrSet(rtModel_t mdl, void *addr, uint32_t dumpSize, uint32_t flag);
+RTS_API rtError_t rtDumpAddrSet(rtModel_t mdl, void* addr, uint32_t dumpSize, uint32_t flag);
 
 /**
  * @ingroup rt_kernel
@@ -231,7 +346,7 @@ RTS_API rtError_t rtDumpAddrSet(rtModel_t mdl, void *addr, uint32_t dumpSize, ui
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtDatadumpInfoLoad(const void *dumpInfo, uint32_t length);
+RTS_API rtError_t rtDatadumpInfoLoad(const void* dumpInfo, uint32_t length);
 
 /**
  * @ingroup rt_kernel
@@ -241,20 +356,7 @@ RTS_API rtError_t rtDatadumpInfoLoad(const void *dumpInfo, uint32_t length);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtAicpuInfoLoad(const void *aicpuInfo, uint32_t length);
-
-#define RT_CCU_INST_CNT_INVALID (0U)
-#define RT_CCU_INST_START_MAX   (32768U)
-typedef struct tagRtCcuTaskInfo {
-    uint8_t dieId;
-    uint8_t missionId;
-    uint16_t timeout;
-    uint16_t instStartId;
-    uint16_t instCnt;
-    uint32_t key;
-    uint32_t argSize;    // 1 or 13. 1 means 32B ccu sqe; 13 means 128B ccu sqe
-    uint64_t args[RT_CCU_SQE_ARGS_LEN];
-} rtCcuTaskInfo_t;
+RTS_API rtError_t rtAicpuInfoLoad(const void* aicpuInfo, uint32_t length);
 
 /**
  * @ingroup rt_kernel
@@ -264,14 +366,14 @@ typedef struct tagRtCcuTaskInfo {
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtCCULaunch(rtCcuTaskInfo_t *taskInfo,  rtStream_t const stm);
+RTS_API rtError_t rtCCULaunch(rtCcuTaskInfo_t* taskInfo, rtStream_t const stm);
 
 /**
  * @ingroup rtCpuKernelLaunchWithFlag(abandoned)
  * @brief launch cpu kernel to device  with dump identifier
  * @param [in] soName        so name
  * @param [in] kernelName    kernel name
- * @param [in] blockDim      block dimensions
+ * @param [in] numBlocks      block dimensions
  * @param [in] argsInfo      argments address for kernel function
  * @param [in] smDesc        shared memory description
  * @param [in] stm           associated stream
@@ -279,18 +381,15 @@ RTS_API rtError_t rtCCULaunch(rtCcuTaskInfo_t *taskInfo,  rtStream_t const stm);
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtCpuKernelLaunchWithFlag(const void *soName, const void *kernelName, uint32_t blockDim,
-                                            const rtArgsEx_t *argsInfo, rtSmDesc_t *smDesc, rtStream_t stm,
-                                            uint32_t flags);
+RTS_API rtError_t rtCpuKernelLaunchWithFlag(
+    const void* soName, const void* kernelName, uint32_t numBlocks, const rtArgsEx_t* argsInfo, rtSmDesc_t* smDesc,
+    rtStream_t stm, uint32_t flags);
 
 /**
  * @ingroup rts_kernel
  * @brief engine type [AICORE, AIVECTOR]
  */
-typedef enum {
-    RT_ENGINE_TYPE_AIC = 0,
-    RT_ENGINE_TYPE_AIV
-} rtEngineType;
+typedef enum { RT_ENGINE_TYPE_AIC = 0, RT_ENGINE_TYPE_AIV } rtEngineType;
 
 /**
  * @ingroup rts_kernel
@@ -298,7 +397,9 @@ typedef enum {
  */
 typedef enum {
     RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE = 1,
-    RT_LAUNCH_KERNEL_ATTR_LOCAL_MEM_SIZE,
+    RT_LAUNCH_KERNEL_ATTR_LOCAL_MEM_SIZE RT_DEPRECATED_MESSAGE("Use RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE instead") =
+        2, // DEPRECATED: Use RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE
+    RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE = 2,
     // vector core使能使用
     RT_LAUNCH_KERNEL_ATTR_ENGINE_TYPE,
     // vector core使能使用
@@ -307,8 +408,18 @@ typedef enum {
     RT_LAUNCH_KERNEL_ATTR_DATA_DUMP,
     RT_LAUNCH_KERNEL_ATTR_TIMEOUT,
     RT_LAUNCH_KERNEL_ATTR_TIMEOUT_US,
+    RT_LAUNCH_KERNEL_ATTR_ENABLE_PROFILING,
     RT_LAUNCH_KERNEL_ATTR_MAX
 } rtLaunchKernelAttrId;
+
+/**
+ * @ingroup rts_kernel
+ * @brief kernel launch option timeout value
+ */
+typedef struct {
+    uint32_t timeoutLow;  // low  32bit
+    uint32_t timeoutHigh; // high 32bit
+} rtTimeoutUs;
 
 /**
  * @ingroup rts_kernel
@@ -316,13 +427,16 @@ typedef enum {
  */
 typedef union {
     uint8_t schemMode;
-    uint32_t localMemorySize;
+    RT_DEPRECATED_MESSAGE("Use dynUBufSize instead")
+    uint32_t localMemorySize; // DEPRECATED: Use dynUBufSize
+    uint32_t dynUBufSize;
     rtEngineType engineType;
     uint32_t blockDimOffset;
-    uint8_t isBlockTaskPrefetch;  // 任务下发时判断是否sqe后续需要刷新标记（tiling key依赖下沉场景）0:disable 1:enable
-    uint8_t isDataDump; // 0:disable 1:enable
+    uint8_t isBlockTaskPrefetch; // 任务下发时判断是否sqe后续需要刷新标记（tiling key依赖下沉场景）0:disable 1:enable
+    uint8_t isDataDump;      // 0:disable 1:enable
     uint16_t timeout;
-    uint64_t timeoutUs; // uint:us
+    rtTimeoutUs timeoutUs;   // unit:us
+    uint8_t enableProfiling; // 0: disable 1: enable
     uint32_t rsv[4];
 } rtLaunchKernelAttrVal_t;
 
@@ -340,71 +454,166 @@ typedef struct {
  * @brief kernel launch option config info
  */
 typedef struct {
-    rtLaunchKernelAttr_t *attrs;
+    rtLaunchKernelAttr_t* attrs;
     size_t numAttrs;
 } rtKernelLaunchCfg_t;
 
 /**
- * @ingroup rts_kernel
- * @brief rts Launch Kernel
- * @param [in] funcHandle  function Handle
- * @param [in] blockDim  block dimensions
- * @param [in] stm  associated stream
- * @param [in] cfg task t-v config
- * @param [in] argsHandle  args Handle
- * @param [in] reserve  reserve param
+ * @ingroup rt_kernel
+ * @brief set exception information callback handle to binHandle
+ * @param [in] binHandle binary bin handle
+ * @param [in] callback exception callback of binary bin handle
+ * @param [in] userData exception userData of binary bin handle
+ * @return RT_ERROR_NONE for ok
+ */
+RTS_API rtError_t rtBinarySetExceptionCallback(rtBinHandle binHandle, rtOpExceptionCallback callback, void* userData);
+
+/**
+ * @ingroup rt_kernel
+ * @brief get func handle from exception information
+ * @param [in] info pointer of exception information
+ * @param [in] func kernel func of exception information
+ * @return RT_ERROR_NONE for ok
+ */
+RTS_API rtError_t rtGetFuncHandleFromExceptionInfo(const rtExceptionInfo_t* info, rtFuncHandle* func);
+
+/**
+ * @ingroup rt_kernel
+ * @brief get binary meta num
+ * @param [in] binHandle  binary handle
+ * @param [in] type       binary meta info type
+ * @param [out] numOfMeta  num of binary meta info
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtsLaunchKernelWithConfig(rtFuncHandle funcHandle, uint32_t blockDim, rtStream_t stm,
-                                            rtKernelLaunchCfg_t *cfg, rtArgsHandle argsHandle, void *reserve);
+RTS_API rtError_t rtBinaryGetMetaNum(const rtBinHandle binHandle, const rtBinaryMetaType type, size_t* numOfMeta);
 
 /**
- * @ingroup rts_kernel
- * @brief get Saturation Status task
- * @param [in] outputAddrPtr  pointer to op output addr
- * @param [in] outputSize   op output size
- * @param [in] stm  associated stream
- * @return RT_ERROR_NONE for ok, errno for failed
- */
-RTS_API rtError_t rtsGetFloatOverflowStatus(void *const outputAddrPtr, const uint64_t outputSize, rtStream_t stm);
-
-/**
- * @ingroup rts_kernel
- * @brief clear Saturation Status task
- * @param [in] stm  associated stream
+ * @ingroup rt_kernel
+ * @brief get binary meta info
+ * @param [in] binHandle  binary handle
+ * @param [in] type       binary meta info type
+ * @param [in] numOfMeta  num of binary meta info
+ * @param [out] data      binary meta info addr
+ * @param [in] dataSize   binary meta info length
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtsResetFloatOverflowStatus(rtStream_t stm);
+RTS_API rtError_t rtBinaryGetMetaInfo(
+    const rtBinHandle binHandle, const rtBinaryMetaType type, const size_t numOfMeta, void** data,
+    const size_t* dataSize);
 
 /**
- * @ingroup rts_kernel
- * @brief launch npu get float status task
- * @param [in] outputAddrPtr  pointer to op output addr
- * @param [in] outputSize   op output size
- * @param [in] checkMode   check mode
- * @param [in] stm   associated stream
+ * @ingroup rt_kernel
+ * @brief get binary function meta info
+ * @param [in] funcHandle  function handle
+ * @param [in] type        function meta info type
+ * @param [out] data       function meta info addr
+ * @param [in] length      function meta info length
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtsNpuGetFloatOverFlowStatus(void *outputAddrPtr, uint64_t outputSize, uint32_t checkMode,
-                                               rtStream_t stm);
+RTS_API rtError_t
+rtFunctionGetMetaInfo(const rtFuncHandle funcHandle, const rtFunctionMetaType type, void* data, const uint32_t length);
 
 /**
- * @ingroup rts_kernel
- * @brief launch npu get float status task
- * @param [in] outputAddrPtr  pointer to op output addr
- * @param [in] outputSize   op output size
- * @param [in] checkMode   check mode
- * @param [in] stm   associated stream
+ * @ingroup rt_kernel
+ * @brief get binary function meta info size
+ * @param [in] funcHandle  function handle
+ * @param [in] type        function meta info type
+ * @param [out] size       function meta info size
  * @return RT_ERROR_NONE for ok
  * @return RT_ERROR_INVALID_VALUE for error input
  */
-RTS_API rtError_t rtsNpuGetFloatOverFlowDebugStatus(void *outputAddrPtr, uint64_t outputSize, uint32_t checkMode,
-                                                    rtStream_t stm);
+RTS_API rtError_t rtFunctionGetMetaInfoSize(const rtFuncHandle funcHandle, const rtFunctionMetaType type, size_t* size);
+
+/**
+ * @ingroup rt_kernel
+ * @brief get l2cache offset
+ * @param [in] deviceId   device id
+ * @param [out]  offset l2cache offset
+ * @return  0 for success, others for fail
+ */
+RTS_API rtError_t rtGetL2CacheOffset(uint32_t deviceId, uint64_t* offset);
+
+/**
+ * @brief Fusion Kernel Launch to device
+ * @param [in] fusionInfo  task information about fusion kernel
+ * @param [in] stm         associated stream
+ * @param [in] argsInfo    args info about fusion kernel
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ */
+RTS_API rtError_t rtFusionLaunch(void* const fusionInfo, rtStream_t const stm, rtFusionArgsEx_t* argsInfo);
+
+/**
+ * @ingroup rt_kernel
+ * @brief register device binary with all kernel
+ * @param [in] bin   device binary description
+ * @param [out] hdl   device binary handle
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ */
+RTS_API rtError_t rtRegisterAllKernel(const rtDevBinary_t* bin, void** hdl);
+
+/**
+ * @ingroup rt_kernel
+ * @brief no operation task
+ * @param [in] stm
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ */
+RTS_API rtError_t rtNopTask(rtStream_t stm);
+
+/**
+ * @ingroup rt_kernel
+ * @brief register device variable symbol mapping relationship.
+ * @param [in] binHandle   binary handle (Program pointer).
+ * @param [in] hostVar   device symbol reference.
+ * @param [in] deviceVarName   device symbol name.
+ * @param [in] size   size of object associated with symbol.
+ * @param [in] flags   symbol attribute flags (bit0: ext; bit1: global).
+ * @param [in] reserve   reserved parameter.
+ */
+RTS_API void rtRegisterVariable(
+    void* binHandle, const void* hostVar, const char* deviceVarName, size_t size, uint32_t flags, void* reserve);
+
+/**
+ * @ingroup rt_kernel
+ * @brief register kernel function symbol mapping relationship.
+ * @param [in] binHandle   binary handle
+ * @param [in] symbol   kernel function reference
+ * @param [in] kernelName   kernel function name
+ * @param [in] reserve   reserved parameter
+ * @return ACL_RT_SUCCESS for ok
+ * @return ACL_ERROR_RT_PARAM_INVALID for error input
+ */
+RTS_API rtError_t rtRegisterFuncSymbol(void* binHandle, const void* symbol, const char* kernelName, void* reserve);
+
+/**
+ * @ingroup rt_kernel
+ * @brief rt bin buffer type
+ */
+typedef enum tagRtBinBufferType {
+    RT_BIN_HOST_ADDR = 1,
+    RT_BIN_DEVICE_ADDR = 2,
+    RT_BIN_TYPE_MAX,
+} rtBinBufferType_t;
+
+/**
+ * @ingroup rt_kernel
+ * @brief Get Bin Buffer
+ * @param [in] binHandle    bin handle
+ * @param [in] type         bin buffer type
+ * @param [out] bin         bin addr
+ * @param [out] binSize     bin size
+ * @return RT_ERROR_NONE for ok
+ * @return RT_ERROR_INVALID_VALUE for error input
+ */
+RTS_API rtError_t
+rtGetBinBuffer(const rtBinHandle binHandle, const rtBinBufferType_t type, void** bin, uint32_t* binSize);
 #if defined(__cplusplus)
 }
 #endif
 
-#endif  // CCE_RUNTIME_RT_EXTERNAL_KERNEL_H
+#endif // CCE_RUNTIME_RT_EXTERNAL_KERNEL_H

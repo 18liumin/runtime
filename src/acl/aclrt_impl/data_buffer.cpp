@@ -13,7 +13,11 @@
 #include "common/resource_statistics.h"
 #include "common/log_inner.h"
 #include "common/prof_reporter.h"
-#include "acl/acl_rt_impl.h"
+#include "acl_rt_impl.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 size_t aclDataTypeSizeImpl(aclDataType dataType)
 {
@@ -53,41 +57,33 @@ size_t aclDataTypeSizeImpl(aclDataType dataType)
     }
 }
 
-aclDataBuffer *aclCreateDataBufferImpl(void *data, size_t size)
+aclDataBuffer* aclCreateDataBufferImpl(void* data, size_t size)
 {
     ACL_PROFILING_REG(acl::AclProfType::AclCreateDataBuffer);
     ACL_ADD_APPLY_TOTAL_COUNT(acl::ACL_STATISTICS_CREATE_DESTROY_DATA_BUFFER);
     ACL_ADD_APPLY_SUCCESS_COUNT(acl::ACL_STATISTICS_CREATE_DESTROY_DATA_BUFFER);
-    return new(std::nothrow) aclDataBuffer(data, size);
+    return new (std::nothrow) aclDataBuffer(data, size);
 }
 
-aclError aclDestroyDataBufferImpl(const aclDataBuffer *dataBuffer)
+aclError aclDestroyDataBufferImpl(const aclDataBuffer* dataBuffer)
 {
     ACL_ADD_RELEASE_TOTAL_COUNT(acl::ACL_STATISTICS_CREATE_DESTROY_DATA_BUFFER);
-    if (dataBuffer == nullptr) {
-        return ACL_ERROR_INVALID_PARAM;
-    }
+    ACL_REQUIRES_NOT_NULL_WITH_INPUT_REPORT(dataBuffer);
 
     ACL_DELETE_AND_SET_NULL(dataBuffer);
     ACL_ADD_RELEASE_SUCCESS_COUNT(acl::ACL_STATISTICS_CREATE_DESTROY_DATA_BUFFER);
     return ACL_SUCCESS;
 }
 
-aclError aclUpdateDataBufferImpl(aclDataBuffer *dataBuffer, void *data, size_t size)
+aclError aclUpdateDataBufferImpl(aclDataBuffer* dataBuffer, void* data, size_t size)
 {
-    if (dataBuffer == nullptr) {
-        ACL_LOG_ERROR("[Check][DataBuffer]invalid input pointer of dataBuffer, please use aclCreateDataBuffer "
-            "interface to create.");
-        acl::AclErrorLogManager::ReportInputError(acl::INVALID_NULL_POINTER_MSG,
-            std::vector<const char *>({"param"}), std::vector<const char *>({"dataBuffer"}));
-        return ACL_ERROR_INVALID_PARAM;
-    }
+    ACL_REQUIRES_NOT_NULL_WITH_INPUT_REPORT(dataBuffer);
     dataBuffer->data = data;
     dataBuffer->length = size;
     return ACL_SUCCESS;
 }
 
-void *aclGetDataBufferAddrImpl(const aclDataBuffer *dataBuffer)
+void* aclGetDataBufferAddrImpl(const aclDataBuffer* dataBuffer)
 {
     if (dataBuffer == nullptr) {
         return nullptr;
@@ -96,7 +92,7 @@ void *aclGetDataBufferAddrImpl(const aclDataBuffer *dataBuffer)
     return dataBuffer->data;
 }
 
-uint32_t aclGetDataBufferSizeImpl(const aclDataBuffer *dataBuffer)
+uint32_t aclGetDataBufferSizeImpl(const aclDataBuffer* dataBuffer)
 {
     if (dataBuffer == nullptr) {
         return 0U;
@@ -105,7 +101,7 @@ uint32_t aclGetDataBufferSizeImpl(const aclDataBuffer *dataBuffer)
     return static_cast<uint32_t>(dataBuffer->length);
 }
 
-size_t aclGetDataBufferSizeV2Impl(const aclDataBuffer *dataBuffer)
+size_t aclGetDataBufferSizeV2Impl(const aclDataBuffer* dataBuffer)
 {
     if (dataBuffer == nullptr) {
         return 0U;
@@ -113,3 +109,6 @@ size_t aclGetDataBufferSizeV2Impl(const aclDataBuffer *dataBuffer)
 
     return static_cast<size_t>(dataBuffer->length);
 }
+#ifdef __cplusplus
+}
+#endif

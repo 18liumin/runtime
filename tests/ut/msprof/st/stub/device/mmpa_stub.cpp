@@ -15,6 +15,7 @@
 #include "prof_report_api.h"
 #include "tsd/tsd_client.h"
 #include "ascend_hal.h"
+#include "ascend_inpackage_hal.h"
 #include "dsmi_common_interface.h"
 #include "acl/acl_base.h"
 #include "runtime/base.h"
@@ -295,8 +296,14 @@ INT32 mmDup2(INT32 oldFd, INT32 newFd)
     return EN_OK;
 }
 
+INT32 mmCreateProcessStub(const CHAR* fileName, const mmArgvEnv *env, const CHAR* stdoutRedirectFile,
+    mmProcess *id) __attribute__((weak));
+
 INT32 mmCreateProcess(const CHAR* fileName, const mmArgvEnv *env, const CHAR* stdoutRedirectFile, mmProcess *id)
 {
+    if (mmCreateProcessStub != nullptr) {
+        return mmCreateProcessStub(fileName, env, stdoutRedirectFile, id);
+    }
     return EN_OK;
 }
 
@@ -1095,6 +1102,10 @@ extern "C" void ProfImplSetCompactBufPop(const ProfCompactBufPopCallback func);
 extern "C" void ProfImplSetAdditionalBufPop(const ProfAdditionalBufPopCallback func);
 extern "C" void ProfImplIfReportBufEmpty(const ProfReportBufEmptyCallback func);
 extern "C" void ProfImplSetAdditionalBufPush(const ProfAdditionalBufPushCallback func);
+extern "C" void ProfImplSetBatchAddBufPop(const ProfBatchAddBufPopCallback func);
+extern "C" void ProfImplSetBatchAddBufIndexShift(const ProfBatchAddBufIndexShiftCallBack func);
+extern "C" void ProfImplSetVarAddBlockBufBatchPop(const ProfVarAddBlockBufPopCallback func);
+extern "C" void ProfImplSetVarAddBlockBufIndexShift(const ProfVarAddBufIndexShiftCallBack func);
 extern "C" void ProfImplSetMarkEx(const ProfMarkExCallback func);
 extern "C" int32_t ProfImplReportRegTypeInfo(uint16_t level, uint32_t type, const std::string &typeName);
 extern "C" uint64_t ProfImplReportGetHashId(const std::string &info);
@@ -1145,6 +1156,10 @@ const std::map<std::string, void*> g_map = {
     {"ProfImplSetCompactBufPop", (void *)ProfImplSetCompactBufPop},
     {"ProfImplSetAdditionalBufPop", (void *)ProfImplSetAdditionalBufPop},
     {"ProfImplIfReportBufEmpty", (void *)ProfImplIfReportBufEmpty},
+    {"ProfImplSetBatchAddBufPop", (void *)ProfImplSetBatchAddBufPop},
+    {"ProfImplSetBatchAddBufIndexShift", (void *)ProfImplSetBatchAddBufIndexShift},
+    {"ProfImplSetVarAddBlockBufBatchPop", (void *)ProfImplSetVarAddBlockBufBatchPop},
+    {"ProfImplSetVarAddBlockBufIndexShift", (void *)ProfImplSetVarAddBlockBufIndexShift},
     {"ProfImplReportRegTypeInfo", (void *)ProfImplReportRegTypeInfo},
     {"ProfImplReportGetHashId", (void *)ProfImplReportGetHashId},
     {"ProfImplSetAdditionalBufPush", (void *)ProfImplSetAdditionalBufPush},
@@ -1164,6 +1179,32 @@ const std::map<std::string, void*> g_map = {
     {"halGetDeviceInfoByBuff", (void *)halGetDeviceInfoByBuff},
     {"halEschedQueryInfo", (void *)halEschedQueryInfo},
     {"halEschedCreateGrpEx", (void *)halEschedCreateGrpEx},
+    // MsprofDrvApi 通过 dlopen/dlsym 动态加载以下 DVVP 主路径驱动符号，
+    // 由 device_drv_prof_stub.cpp 提供模拟实现，注册到桩表后 dlsym 才能命中。
+    {"drvGetDevNum", (void *)drvGetDevNum},
+    {"drvGetDevIDs", (void *)drvGetDevIDs},
+    {"drvGetPlatformInfo", (void *)drvGetPlatformInfo},
+    {"drvDeviceStatus", (void *)drvDeviceStatus},
+    {"halGetDeviceInfo", (void *)halGetDeviceInfo},
+    {"prof_drv_get_channels", (void *)prof_drv_get_channels},
+    {"prof_drv_start", (void *)prof_drv_start},
+    {"prof_stop", (void *)prof_stop},
+    {"prof_channel_read", (void *)prof_channel_read},
+    {"prof_channel_poll", (void *)prof_channel_poll},
+    {"halProfDataFlush", (void *)halProfDataFlush},
+    {"drvDeviceGetPhyIdByIndex", (void *)drvDeviceGetPhyIdByIndex},
+    {"halEschedSubmitEvent", (void *)halEschedSubmitEvent},
+    {"halProfSampleRegister", (void *)halProfSampleRegister},
+    {"halProfSampleRegisterEx", (void *)halProfSampleRegisterEx},
+    {"halProfQueryAvailBufLen", (void *)halProfQueryAvailBufLen},
+    {"halProfSampleDataReport", (void *)halProfSampleDataReport},
+    // drv event 线程路径的 5 个符号：随修复改为经 MsprofDrvApi dlopen/dlsym 调用，
+    // 需注册到桩表，否则 dlsym 命中不到会降级导致 aicpu 采集路径异常。
+    {"halEschedAttachDevice", (void *)halEschedAttachDevice},
+    {"halEschedDettachDevice", (void *)halEschedDettachDevice},
+    {"halEschedSubscribeEvent", (void *)halEschedSubscribeEvent},
+    {"halQueryDevpid", (void *)halQueryDevpid},
+    {"halEschedWaitEvent", (void *)halEschedWaitEvent},
     {"dsmi_read_fault_event", (void *)dsmiReadFaultEventStub},
     {"rtProfilerTraceEx", (void *)rtProfilerTraceExStub},
     {"MsprofStart", (void *)MsprofStart},
@@ -1203,6 +1244,11 @@ int mmDlclose(void *handle)
     return 0;
 }
 
+extern "C" int dlclose(void *handle) noexcept
+{
+    return mmDlclose(handle);
+}
+
 typedef struct {
     mmEnvId id;
     const CHAR *name;
@@ -1214,6 +1260,7 @@ static mmEnvInfo s_envList[] = {
     {MM_ENV_ASCEND_WORK_PATH, "ASCEND_WORK_PATH"},
     {MM_ENV_ASCEND_HOSTPID, "ASCEND_HOSTPID"},
     {MM_ENV_RANK_ID, "RANK_ID"},
+    {MM_ENV_ASCEND_TOOLKIT_HOME, "ASCEND_TOOLKIT_HOME"},
     {MM_ENV_ASCEND_RT_VISIBLE_DEVICES, "ASCEND_RT_VISIBLE_DEVICES"},
     {MM_ENV_ASCEND_COREDUMP_SIGNAL, "ASCEND_COREDUMP_SIGNAL"},
     {MM_ENV_ASCEND_CACHE_PATH, "ASCEND_CACHE_PATH"},
@@ -1248,20 +1295,82 @@ static mmEnvInfo *GetEnvInfoById(mmEnvId id)
     return nullptr;
 }
 
+static const CHAR *GetEnvNameById(mmEnvId id)
+{
+    switch (id) {
+        case MM_ENV_DUMP_GRAPH_PATH:
+            return "DUMP_GRAPH_PATH";
+        case MM_ENV_ACLNN_CACHE_LIMIT:
+            return "ACLNN_CACHE_LIMIT";
+        case MM_ENV_ASCEND_WORK_PATH:
+            return "ASCEND_WORK_PATH";
+        case MM_ENV_ASCEND_HOSTPID:
+            return "ASCEND_HOSTPID";
+        case MM_ENV_RANK_ID:
+            return "RANK_ID";
+        case MM_ENV_ASCEND_TOOLKIT_HOME:
+            return "ASCEND_TOOLKIT_HOME";
+        case MM_ENV_ASCEND_RT_VISIBLE_DEVICES:
+            return "ASCEND_RT_VISIBLE_DEVICES";
+        case MM_ENV_ASCEND_COREDUMP_SIGNAL:
+            return "ASCEND_COREDUMP_SIGNAL";
+        case MM_ENV_ASCEND_CACHE_PATH:
+            return "ASCEND_CACHE_PATH";
+        case MM_ENV_ASCEND_OPP_PATH:
+            return "ASCEND_OPP_PATH";
+        case MM_ENV_ASCEND_CUSTOM_OPP_PATH:
+            return "ASCEND_CUSTOM_OPP_PATH";
+        case MM_ENV_ASCEND_LOG_DEVICE_FLUSH_TIMEOUT:
+            return "ASCEND_LOG_DEVICE_FLUSH_TIMEOUT";
+        case MM_ENV_ASCEND_LOG_SAVE_MODE:
+            return "ASCEND_LOG_SAVE_MODE";
+        case MM_ENV_ASCEND_SLOG_PRINT_TO_STDOUT:
+            return "ASCEND_SLOG_PRINT_TO_STDOUT";
+        case MM_ENV_ASCEND_GLOBAL_EVENT_ENABLE:
+            return "ASCEND_GLOBAL_EVENT_ENABLE";
+        case MM_ENV_ASCEND_GLOBAL_LOG_LEVEL:
+            return "ASCEND_GLOBAL_LOG_LEVEL";
+        case MM_ENV_ASCEND_MODULE_LOG_LEVEL:
+            return "ASCEND_MODULE_LOG_LEVEL";
+        case MM_ENV_ASCEND_HOST_LOG_FILE_NUM:
+            return "ASCEND_HOST_LOG_FILE_NUM";
+        case MM_ENV_ASCEND_PROCESS_LOG_PATH:
+            return "ASCEND_PROCESS_LOG_PATH";
+        case MM_ENV_ASCEND_LOG_SYNC_SAVE:
+            return "ASCEND_LOG_SYNC_SAVE";
+        case MM_ENV_PROFILER_SAMPLECONFIG:
+            return "PROFILER_SAMPLECONFIG";
+        case MM_ENV_ACP_PIPE_FD:
+            return "ACP_PIPE_FD";
+        case MM_ENV_PROFILING_MODE:
+            return "PROFILING_MODE";
+        case MM_ENV_DYNAMIC_PROFILING_KEY_PID:
+            return "DYNAMIC_PROFILING_KEY_PID";
+        case MM_ENV_HOME:
+            return "HOME";
+        case MM_ENV_AOS_TYPE:
+            return "AOS_TYPE";
+        case MM_ENV_LD_LIBRARY_PATH:
+            return "LD_LIBRARY_PATH";
+        default:
+            return nullptr;
+    }
+}
+
 CHAR *mmSysGetEnv(mmEnvId id)
 {
-    mmEnvInfo *envInfo = GetEnvInfoById(id);
-    if (envInfo != nullptr) {
-        return getenv(envInfo->name);
+    const CHAR *envName = GetEnvNameById(id);
+    if (envName != nullptr) {
+        return getenv(envName);
     }
     return nullptr;
 }
 
 INT32 mmSysSetEnv(mmEnvId id, const CHAR *value, INT32 overwrite)
 {
-    mmEnvInfo *envInfo = GetEnvInfoById(id);
-    if (envInfo == nullptr) {
+    const CHAR *envName = GetEnvNameById(id);
+    if (envName == nullptr) {
         return EN_INVALID_PARAM;
     }
-    return setenv(envInfo->name, value, overwrite);
+    return setenv(envName, value, overwrite);
 }

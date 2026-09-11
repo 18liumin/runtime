@@ -1,0 +1,1137 @@
+# 13. 异常处理
+
+本章节描述 CANN Runtime 的异常处理接口，包括错误信息获取、异常回调注册、内存 UCE 修复及任务中止。
+
+- [`const char *aclGetRecentErrMsg()`](#aclGetRecentErrMsg)：获取并清空与本接口在同一个进程或线程中的其它acl接口调用失败时的错误描述信息。
+- [`aclError aclrtSetExceptionInfoCallback(aclrtExceptionInfoCallback callback)`](#aclrtSetExceptionInfoCallback_deprecated)：设置进程级异常回调函数。若多次设置异常回调函数，以最后一次设置为准。（废弃接口，请使用[`aclrtExceptionInfoCallbackRegister`](#aclrtExceptionInfoCallbackRegister)接口或者[`aclrtExceptionInfoCallbackUnregister`](#aclrtExceptionInfoCallbackUnregister)接口）
+- [`aclError aclrtExceptionInfoCallbackRegister(aclrtExceptionInfoCallback callback)`](#aclrtExceptionInfoCallbackRegister)：注册进程级异常回调函数，支持注册多个不同的回调函数。
+- [`aclError aclrtExceptionInfoCallbackUnregister(aclrtExceptionInfoCallback callback)`](#aclrtExceptionInfoCallbackUnregister)：注销通过aclrtExceptionInfoCallbackRegister接口注册的进程级异常回调函数。
+- [`uint32_t aclrtGetTaskIdFromExceptionInfo(const aclrtExceptionInfo *info)`](#aclrtGetTaskIdFromExceptionInfo)：获取异常信息中的任务ID。
+- [`uint32_t aclrtGetStreamIdFromExceptionInfo(const aclrtExceptionInfo *info)`](#aclrtGetStreamIdFromExceptionInfo)：获取异常信息中的Stream ID。
+- [`uint32_t aclrtGetThreadIdFromExceptionInfo(const aclrtExceptionInfo *info)`](#aclrtGetThreadIdFromExceptionInfo)：获取异常信息中的线程ID。
+- [`uint32_t aclrtGetDeviceIdFromExceptionInfo(const aclrtExceptionInfo *info)`](#aclrtGetDeviceIdFromExceptionInfo)：获取异常信息中的Device ID。
+- [`uint32_t aclrtGetErrorCodeFromExceptionInfo(const aclrtExceptionInfo *info)`](#aclrtGetErrorCodeFromExceptionInfo)：获取异常信息中的错误码。
+- [`aclError aclrtPeekAtLastError(aclrtLastErrLevel level)`](#aclrtPeekAtLastError)：获取当前线程的Runtime（运行时管理模块）错误码，仅获取但不清空错误码。
+- [`aclError aclrtGetLastError(aclrtLastErrLevel level)`](#aclrtGetLastError)：获取当前线程的Runtime（运行时管理模块）错误码，获取后清空当前线程的错误码，这时在线程中无新增错误码之前，调用本接口获取到的是ACL\_SUCCESS。
+- [`aclError aclrtGetMemUceInfo(int32_t deviceId, aclrtMemUceInfo *memUceInfoArray, size_t arraySize, size_t *retSize)`](#aclrtGetMemUceInfo)：获取内存UCE（uncorrectable error，指系统硬件不能直接处理恢复内存错误）的错误虚拟地址。
+- [`aclError aclrtMemUceRepair(int32_t deviceId, aclrtMemUceInfo *memUceInfoArray, size_t arraySize)`](#aclrtMemUceRepair)：修复内存UCE的错误虚拟地址。
+- [`aclError aclrtDeviceTaskAbort(int32_t deviceId, uint32_t timeout)`](#aclrtDeviceTaskAbort)：停止指定Device上的正在执行的任务，同时丢弃指定Device上已下发的任务。
+- [`aclError aclrtGetErrorVerbose(int32_t deviceId, aclrtErrorInfo *errorInfo);`](#aclrtGetErrorVerbose)：用于在发生设备故障后获取详细错误信息。此接口必须在获取故障事件之后，提交任务中止之前调用。
+- [`aclError aclrtRepairError(int32_t deviceId, const aclrtErrorInfo *errorInfo)`](#aclrtRepairError)：基于[aclrtGetErrorVerbose](#aclrtGetErrorVerbose)接口获取的详细信息进行故障恢复，此接口应该在提交任务中止之后调用。
+- [`aclError aclrtSetDeviceTaskAbortCallback(const char *regName, aclrtDeviceTaskAbortCallback callback, void *args)`](#aclrtSetDeviceTaskAbortCallback)：调用本接口注册回调函数，用于在调用[aclrtDeviceTaskAbort](#aclrtDeviceTaskAbort)接口前后触发该回调函数。
+
+<a id="aclGetRecentErrMsg"></a>
+
+## aclGetRecentErrMsg
+
+```c
+const char *aclGetRecentErrMsg()
+```
+
+### 产品支持情况
+
+<!-- npu="950" id113 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id113 -->
+<!-- npu="A3" id114 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id114 -->
+<!-- npu="910b" id115 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id115 -->
+<!-- npu="310b" id116 -->
+- Atlas 200I/500 A2 推理产品：支持
+<!-- end id116 -->
+<!-- npu="310p" id117 -->
+- Atlas 推理系列产品：支持
+<!-- end id117 -->
+<!-- npu="910" id118 -->
+- Atlas 训练系列产品：支持
+<!-- end id118 -->
+<!-- npu="IPV350" id119 -->
+- IPV350：不支持
+<!-- end id119 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id1 -->
+
+### 功能说明
+
+获取并清空与本接口在同一个进程或线程中的其它acl接口调用失败时的错误描述信息。
+
+获取进程级别、还是线程级别的错误描述信息由[aclInit](02_initialization_and_deinitialization.md#aclInit)接口中的err\_msg\_mode配置控制，默认线程级别。
+
+建议在每次调用acl接口失败时都调用aclGetRecentErrMsg接口，以便获取调用acl接口异常时的错误描述信息，用于定位问题，否则可能导致错误信息堆积、丢失。同一个进程或线程中多次调用aclGetRecentErrMsg接口后，只有最后一次调用aclGetRecentErrMsg接口返回的错误描述字符串的指针有效，之前aclGetRecentErrMsg接口返回的错误描述字符串指针不能使用，否则可能导致内存非法访问。
+
+### 参数说明
+
+无
+
+### 返回值说明
+
+返回错误描述字符串的指针。如果通过本接口获取到多条错误描述信息，最上面的错误描述信息为最新的。
+
+获取错误描述信息失败时，返回nullptr。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtSetExceptionInfoCallback_deprecated"></a>
+
+## aclrtSetExceptionInfoCallback (废弃)
+
+```c
+aclError aclrtSetExceptionInfoCallback(aclrtExceptionInfoCallback callback)
+```
+
+**须知：此接口已废弃，请使用[`aclrtExceptionInfoCallbackRegister`](#aclrtExceptionInfoCallbackRegister)接口或者[`aclrtExceptionInfoCallbackUnregister`](#aclrtExceptionInfoCallbackUnregister)接口。**
+
+### 产品支持情况
+
+<!-- npu="950" id1877 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id1877 -->
+<!-- npu="A3" id1878 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id1878 -->
+<!-- npu="910b" id1879 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id1879 -->
+<!-- npu="310b" id1880 -->
+- Atlas 200I/500 A2 推理产品：支持
+<!-- end id1880 -->
+<!-- npu="310p" id1881 -->
+- Atlas 推理系列产品：支持
+<!-- end id1881 -->
+<!-- npu="910" id1882 -->
+- Atlas 训练系列产品：支持
+<!-- end id1882 -->
+<!-- npu="IPV350" id1883 -->
+- IPV350：不支持
+<!-- end id1883 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id2 -->
+
+### 功能说明
+
+设置进程级异常回调函数。如果想清空回调函数，可调用本接口，将入参设置为空指针。
+若多次调用本接口设置异常回调函数，以最后一次设置为准。不影响通过[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口注册的异常回调函数。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| callback | 输入 | 指定要注册的回调函数。<br>回调函数的函数原型为：<br>typedef void (*aclrtExceptionInfoCallback)(aclrtExceptionInfo*exceptionInfo); |
+
+### 返回值说明
+
+返回0表示成功，返回其他值表示失败，请参见[aclError](25-01_aclError.md#aclError)。
+
+### 约束说明
+
+- 回调函数涉及共享资源（例如锁），因此在使用回调函数需慎重，在回调函数内调用资源申请&释放、Stream同步、Device同步、任务下发、任务终止等接口，可能会导致错误或死锁。
+- 您需要在执行异步任务之前，设置异常回调函数，当Device上的任务执行异常时，系统会向用户设置的异常回调函数中传入一个包含任务ID、Stream ID、线程ID、Device ID以及错误码的aclrtExceptionInfo结构体指针，并执行回调函数，用户可以再分别调用[aclrtGetTaskIdFromExceptionInfo](#aclrtGetTaskIdFromExceptionInfo)、[aclrtGetStreamIdFromExceptionInfo](#aclrtGetStreamIdFromExceptionInfo)、[aclrtGetThreadIdFromExceptionInfo](#aclrtGetThreadIdFromExceptionInfo)、[aclrtGetDeviceIdFromExceptionInfo](#aclrtGetDeviceIdFromExceptionInfo)、[aclrtGetErrorCodeFromExceptionInfo](#aclrtGetErrorCodeFromExceptionInfo)接口获取产生异常的任务ID、Stream ID、线程ID、Device ID以及错误码，便于定位问题。
+
+    **使用场景举例**：例如，在调用aclopExecuteV2接口前，调用aclrtSetExceptionInfoCallback接口设置异常回调函数，当算子在Device执行异常时，系统会向用户设置的异常回调函数中传入一个包含任务ID、Stream ID、线程ID、Device ID以及错误码的aclrtExceptionInfo结构体指针，并执行回调函数。
+- `exceptionInfo`由Runtime管理，仅在本次回调执行期间有效。回调函数不得保存、释放或修改该指针及其内容。
+
+### 接口调用流程
+
+**使用场景举例**：执行整网模型推理时（**不支持动态Shape场景**），如果产生AI Core报错，可以按照本章的内容获取报错算子的描述信息，再做进一步错误排查。
+
+**推荐的接口调用顺序如下：**
+
+1. 定义并实现异常回调函数fn\(aclrtExceptionInfoCallback类型\)。
+
+    实现回调函数的关键逻辑如下：
+
+    1. 在异常回调函数fn内调用aclrtGetDeviceIdFromExceptionInfo、aclrtGetStreamIdFromExceptionInfo、aclrtGetTaskIdFromExceptionInfo接口分别获取Device ID、Stream ID、Task ID。
+    2. 在异常回调函数fn内调用aclmdlCreateAndGetOpDesc接口获取算子的描述信息。
+    3. 在异常回调函数fn内调用aclGetTensorDescByIndex接口获取指定算子输入/输出的tensor描述。
+    4. 在异常回调函数fn内调用如下接口获取tensor描述中的数据，进行进一步分析。
+
+        例如，调用aclGetTensorDescAddress接口获取tensor数据的内存地址（用户可从该内存地址中获取tensor数据）、调用aclGetTensorDescType接口获取tensor描述中的数据类型、调用aclGetTensorDescFormat接口获取tensor描述中的Format、调用aclGetTensorDescNumDims接口获取tensor描述中的Shape维度个数、调用aclGetTensorDescDimV2接口获取Shape中指定维度的大小。
+
+2. 调用aclrtSetExceptionInfoCallback接口设置异常回调函数。
+3. 执行模型推理。
+
+    如果存在AI Core报错，则触发回调函数fn，获取算子的信息，进行进一步分析。
+
+### 示例代码
+
+以下是AI Core异常信息获取功能的关键步骤代码示例，不能直接拷贝编译运行，仅供参考。调用接口后，需增加异常处理的分支，并记录报错日志、提示日志，此处不一一列举。
+
+```cpp
+......
+
+// 1.模型加载，加载成功后，返回标识模型的modelId
+
+// 2.创建aclmdlDataset类型的数据，用于描述模型的输入数据input、输出数据output
+
+// 3.实现异常回调函数
+void callback(aclrtExceptionInfo *exceptionInfo)
+{
+    deviceId = aclrtGetDeviceIdFromExceptionInfo(exceptionInfo);
+    streamId = aclrtGetStreamIdFromExceptionInfo(exceptionInfo);
+    taskId = aclrtGetTaskIdFromExceptionInfo(exceptionInfo);
+    
+    char opName[256];
+    aclTensorDesc *inputDesc = nullptr;
+    aclTensorDesc *outputDesc = nullptr;
+    size_t inputCnt = 0;
+    size_t outputCnt = 0; 
+    // 用户可以将获取的算子信息写入到文件，或者另起线程，当发生异常回调时触发线程处理函数，在线程处理函数中将算子信息在屏幕上显示 
+    aclmdlCreateAndGetOpDesc(deviceId, streamId, taskId, opName, 256,  &inputDesc, &inputCnt, &outputDesc, &outputCnt);
+    // 可以调用tensor的相关接口，获取算子的相关信息，用户可以根据自己需要调用
+    for (size_t i = 0; i < inputCnt; ++i) {
+        const aclTensorDesc *desc = aclGetTensorDescByIndex(inputDesc, i);
+        aclGetTensorDescAddress(desc);
+        aclGetTensorDescFormat(desc);
+    }
+    for (size_t i = 0; i < outputCnt; ++i) {
+        const aclTensorDesc *desc = aclGetTensorDescByIndex(outputDesc, i);
+        aclGetTensorDescAddress(desc);
+        aclGetTensorDescFormat(desc);
+    }
+    aclDestroyTensorDesc(inputDesc);
+    aclDestroyTensorDesc(outputDesc);
+}
+
+// 4.设置异常回调
+aclrtSetExceptionInfoCallback(callback);
+
+// 5.执行模型
+aclmdlExecute(modelId, input, output);
+
+// 6.处理模型推理结果
+......
+
+// 7.释放描述模型输入/输出信息、内存等资源，卸载模型
+......
+```
+
+<br>
+<br>
+<br>
+
+<a id="aclrtExceptionInfoCallbackRegister"></a>
+
+## aclrtExceptionInfoCallbackRegister
+
+```c
+aclError aclrtExceptionInfoCallbackRegister(aclrtExceptionInfoCallback callback)
+```
+
+### 产品支持情况
+
+<!-- npu="950" id36 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id36 -->
+<!-- npu="A3" id37 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id37 -->
+<!-- npu="910b" id38 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id38 -->
+<!-- npu="310b" id39 -->
+- Atlas 200I/500 A2 推理产品：支持
+<!-- end id39 -->
+<!-- npu="310p" id40 -->
+- Atlas 推理系列产品：支持
+<!-- end id40 -->
+<!-- npu="910" id41 -->
+- Atlas 训练系列产品：支持
+<!-- end id41 -->
+<!-- npu="IPV350" id42 -->
+- IPV350：不支持
+<!-- end id42 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id16 -->
+
+### 功能说明
+
+注册进程级异常回调函数。通过本接口可以注册多个函数指针值不同的异常回调函数。callback参数中的函数指针不同，则表示异常回调函数不同。重复调用本接口注册同一个回调函数时返回成功，但Runtime只会保留最后一次注册信息。
+
+通过本接口注册的异常回调函数可与通过[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口设置的回调函数共存。当Device任务执行异常并进入Runtime异常通知流程时，系统会将异常信息通知给通过本接口或[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口注册的异常回调函数。
+
+同一个回调函数既通过[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口设置，又通过本接口注册时，Runtime会将其保存为两个相互独立的注册项。回调函数在本次通知中会被调用两次，两次调用的先后顺序不做保证。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| callback | 输入 | 指定要注册的回调函数，不能为NULL。<br>回调函数的函数原型为：<br>typedef void (*aclrtExceptionInfoCallback)(aclrtExceptionInfo *exceptionInfo); |
+
+### 返回值说明
+
+返回0表示成功，返回其他值表示失败，请参见[aclError](25-01_aclError.md#aclError)。入参为NULL时，返回参数错误。
+
+### 约束说明
+
+- 回调函数涉及共享资源（例如锁），因此在使用回调函数需慎重，在回调函数内调用资源申请&释放、Stream同步、Device同步、任务下发、任务终止等接口，可能会导致错误或死锁。
+- 为确保收到任务的异常通知，您需要在执行异步任务之前，完成异常回调函数的注册。当Device上的任务执行异常时，系统会向用户注册的异常回调函数中传入一个包含任务ID、Stream ID、线程ID、Device ID以及错误码的aclrtExceptionInfo结构体指针，并执行回调函数，用户可以再分别调用[aclrtGetTaskIdFromExceptionInfo](#aclrtGetTaskIdFromExceptionInfo)、[aclrtGetStreamIdFromExceptionInfo](#aclrtGetStreamIdFromExceptionInfo)、[aclrtGetThreadIdFromExceptionInfo](#aclrtGetThreadIdFromExceptionInfo)、[aclrtGetDeviceIdFromExceptionInfo](#aclrtGetDeviceIdFromExceptionInfo)、[aclrtGetErrorCodeFromExceptionInfo](#aclrtGetErrorCodeFromExceptionInfo)接口获取产生异常的任务ID、Stream ID、线程ID、Device ID以及错误码，便于定位问题。
+
+    **使用场景举例**：例如，在调用aclopExecuteV2接口前，调用aclrtExceptionInfoCallbackRegister接口注册异常回调函数，当算子在Device执行异常时，系统会向用户设置的异常回调函数中传入一个包含任务ID、Stream ID、线程ID、Device ID以及错误码的aclrtExceptionInfo结构体指针，并执行回调函数。
+
+- `exceptionInfo`由Runtime管理，仅在本次回调执行期间有效。回调函数不得保存、释放或修改该指针及其内容。
+- Runtime不保证同一个回调函数只在一个线程中执行。不同异常通知可能在不同线程中并发调用同一个回调函数，回调函数需自行保证其访问的数据线程安全。
+- Runtime不对各回调函数进行异常隔离。任一回调函数抛出异常可能中断本次通知，使尚未执行的其他回调函数不再被调用，并可能中断Runtime后续异常处理。
+
+### 接口调用流程
+
+**使用场景举例**：执行整网模型推理时（**不支持动态Shape场景**），如果产生AI Core报错，可以按照本章的内容获取报错算子的描述信息，再做进一步错误排查。
+
+**推荐的接口调用顺序如下：**
+
+1. 定义并实现异常回调函数fn\(aclrtExceptionInfoCallback类型\)。
+
+    实现回调函数的关键逻辑如下：
+
+    1. 在异常回调函数fn内调用aclrtGetDeviceIdFromExceptionInfo、aclrtGetStreamIdFromExceptionInfo、aclrtGetTaskIdFromExceptionInfo接口分别获取Device ID、Stream ID、Task ID。
+    2. 在异常回调函数fn内调用aclmdlCreateAndGetOpDesc接口获取算子的描述信息。
+    3. 在异常回调函数fn内调用aclGetTensorDescByIndex接口获取指定算子输入/输出的tensor描述。
+    4. 在异常回调函数fn内调用如下接口获取tensor描述中的数据，进行进一步分析。
+
+        例如，调用aclGetTensorDescAddress接口获取tensor数据的内存地址（用户可从该内存地址中获取tensor数据）、调用aclGetTensorDescType接口获取tensor描述中的数据类型、调用aclGetTensorDescFormat接口获取tensor描述中的Format、调用aclGetTensorDescNumDims接口获取tensor描述中的Shape维度个数、调用aclGetTensorDescDimV2接口获取Shape中指定维度的大小。
+
+2. 调用aclrtExceptionInfoCallbackRegister接口设置异常回调函数。
+3. 执行模型推理。
+
+    如果存在AI Core报错，则触发回调函数fn，获取算子的信息，进行进一步分析。
+
+### 示例代码
+
+以下是AI Core异常信息获取功能的关键步骤代码示例，不能直接拷贝编译运行，仅供参考。调用接口后，需增加异常处理的分支，并记录报错日志、提示日志，此处不一一列举。
+
+```cpp
+......
+
+// 1.模型加载，加载成功后，返回标识模型的modelId
+
+// 2.创建aclmdlDataset类型的数据，用于描述模型的输入数据input、输出数据output
+
+// 3.实现异常回调函数
+void callback(aclrtExceptionInfo *exceptionInfo)
+{
+    deviceId = aclrtGetDeviceIdFromExceptionInfo(exceptionInfo);
+    streamId = aclrtGetStreamIdFromExceptionInfo(exceptionInfo);
+    taskId = aclrtGetTaskIdFromExceptionInfo(exceptionInfo);
+    
+    char opName[256];
+    aclTensorDesc *inputDesc = nullptr;
+    aclTensorDesc *outputDesc = nullptr;
+    size_t inputCnt = 0;
+    size_t outputCnt = 0; 
+    // 用户可以将获取的算子信息写入到文件，或者另起线程，当发生异常回调时触发线程处理函数，在线程处理函数中将算子信息在屏幕上显示 
+    aclmdlCreateAndGetOpDesc(deviceId, streamId, taskId, opName, 256,  &inputDesc, &inputCnt, &outputDesc, &outputCnt);
+    // 可以调用tensor的相关接口，获取算子的相关信息，用户可以根据自己需要调用
+    for (size_t i = 0; i < inputCnt; ++i) {
+        const aclTensorDesc *desc = aclGetTensorDescByIndex(inputDesc, i);
+        aclGetTensorDescAddress(desc);
+        aclGetTensorDescFormat(desc);
+    }
+    for (size_t i = 0; i < outputCnt; ++i) {
+        const aclTensorDesc *desc = aclGetTensorDescByIndex(outputDesc, i);
+        aclGetTensorDescAddress(desc);
+        aclGetTensorDescFormat(desc);
+    }
+    aclDestroyTensorDesc(inputDesc);
+    aclDestroyTensorDesc(outputDesc);
+}
+
+// 4.设置异常回调
+aclrtExceptionInfoCallbackRegister(callback);
+
+// 5.执行模型
+aclmdlExecute(modelId, input, output);
+
+// 6.处理模型推理结果
+......
+
+// 7.释放描述模型输入/输出信息、内存等资源，卸载模型
+......
+```
+
+<br>
+<br>
+<br>
+
+<a id="aclrtExceptionInfoCallbackUnregister"></a>
+
+## aclrtExceptionInfoCallbackUnregister
+
+```c
+aclError aclrtExceptionInfoCallbackUnregister(aclrtExceptionInfoCallback callback)
+```
+
+### 产品支持情况
+
+<!-- npu="950" id43 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id43 -->
+<!-- npu="A3" id44 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id44 -->
+<!-- npu="910b" id45 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id45 -->
+<!-- npu="310b" id46 -->
+- Atlas 200I/500 A2 推理产品：支持
+<!-- end id46 -->
+<!-- npu="310p" id47 -->
+- Atlas 推理系列产品：支持
+<!-- end id47 -->
+<!-- npu="910" id48 -->
+- Atlas 训练系列产品：支持
+<!-- end id48 -->
+<!-- npu="IPV350" id49 -->
+- IPV350：不支持
+<!-- end id49 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id17 -->
+
+### 功能说明
+
+注销通过[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口注册的进程级异常回调函数。不支持注销通过[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口设置的回调函数。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| callback | 输入 | 待注销的回调函数，不能为NULL。<br> callback为NULL时，返回参数错误。注销未注册的callback时，不执行操作并返回成功。|
+
+### 返回值说明
+
+返回0表示成功，返回其他值表示失败，请参见[aclError](25-01_aclError.md#aclError)。
+
+### 约束说明
+
+- Runtime不记录调用本接口的调用方身份。进程内任意调用方只要持有已注册的相同函数指针，均可注销该注册项。
+- 本接口不会等待已经进入异常通知流程或正在执行的回调函数结束。接口返回成功后，后续开始分发的异常通知不再包含该注册项，但已经进入通知流程的回调仍可能执行。
+
+### 示例代码
+
+以下示例仅展示多个回调函数的注册和注销顺序，省略初始化、任务下发及异常处理逻辑。
+
+```cpp
+void callbackA(aclrtExceptionInfo *exceptionInfo)
+{
+    // 读取并处理callbackA关注的异常信息
+    deviceId = aclrtGetDeviceIdFromExceptionInfo(exceptionInfo);
+    streamId = aclrtGetStreamIdFromExceptionInfo(exceptionInfo);
+    taskId = aclrtGetTaskIdFromExceptionInfo(exceptionInfo);
+    ......
+}
+
+void callbackB(aclrtExceptionInfo *exceptionInfo)
+{
+    // 读取并处理callbackB关注的异常信息
+    deviceId = aclrtGetDeviceIdFromExceptionInfo(exceptionInfo);
+    streamId = aclrtGetStreamIdFromExceptionInfo(exceptionInfo);
+    taskId = aclrtGetTaskIdFromExceptionInfo(exceptionInfo);
+    ......
+}
+
+aclrtExceptionInfoCallbackRegister(callbackA);
+aclrtExceptionInfoCallbackRegister(callbackB);
+
+// 下发异步任务并处理任务执行结果
+
+aclrtExceptionInfoCallbackUnregister(callbackA);
+aclrtExceptionInfoCallbackUnregister(callbackB);
+
+// 注销接口不等待在途回调结束
+// 释放回调函数访问的资源前，需通过业务同步确认所有在途回调均已结束
+```
+
+<br>
+<br>
+<br>
+
+<a id="aclrtGetTaskIdFromExceptionInfo"></a>
+
+## aclrtGetTaskIdFromExceptionInfo
+
+```c
+uint32_t aclrtGetTaskIdFromExceptionInfo(const aclrtExceptionInfo *info)
+```
+
+### 产品支持情况
+
+<!-- npu="950" id2528 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id2528 -->
+<!-- npu="A3" id2529 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id2529 -->
+<!-- npu="910b" id2530 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id2530 -->
+<!-- npu="310b" id2531 -->
+- Atlas 200I/500 A2 推理产品：支持
+<!-- end id2531 -->
+<!-- npu="310p" id2532 -->
+- Atlas 推理系列产品：支持
+<!-- end id2532 -->
+<!-- npu="910" id2533 -->
+- Atlas 训练系列产品：支持
+<!-- end id2533 -->
+<!-- npu="IPV350" id2534 -->
+- IPV350：不支持
+<!-- end id2534 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id3 -->
+
+### 功能说明
+
+获取异常信息中的任务ID。Runtime向异常回调函数传入aclrtExceptionInfo指针；本章中通过[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口设置或通过[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口注册的进程级异常回调函数均可调用本接口读取该字段。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| info | 输入 | 异常信息的指针。<br>在执行任务之前调用[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口或者[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口，系统会将产生异常的任务ID、Stream ID、线程ID、Device ID存放在aclrtExceptionInfo结构体中。 |
+
+### 返回值说明
+
+返回异常信息中的任务ID，返回值为0xFFFFFFFF（以十六进制为例）时表示Device异常。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtGetStreamIdFromExceptionInfo"></a>
+
+## aclrtGetStreamIdFromExceptionInfo
+
+```c
+uint32_t aclrtGetStreamIdFromExceptionInfo(const aclrtExceptionInfo *info)
+```
+
+### 产品支持情况
+
+<!-- npu="950" id3116 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id3116 -->
+<!-- npu="A3" id3117 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id3117 -->
+<!-- npu="910b" id3118 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id3118 -->
+<!-- npu="310b" id3119 -->
+- Atlas 200I/500 A2 推理产品：支持
+<!-- end id3119 -->
+<!-- npu="310p" id3120 -->
+- Atlas 推理系列产品：支持
+<!-- end id3120 -->
+<!-- npu="910" id3121 -->
+- Atlas 训练系列产品：支持
+<!-- end id3121 -->
+<!-- npu="IPV350" id3122 -->
+- IPV350：不支持
+<!-- end id3122 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id4 -->
+
+### 功能说明
+
+获取异常信息中的Stream ID。Runtime向异常回调函数传入aclrtExceptionInfo指针；本章中通过[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口设置或通过[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口注册的进程级异常回调函数均可调用本接口读取该字段。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| info | 输入 | 异常信息的指针。<br>在执行任务之前调用[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口或者[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口，系统会将产生异常的任务ID、Stream ID、线程ID、Device ID存放在aclrtExceptionInfo结构体中。该指针由Runtime管理，仅在本次回调执行期间有效。 |
+
+### 返回值说明
+
+返回异常信息中的Stream ID，返回值为0xFFFFFFFF（以十六进制为例）时表示Device异常。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtGetThreadIdFromExceptionInfo"></a>
+
+## aclrtGetThreadIdFromExceptionInfo
+
+```c
+uint32_t aclrtGetThreadIdFromExceptionInfo(const aclrtExceptionInfo *info)
+```
+
+### 产品支持情况
+
+<!-- npu="950" id2017 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id2017 -->
+<!-- npu="A3" id2018 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id2018 -->
+<!-- npu="910b" id2019 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id2019 -->
+<!-- npu="310b" id2020 -->
+- Atlas 200I/500 A2 推理产品：支持
+<!-- end id2020 -->
+<!-- npu="310p" id2021 -->
+- Atlas 推理系列产品：支持
+<!-- end id2021 -->
+<!-- npu="910" id2022 -->
+- Atlas 训练系列产品：支持
+<!-- end id2022 -->
+<!-- npu="IPV350" id2023 -->
+- IPV350：不支持
+<!-- end id2023 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id5 -->
+
+### 功能说明
+
+获取异常信息中的线程ID。Runtime向异常回调函数传入aclrtExceptionInfo指针；本章中通过[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口设置或通过[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口注册的进程级异常回调函数均可调用本接口读取该字段。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| info | 输入 | 异常信息的指针。<br>在执行任务之前调用[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口或者[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口，系统会将产生异常的任务ID、Stream ID、线程ID、Device ID存放在aclrtExceptionInfo结构体中。 |
+
+### 返回值说明
+
+返回异常信息中的线程ID，返回值为0xFFFFFFFF（以十六进制为例）时表示Device异常。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtGetDeviceIdFromExceptionInfo"></a>
+
+## aclrtGetDeviceIdFromExceptionInfo
+
+```c
+uint32_t aclrtGetDeviceIdFromExceptionInfo(const aclrtExceptionInfo *info)
+```
+
+### 产品支持情况
+
+<!-- npu="950" id757 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id757 -->
+<!-- npu="A3" id758 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id758 -->
+<!-- npu="910b" id759 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id759 -->
+<!-- npu="310b" id760 -->
+- Atlas 200I/500 A2 推理产品：支持
+<!-- end id760 -->
+<!-- npu="310p" id761 -->
+- Atlas 推理系列产品：支持
+<!-- end id761 -->
+<!-- npu="910" id762 -->
+- Atlas 训练系列产品：支持
+<!-- end id762 -->
+<!-- npu="IPV350" id763 -->
+- IPV350：不支持
+<!-- end id763 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id6 -->
+
+### 功能说明
+
+获取异常信息中的Device ID。Runtime向异常回调函数传入aclrtExceptionInfo指针；本章中通过[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口设置或通过[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口注册的进程级异常回调函数均可调用本接口读取该字段。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| info | 输入 | 异常信息的指针。<br>在执行任务之前调用[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口或者[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口，系统会将产生异常的任务ID、Stream ID、线程ID、Device ID存放在aclrtExceptionInfo结构体中。该指针由Runtime管理，仅在本次回调执行期间有效。 |
+
+### 返回值说明
+
+返回异常信息中的Device ID，返回值为0xFFFFFFFF（以十六进制为例）时表示Device异常。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtGetErrorCodeFromExceptionInfo"></a>
+
+## aclrtGetErrorCodeFromExceptionInfo
+
+```c
+uint32_t aclrtGetErrorCodeFromExceptionInfo(const aclrtExceptionInfo *info)
+```
+
+### 产品支持情况
+
+<!-- npu="950" id1044 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id1044 -->
+<!-- npu="A3" id1045 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id1045 -->
+<!-- npu="910b" id1046 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id1046 -->
+<!-- npu="310b" id1047 -->
+- Atlas 200I/500 A2 推理产品：支持
+<!-- end id1047 -->
+<!-- npu="310p" id1048 -->
+- Atlas 推理系列产品：支持
+<!-- end id1048 -->
+<!-- npu="910" id1049 -->
+- Atlas 训练系列产品：支持
+<!-- end id1049 -->
+<!-- npu="IPV350" id1050 -->
+- IPV350：不支持
+<!-- end id1050 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id7 -->
+
+### 功能说明
+
+获取异常信息中的错误码。Runtime向异常回调函数传入aclrtExceptionInfo指针；本章中通过[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口设置或通过[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口注册的进程级异常回调函数均可调用本接口读取该字段。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| info | 输入 | 异常信息的指针。<br>在执行任务之前调用[aclrtSetExceptionInfoCallback (废弃)](#aclrtSetExceptionInfoCallback_deprecated)接口或者[aclrtExceptionInfoCallbackRegister](#aclrtExceptionInfoCallbackRegister)接口，系统会将产生异常的任务ID、Stream ID、线程ID、Device ID、错误码存放在aclrtExceptionInfo结构体中。 |
+
+### 返回值说明
+
+返回异常信息中的错误码，返回值为0xFFFFFFFF（以十六进制为例）时表示Device异常。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtPeekAtLastError"></a>
+
+## aclrtPeekAtLastError
+
+```c
+aclError aclrtPeekAtLastError(aclrtLastErrLevel level)
+```
+
+### 产品支持情况
+
+<!-- npu="950" id1835 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id1835 -->
+<!-- npu="A3" id1836 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id1836 -->
+<!-- npu="910b" id1837 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id1837 -->
+<!-- npu="310b" id1838 -->
+- Atlas 200I/500 A2 推理产品：支持
+<!-- end id1838 -->
+<!-- npu="310p" id1839 -->
+- Atlas 推理系列产品：支持
+<!-- end id1839 -->
+<!-- npu="910" id1840 -->
+- Atlas 训练系列产品：支持
+<!-- end id1840 -->
+<!-- npu="IPV350" id1841 -->
+- IPV350：支持
+<!-- end id1841 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id8 -->
+
+### 功能说明
+
+获取当前线程的Runtime（运行时管理模块）错误码，仅获取但不清空错误码。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| level | 输入 | 指定获取错误码的级别，当前仅支持线程级别。类型定义请参见[aclrtLastErrLevel](25-02_Enumerations.md#aclrtLastErrLevel)。 |
+
+### 返回值说明
+
+返回0表示成功，返回其他值表示失败，请参见[aclError](25-01_aclError.md#aclError)。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtGetLastError"></a>
+
+## aclrtGetLastError
+
+```c
+aclError aclrtGetLastError(aclrtLastErrLevel level)
+```
+
+### 产品支持情况
+
+<!-- npu="950" id904 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id904 -->
+<!-- npu="A3" id905 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id905 -->
+<!-- npu="910b" id906 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id906 -->
+<!-- npu="310b" id907 -->
+- Atlas 200I/500 A2 推理产品：支持
+<!-- end id907 -->
+<!-- npu="310p" id908 -->
+- Atlas 推理系列产品：支持
+<!-- end id908 -->
+<!-- npu="910" id909 -->
+- Atlas 训练系列产品：支持
+<!-- end id909 -->
+<!-- npu="IPV350" id910 -->
+- IPV350：支持
+<!-- end id910 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id9 -->
+
+### 功能说明
+
+获取当前线程的Runtime（运行时管理模块）错误码，获取后清空当前线程的错误码，这时在线程中无新增错误码之前，调用本接口获取到的是ACL\_SUCCESS。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| level | 输入 | 指定获取错误码的级别，当前仅支持线程级别。类型定义请参见[aclrtLastErrLevel](25-02_Enumerations.md#aclrtLastErrLevel)。 |
+
+### 返回值说明
+
+返回0表示成功，返回其他值表示失败，请参见[aclError](25-01_aclError.md#aclError)。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtGetMemUceInfo"></a>
+
+## aclrtGetMemUceInfo
+
+```c
+aclError aclrtGetMemUceInfo(int32_t deviceId, aclrtMemUceInfo *memUceInfoArray, size_t arraySize, size_t *retSize)
+```
+
+**须知：本接口为试验特性，后续版本可能会存在变更，不支持应用于生产环境中。**
+
+### 产品支持情况
+
+<!-- npu="950" id1 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id1 -->
+<!-- npu="A3" id2 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id2 -->
+<!-- npu="910b" id3 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id3 -->
+<!-- npu="310b" id4 -->
+- Atlas 200I/500 A2 推理产品：不支持
+<!-- end id4 -->
+<!-- npu="310p" id5 -->
+- Atlas 推理系列产品：不支持
+<!-- end id5 -->
+<!-- npu="910" id6 -->
+- Atlas 训练系列产品：不支持
+<!-- end id6 -->
+<!-- npu="IPV350" id7 -->
+- IPV350：不支持
+<!-- end id7 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id11 -->
+
+### 功能说明
+
+获取内存UCE（uncorrectable error，指系统硬件不能直接处理并恢复内存错误）的错误虚拟地址。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| deviceId | 输入 | Device ID。<br>与[aclrtSetDevice](04_device_management.md#aclrtSetDevice)接口中Device ID保持一致。 |
+| memUceInfoArray | 输入&输出 | aclrtMemUceInfo数组的指针。类型定义请参见[aclrtMemUceInfo](25-04_Structs.md#aclrtMemUceInfo)。 |
+| arraySize | 输入 | 传入aclrtMemUceInfo数组的长度。 |
+| retSize | 输出 | 实际返回的aclrtMemUceInfo数组的有效长度。 |
+
+### 返回值说明
+
+返回0表示成功，返回其他值表示失败，请参见[aclError](25-01_aclError.md#aclError)。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtMemUceRepair"></a>
+
+## aclrtMemUceRepair
+
+```c
+aclError aclrtMemUceRepair(int32_t deviceId, aclrtMemUceInfo *memUceInfoArray, size_t arraySize)
+```
+
+**须知：本接口为试验特性，后续版本可能会存在变更，不支持应用于生产环境中。**
+
+### 产品支持情况
+
+<!-- npu="950" id8 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id8 -->
+<!-- npu="A3" id9 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id9 -->
+<!-- npu="910b" id10 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id10 -->
+<!-- npu="310b" id11 -->
+- Atlas 200I/500 A2 推理产品：不支持
+<!-- end id11 -->
+<!-- npu="310p" id12 -->
+- Atlas 推理系列产品：不支持
+<!-- end id12 -->
+<!-- npu="910" id13 -->
+- Atlas 训练系列产品：不支持
+<!-- end id13 -->
+<!-- npu="IPV350" id14 -->
+- IPV350：不支持
+<!-- end id14 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id12 -->
+
+### 功能说明
+
+修复内存UCE的错误虚拟地址。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| deviceId | 输入 | Device ID。<br>与[aclrtSetDevice](04_device_management.md#aclrtSetDevice)接口中Device ID保持一致。 |
+| memUceInfoArray | 输入 | aclrtMemUceInfo数组的指针。 |
+| arraySize | 输入 | 传入aclrtMemUceInfo数组的长度。 |
+
+### 返回值说明
+
+返回0表示成功，返回其他值表示失败，请参见[aclError](25-01_aclError.md#aclError)。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtDeviceTaskAbort"></a>
+
+## aclrtDeviceTaskAbort
+
+```c
+aclError aclrtDeviceTaskAbort(int32_t deviceId, uint32_t timeout)
+```
+
+**须知：本接口为试验特性，后续版本可能会存在变更，不支持应用于生产环境中。**
+
+### 产品支持情况
+
+<!-- npu="950" id15 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id15 -->
+<!-- npu="A3" id16 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id16 -->
+<!-- npu="910b" id17 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id17 -->
+<!-- npu="310b" id18 -->
+- Atlas 200I/500 A2 推理产品：不支持
+<!-- end id18 -->
+<!-- npu="310p" id19 -->
+- Atlas 推理系列产品：不支持
+<!-- end id19 -->
+<!-- npu="910" id20 -->
+- Atlas 训练系列产品：不支持
+<!-- end id20 -->
+<!-- npu="IPV350" id21 -->
+- IPV350：不支持
+<!-- end id21 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id13 -->
+
+### 功能说明
+
+停止指定Device上的正在执行的任务，同时丢弃指定Device上已下发的任务。该接口支持用户设置永久等待、或配置具体的超时时间，若配置具体的超时时间，则调用本接口超出超时时间，则接口返回报错。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| deviceId | 输入 | Device ID。<br>与[aclrtSetDevice](04_device_management.md#aclrtSetDevice)接口中Device ID保持一致。 |
+| timeout | 输入 | 超时时间。<br>取值说明如下：<br><br>  - 0：表示永久等待；<br>  - >0：配置具体的超时时间，单位是毫秒。最大超时时间36分钟。 |
+
+### 返回值说明
+
+返回0表示成功，返回其他值表示失败，请参见[aclError](25-01_aclError.md#aclError)。
+
+### 约束说明
+
+当前接口仅支持遇错即停场景下使用，否则会出现不可预知的异常问题。默认模式为遇错继续模式，如需调用本接口，请先设置遇错即停模式，具体可参考接口[aclrtSetStreamFailureMode](06_stream_management.md#aclrtSetStreamFailureMode)。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtGetErrorVerbose"></a>
+
+## aclrtGetErrorVerbose
+
+```c
+aclError aclrtGetErrorVerbose(int32_t deviceId, aclrtErrorInfo *errorInfo);
+```
+
+**须知：本接口为试验特性，后续版本可能会存在变更，不支持应用于生产环境中。**
+
+### 产品支持情况
+
+<!-- npu="950" id22 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id22 -->
+<!-- npu="A3" id23 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id23 -->
+<!-- npu="910b" id24 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id24 -->
+<!-- npu="310b" id25 -->
+- Atlas 200I/500 A2 推理产品：不支持
+<!-- end id25 -->
+<!-- npu="310p" id26 -->
+- Atlas 推理系列产品：不支持
+<!-- end id26 -->
+<!-- npu="910" id27 -->
+- Atlas 训练系列产品：不支持
+<!-- end id27 -->
+<!-- npu="IPV350" id28 -->
+- IPV350：不支持
+<!-- end id28 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id14 -->
+
+### 功能说明
+
+用于在发生设备故障后获取详细错误信息。此接口必须在获取故障事件之后，提交任务中止之前调用。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| deviceId | 输入 | Device ID。<br>与[aclrtSetDevice](04_device_management.md#aclrtSetDevice)接口中Device ID保持一致。 |
+| errorInfo | 输出 | 错误信息。<br>typedef enum { <br>   ACL_RT_NO_ERROR = 0,  // 无错误<br>   ACL_RT_ERROR_MEMORY = 1,  // 内存错误<br>   ACL_RT_ERROR_L2 = 2,  // L2 Buffer错误<br>   ACL_RT_ERROR_AICORE = 3,  // AI Core错误<br>   ACL_RT_ERROR_LINK = 4,  // 网络错误<br>   ACL_RT_ERROR_L3_PORT = 5,  // L3端口错误<br>   ACL_RT_ERROR_OTHERS = 0xFFFF, // 其它错误<br>} aclrtErrorType;<br><br>typedef enum aclrtAicoreErrorType { <br>   ACL_RT_AICORE_ERROR_UNKNOWN,  // 未知错误<br>   ACL_RT_AICORE_ERROR_SW,  // 建议排查软件错误<br>   ACL_RT_AICORE_ERROR_HW_LOCAL, // 建议排查当前Device的硬件错误<br>} aclrtAicoreErrorType;<br><br>#define ACL_RT_MEM_UCE_INFO_MAX_NUM 20<br>typedef struct {<br>   size_t arraySize;  // memUceInfoArray数组大小<br>   [aclrtMemUceInfo](25-04_Structs.md#aclrtMemUceInfo) memUceInfoArray[ACL_RT_MEM_UCE_INFO_MAX_NUM];  // 内存UCE的错误虚拟地址数组<br>} aclrtMemUceInfoArray;<br><br>typedef union aclrtErrorInfoDetail { <br>   aclrtMemUceInfoArray uceInfo;  // 内存UCE（uncorrect error）<br>   aclrtAicoreErrorType aicoreErrType;  // AI Core错误<br>} aclrtErrorInfoDetail; <br><br>typedef struct aclrtErrorInfo { <br>   uint8_t tryRepair;  // 是否需要修复 ，0表示无需修复，1表示需修复   <br>   uint8_t hasDetail;  // 是否有详细报错信息，0表示没有，1表示有<br>   uint8_t reserved[2];  // 预留参数<br>   aclrtErrorType errorType;  // 错误类型<br>   aclrtErrorInfoDetail detail; // 错误详细信息<br>} aclrtErrorInfo; |
+
+### 返回值说明
+
+返回0表示成功，返回其他值表示失败，请参见[aclError](25-01_aclError.md#aclError)。
+
+### 约束说明
+
+如果通过[aclrtGetOpTimeOutInterval](12_execution_control.md#aclrtGetOpTimeOutInterval)接口查询到的超时最短时间间隔小于100ms时，本接口返回的故障的详细信息可能不准确。
+对于Atlas A3 训练系列产品/Atlas A3 推理系列产品、Atlas A2 训练系列产品/Atlas A2 推理系列产品，仅支持获取ACL_RT_NO_ERROR（无错误） 、ACL_RT_ERROR_MEMORY（内存错误） 、ACL_RT_ERROR_OTHERS（其它错误）。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtRepairError"></a>
+
+## aclrtRepairError
+
+```c
+aclError aclrtRepairError(int32_t deviceId, const aclrtErrorInfo *errorInfo)
+```
+
+**须知：本接口为试验特性，后续版本可能会存在变更，不支持应用于生产环境中。**
+
+### 产品支持情况
+
+<!-- npu="950" id29 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id29 -->
+<!-- npu="A3" id30 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id30 -->
+<!-- npu="910b" id31 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id31 -->
+<!-- npu="310b" id32 -->
+- Atlas 200I/500 A2 推理产品：不支持
+<!-- end id32 -->
+<!-- npu="310p" id33 -->
+- Atlas 推理系列产品：不支持
+<!-- end id33 -->
+<!-- npu="910" id34 -->
+- Atlas 训练系列产品：不支持
+<!-- end id34 -->
+<!-- npu="IPV350" id35 -->
+- IPV350：不支持
+<!-- end id35 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id15 -->
+
+### 功能说明
+
+基于[aclrtGetErrorVerbose](#aclrtGetErrorVerbose)接口获取的详细信息进行故障恢复，此接口应该在提交任务中止之后调用。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| deviceId | 输入 | Device ID。<br>与[aclrtSetDevice](04_device_management.md#aclrtSetDevice)接口中Device ID保持一致。 |
+| errorInfo | 输入 | 错误信息。<br>aclrtErrorInfo结构体的描述请参见[aclrtGetErrorVerbose](#aclrtGetErrorVerbose)。 |
+
+### 返回值说明
+
+返回0表示成功，返回其他值表示失败，请参见[aclError](25-01_aclError.md#aclError)。
+
+<br>
+<br>
+<br>
+
+<a id="aclrtSetDeviceTaskAbortCallback"></a>
+
+## aclrtSetDeviceTaskAbortCallback
+
+```c
+aclError aclrtSetDeviceTaskAbortCallback(const char *regName, aclrtDeviceTaskAbortCallback callback, void *args)
+```
+
+### 产品支持情况
+
+<!-- npu="950" id379 -->
+- Ascend 950PR/Ascend 950DT：支持
+<!-- end id379 -->
+<!-- npu="A3" id380 -->
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品：支持
+<!-- end id380 -->
+<!-- npu="910b" id381 -->
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品：支持
+<!-- end id381 -->
+<!-- npu="310b" id382 -->
+- Atlas 200I/500 A2 推理产品：不支持
+<!-- end id382 -->
+<!-- npu="310p" id383 -->
+- Atlas 推理系列产品：不支持
+<!-- end id383 -->
+<!-- npu="910" id384 -->
+- Atlas 训练系列产品：不支持
+<!-- end id384 -->
+<!-- npu="IPV350" id385 -->
+- IPV350：不支持
+<!-- end id385 -->
+<!-- @ref: runtime/res/docs/zh/api_ref/13_exception_handling_res.md#id10 -->
+
+### 功能说明
+
+调用本接口注册回调函数，用于在调用[aclrtDeviceTaskAbort](#aclrtDeviceTaskAbort)接口前后触发该回调函数。不支持重复注册。
+
+### 参数说明
+
+| 参数名 | 输入/输出 | 说明 |
+| --- | :---: | --- |
+| regName | 输入 | 注册名称，保持唯一，不能为空，输入保证字符串以\0结尾。 |
+| callback | 输入 | 回调函数。若callback不为NULL，则表示注册回调函数；若为NULL，则表示取消注册回调函数。<br>回调函数的函数原型为：<br>typedef enum {<br>   ACL_RT_DEVICE_TASK_ABORT_PRE = 0,<br>   ACL_RT_DEVICE_TASK_ABORT_POST,<br>} aclrtDeviceTaskAbortStage;<br>typedef int32_t (*aclrtDeviceTaskAbortCallback)(int32_t deviceId, aclrtDeviceTaskAbortStage stage, uint32_t timeout, void*args);<br>此处的timeout表示期望回调函数执行的最长时间。 |
+| args | 输入 | 待传递给回调函数的用户数据的指针。 |
+
+### 返回值说明
+
+返回0表示成功，返回其他值表示失败，请参见[aclError](25-01_aclError.md#aclError)。
+
+<br>
+<br>
+<br>

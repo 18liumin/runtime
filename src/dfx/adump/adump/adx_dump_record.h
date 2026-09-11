@@ -9,10 +9,13 @@
  */
 #ifndef ADX_DUMP_RECORE_H
 #define ADX_DUMP_RECORE_H
+#include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <cstdint>
 #include <sstream>
+#include <thread>
 #if !defined(ADUMP_SOC_HOST) || ADUMP_SOC_HOST == 1
 #include "proto/dump_task.pb.h"
 #endif
@@ -72,63 +75,73 @@ struct OpStatsResult {
 };
 #endif
 
-bool SendDumpMsgToRemote(const std::string &msg, uint16_t flag);
+bool SendDumpMsgToRemote(const std::string& msg, uint16_t flag);
 class AdxDumpRecord : public Adx::Common::Singleton::Singleton<AdxDumpRecord> {
 public:
     AdxDumpRecord();
     virtual ~AdxDumpRecord();
     int32_t GetDumpInitNum() const;
     void UpdateDumpInitNum(bool isPlus);
-    int32_t Init(const std::string &hostPid);
+    bool HasStartedServer() const;
+    bool CanShutdownServer() const;
+    int32_t Init(const std::string& hostPid);
     int32_t UnInit();
-    void SetWorkPath(const std::string &path);
+    void SetWorkPath(const std::string& path);
+    int32_t StartRecord();
     void RecordDumpInfo();
-    bool RecordDumpDataToQueue(HostDumpDataInfo &info);
+    bool RecordDumpDataToQueue(HostDumpDataInfo& info);
     bool DumpDataQueueIsEmpty() const;
-    AdxDumpRecord(AdxDumpRecord const &) = delete;
-    AdxDumpRecord &operator=(AdxDumpRecord const &) = delete;
+    AdxDumpRecord(AdxDumpRecord const&) = delete;
+    AdxDumpRecord& operator=(AdxDumpRecord const&) = delete;
 #if !defined(ADUMP_SOC_HOST) || ADUMP_SOC_HOST == 1
     void SetOptimizationMode(uint64_t statsItem);
 #endif
-    void SetDumpPath(const std::string &dumpPath);
+    void SetDumpPath(const std::string& dumpPath);
+    bool RecordDumpDataToDisk(const DumpChunk& dumpChunk) const;
 
 private:
-    bool RecordDumpDataToDisk(const DumpChunk &dumpChunk) const;
-    bool JudgeRemoteFalg(const std::string &msg) const;
+    bool JudgeRemoteFalg(const std::string& msg) const;
+    static void PrepareFork();
+    static void PostForkParent();
+    static void PostForkChild();
 #if !defined(ADUMP_SOC_HOST) || ADUMP_SOC_HOST == 1
-    bool DumpDataToCallback(const std::string &filename, const std::string &dumpData, int64_t offSet, int32_t flag);
-    bool StatsDataParsing(const DumpChunk &dumpChunk);
-    bool CheckFileNameExist(const std::string &filename);
-    void AppendFileName(const std::string &filename);
-    bool GenerateFileData(std::stringstream &strStream, const std::string &filename,
-        std::shared_ptr<OpStatsResult> statsResult);
-    bool FileNameCheck(const DumpChunk &dumpChunk) const;
-    std::string Int32DataHandle(const int64_t &data) const;
-    std::string FloatDataHandle(const int64_t &data) const;
-    std::string TypeDataHandle(const int64_t &data, toolkit::dump::OutputDataType dType) const;
-    std::string GetStatsString(toolkit::dump::OutputDataType dType, uint16_t pos, const int64_t &data);
+    bool DumpDataToCallback(const std::string& filename, const std::string& dumpData, int64_t offSet, int32_t flag);
+    bool StatsDataParsing(const DumpChunk& dumpChunk);
+    bool CheckFileNameExist(const std::string& filename);
+    void AppendFileName(const std::string& filename);
+    bool GenerateFileData(
+        std::stringstream& strStream, const std::string& filename, std::shared_ptr<OpStatsResult> statsResult);
+    bool FileNameCheck(const DumpChunk& dumpChunk) const;
+    std::string Int32DataHandle(const int64_t& data) const;
+    std::string FloatDataHandle(const int64_t& data) const;
+    std::string TypeDataHandle(const int64_t& data, toolkit::dump::OutputDataType dType) const;
+    std::string GetStatsString(toolkit::dump::OutputDataType dType, uint16_t pos, const int64_t& data);
     template <typename T>
-    std::string GetStringName(T key, const std::map<T, std::string> &stringMap) const;
-    std::string GetShapeString(const uint32_t shape[], int32_t shapeSize, int64_t &count) const;
-    void StatisticsData(std::stringstream &strStream, std::shared_ptr<OpStatsResult> statsResult,
-        const int64_t &count, const int32_t &idx);
+    std::string GetStringName(T key, const std::map<T, std::string>& stringMap) const;
+    std::string GetShapeString(const uint32_t shape[], int32_t shapeSize, int64_t& count) const;
+    void StatisticsData(
+        std::stringstream& strStream, std::shared_ptr<OpStatsResult> statsResult, const int64_t& count,
+        const int32_t& idx);
 #endif
 
 private:
-    bool dumpRecordFlag_;
+    std::atomic<bool> dumpRecordFlag_;
     std::string dumpPath_;
     std::string workPath_;
-    BoundQueueMemory<HostDumpDataInfo> hostDumpDataInfoQueue_;
+    std::unique_ptr<BoundQueueMemory<HostDumpDataInfo>> hostDumpDataInfoQueue_;
     int32_t dumpInitNum_;
+    std::thread recordThread_;
+    std::mutex recordMutex_;
+
 #if !defined(ADUMP_SOC_HOST) || ADUMP_SOC_HOST == 1
     uint64_t dumpStatsItem_{0};
     uint32_t filenameIndex_{0};
     std::string statsHeader_;
     std::vector<uint16_t> statsList_;
-    std::map<int16_t, std::function<std::string(const int64_t &, toolkit::dump::OutputDataType dType)>> funcMap_;
+    std::map<int16_t, std::function<std::string(const int64_t&, toolkit::dump::OutputDataType dType)>> funcMap_;
     std::vector<std::string> fileNameStatus_;
     bool compatible_{false};
 #endif
 };
-}
+} // namespace Adx
 #endif

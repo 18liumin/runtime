@@ -1,0 +1,35 @@
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under
+ * the terms and conditions of CANN Open Software License Agreement Version 2.0
+ * (the "License"). Please refer to the License for details. You may not use
+ * this file except in compliance with the License. THIS SOFTWARE IS PROVIDED ON
+ * AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS
+ * FOR A PARTICULAR PURPOSE. See LICENSE in the root of the software repository
+ * for the full text of the License.
+ */
+#ifndef CCE_RUNTIME_API_IMPL_EVENT_HPP
+#define CCE_RUNTIME_API_IMPL_EVENT_HPP
+
+#include "api_event.hpp"
+
+namespace cce {
+namespace runtime {
+
+class ApiImplEvent : public ApiEvent {
+public:
+    rtError_t GetEventID(Event* const evt, uint32_t* const evtId) override;
+    rtError_t EventQuery(Event* const evt) override;
+    rtError_t EventQueryStatus(Event* const evt, rtEventStatus_t* const status) override;
+    rtError_t EventQueryWaitStatus(Event* const evt, rtEventWaitStatus_t* const status) override;
+    rtError_t EventElapsedTime(float32_t* const timeInterval, Event* const startEvent, Event* const endEvent) override;
+    rtError_t EventGetTimeStamp(uint64_t* const timeStamp, Event* const evt) override;
+    rtError_t IpcOpenEventHandle(rtIpcEventHandle_t* handle, IpcEvent** const event) override;
+    rtError_t IpcGetEventHandle(IpcEvent* const event, rtIpcEventHandle_t* handle) override;
+};
+
+} // namespace runtime
+} // namespace cce
+
+#endif // CCE_RUNTIME_API_IMPL_EVENT_HPP

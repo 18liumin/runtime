@@ -1,0 +1,58 @@
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include "event.hpp"
+#include "stream.hpp"
+
+namespace cce {
+namespace runtime {
+
+rtError_t Event::CaptureWaitProcess(Stream* const stm)
+{
+    UNUSED(stm);
+    return RT_ERROR_FEATURE_NOT_SUPPORT;
+}
+
+rtError_t Event::ExternalEventWaitProcess(Stream* const stm)
+{
+    UNUSED(stm);
+    return RT_ERROR_FEATURE_NOT_SUPPORT;
+}
+
+rtError_t Event::RecordSoftwareEvent(Stream* const stm)
+{
+    UNUSED(stm);
+    return RT_ERROR_FEATURE_NOT_SUPPORT;
+}
+
+rtError_t Event::ResetSoftwareEvent(Stream* const stm)
+{
+    UNUSED(stm);
+    return RT_ERROR_FEATURE_NOT_SUPPORT;
+}
+
+bool Event::IsRecordOrigCaptureStream(const Stream* const stm) const
+{
+    UNUSED(stm);
+    return false;
+}
+
+CaptureModel* Event::GetCaptureModel(void) const { return nullptr; }
+
+bool Event::IsCapturing() const { return false; }
+
+bool Event::ToBeCaptured(const Stream* const stm) const
+{
+    UNUSED(stm);
+    return false;
+}
+
+} // namespace runtime
+} // namespace cce

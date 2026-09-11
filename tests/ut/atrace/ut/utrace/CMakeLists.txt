@@ -6,11 +6,11 @@ set(TEST_STUB_SRC
 )
 
 set(STACKTRACE_COMMON_SRC
-    ${TOP_DIR}/abl/atrace/common/adiag_lock.c
-    ${TOP_DIR}/abl/atrace/common/adiag_list.c
-    ${TOP_DIR}/abl/atrace/common/adiag_utils.c
-    ${TOP_DIR}/abl/atrace/atrace/utils/trace_system_api.c
-    ${TOP_DIR}/abl/atrace/atrace/utils/trace_load_library.c
+    ${TOP_DIR}/src/dfx/trace/common/adiag_lock.c
+    ${TOP_DIR}/src/dfx/trace/common/adiag_list.c
+    ${TOP_DIR}/src/dfx/trace/common/adiag_utils.c
+    ${TOP_DIR}/src/dfx/trace/atrace/utils/trace_system_api.c
+    ${TOP_DIR}/src/dfx/trace/atrace/utils/trace_load_library.c
 )
 
 set(STACKTRACE_DUMPER_SRC
@@ -29,7 +29,6 @@ set(STACKTRACE_DUMPER_SRC
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_dumper/scd_process.c
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_dumper/scd_ptrace.c
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_dumper/scd_regs_arm_64.c
-    ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_dumper/scd_regs_x86_64.c
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_dumper/scd_thread.c
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_dumper/scd_threads.c
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_dumper/scd_util.c
@@ -47,6 +46,7 @@ set(SRC_FILE
     ${ATRACE_SOURCE_DIR}/utrace/tracer/tracer_schedule.c
     ${ATRACE_SOURCE_DIR}/utrace/tracer/tracer_mgr_operate.c
     ${ATRACE_SOURCE_DIR}/utrace/tracer/tracer_mgr_operate_atrace.c
+    ${ATRACE_SOURCE_DIR}/utrace/utrace_client/utrace_socket.c
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_fp.c
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_safe_recorder.c
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_dumper.c
@@ -59,9 +59,6 @@ set(SRC_FILE
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_monitor.c
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_exec.c
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_logger.c
-    ${ATRACE_SOURCE_DIR}/utrace/stacktrace/dumper_process/dumper_core.c
-    ${ATRACE_SOURCE_DIR}/utrace/stacktrace/dumper_process/dumper_process.c
-    ${ATRACE_SOURCE_DIR}/utrace/stacktrace/dumper_process/dumper_thread.c
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_parse.c
     ${ATRACE_SOURCE_DIR}/utrace/recorder/trace_recorder.c
     ${ATRACE_SOURCE_DIR}/utrace/ringbuffer/trace_rb_log.c
@@ -73,9 +70,9 @@ set(SRC_FILE
     ${ATRACE_SOURCE_DIR}/utils/trace_load_library.c
     ${ATRACE_SOURCE_DIR}/utils/trace_system_api.c
     ${STACKTRACE_DUMPER_SRC}
-    ${TOP_DIR}/abl/atrace/common/adiag_list.c
-    ${TOP_DIR}/abl/atrace/common/adiag_lock.c
-    ${TOP_DIR}/abl/atrace/common/adiag_utils.c
+    ${TOP_DIR}/src/dfx/trace/common/adiag_list.c
+    ${TOP_DIR}/src/dfx/trace/common/adiag_lock.c
+    ${TOP_DIR}/src/dfx/trace/common/adiag_utils.c
 )
 
 set(INCLUDE_DIR
@@ -86,24 +83,25 @@ set(INCLUDE_DIR
     ${ATRACE_SOURCE_DIR}/utrace/recorder
     ${ATRACE_SOURCE_DIR}/utrace/ringbuffer
     ${ATRACE_SOURCE_DIR}/utrace/trace_client
+    ${ATRACE_SOURCE_DIR}/utrace/utrace_client
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace
-    ${ATRACE_SOURCE_DIR}/utrace/stacktrace/dumper_process
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_dumper
     ${ATRACE_SOURCE_DIR}/utrace/tracer
     ${ATRACE_SOURCE_DIR}/utrace/util
     ${ATRACE_SOURCE_DIR}/utrace/include
     ${ATRACE_SOURCE_DIR}/utils
-    ${TOP_DIR}/abl/libc_sec/include
-    ${TOP_DIR}/abl/adump/inc/adump
-    ${TOP_DIR}/abl/adump/external
-    ${TOP_DIR}/abl/adump
-    ${TOP_DIR}/inc/driver
-    ${TOP_DIR}/abl/adump/inc/adump
-    ${TOP_DIR}/abl/adump/external
-    ${TOP_DIR}/abl/atrace/common
+    ${LIBC_SEC_HEADER}
+    ${TOP_DIR}/pkg_inc/trace
+    ${TOP_DIR}/src/dfx/trace/inc/toolchain
+    ${TOP_DIR}/src/dfx/trace/common
+    ${TOP_DIR}/src/dfx/adump
+    ${TOP_DIR}/src/dfx/adump/inc/adump
+    ${TOP_DIR}/src/dfx/adump/external
+    ${TOP_DIR}/pkg_inc/driver
 )
 
 set(TEST_SRC
+    testcase/main.cc
     testcase/utrace_utest.cc
     testcase/utrace_event_utest.cc
     testcase/trace_attr_utest.cc
@@ -113,7 +111,6 @@ set(TEST_SRC
     testcase/trace_util_utest.cc
 
     testcase/stacktrace/stacktrace_utest.cc
-    testcase/stacktrace/dumper_process_utest.cc
     testcase/stacktrace/stacktrace_exec_utest.cc
     testcase/stacktrace/stacktrace_unwind_utest.cc
     testcase/stacktrace/stacktrace_unwind_instr_utest.cc
@@ -124,11 +121,14 @@ set(TEST_SRC
     testcase/stacktrace_dumper/scd_maps_utest.cc
     testcase/stacktrace_dumper/scd_process_utest.cc
     testcase/stacktrace_dumper/scd_registers_utest.cc
-    testcase/stacktrace_dumper/scd_threads_utest.cc
     testcase/stacktrace_dumper/scd_utils_utest.cc
     testcase/stacktrace_dumper/scd_memory_utest.cc
     testcase/stacktrace_dumper/scd_dwarf_utest.cc
 )
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    list(APPEND TEST_SRC testcase/stacktrace_dumper/scd_threads_utest.cc)
+endif()
 
 ############################# utrace_utest(x86_64)   #############################
 add_executable(utrace_utest
@@ -148,7 +148,6 @@ target_compile_options(utrace_utest PRIVATE
 )
 
 target_compile_definitions(utrace_utest PRIVATE
-    C_SEC
     ATRACE_API
     ATRACE_HOST
     _ADIAG_LLT_
@@ -167,20 +166,20 @@ target_link_libraries(utrace_utest PRIVATE
     $<BUILD_INTERFACE:intf_llt_pub>
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:mmpa_headers>
+    $<BUILD_INTERFACE:adump_headers>
     dl
 )
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    target_sources(utrace_utest PRIVATE
+        ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_dumper/scd_regs_x86_64.c)
+endif()
 
 set_target_properties(utrace_utest
     PROPERTIES
     OUTPUT_NAME utrace_utest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
-
-run_llt_test(
-    TARGET utrace_utest
-    TASK_NUM 1
-)
-
 
 #############################  utrace_arm_utest(arm64)   #############################
 add_executable(utrace_arm_utest
@@ -189,6 +188,7 @@ add_executable(utrace_arm_utest
     ${ATRACE_SOURCE_DIR}/utrace/stacktrace/stacktrace_logger.c
     ${STACKTRACE_COMMON_SRC}
     testcase/stacktrace_dumper/scd_registers_utest.cc
+    testcase/main.cc
     ${TEST_STUB_SRC}
 )
 
@@ -201,7 +201,6 @@ target_compile_options(utrace_arm_utest PRIVATE
     -g
     -Wall
     -Werror
-    -std=c++11
 )
 
 target_compile_definitions(utrace_arm_utest PRIVATE
@@ -228,9 +227,4 @@ set_target_properties(utrace_arm_utest
     PROPERTIES
     OUTPUT_NAME utrace_arm_utest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-
-run_llt_test(
-    TARGET utrace_arm_utest
-    TASK_NUM 1
 )

@@ -19,11 +19,11 @@ namespace socket {
 using namespace analysis::dvvp::common::error;
 using namespace analysis::dvvp::common::utils;
 
-sockaddr_un LocalSocket::GetUnixSockAddr(const std::string &key)
+sockaddr_un LocalSocket::GetUnixSockAddr(const std::string& key)
 {
     sockaddr_un sockAddr;
     (void)memset_s(&sockAddr, sizeof(sockAddr), 0, sizeof(sockAddr));
-    auto ret = strcpy_s(sockAddr.sun_path + 1, sizeof(sockAddr.sun_path) - 1, key.c_str());
+    auto ret = strcpy_s(sockAddr.sun_path, sizeof(sockAddr.sun_path), key.c_str());
     if (ret != EOK) {
         MSPROF_LOGE("local socket path copy failed");
     }
@@ -31,7 +31,7 @@ sockaddr_un LocalSocket::GetUnixSockAddr(const std::string &key)
     return sockAddr;
 }
 
-int32_t LocalSocket::Create(const std::string &key, int32_t backlog)
+int32_t LocalSocket::Create(const std::string& key, int32_t backlog)
 {
     if (key.empty()) {
         MSPROF_LOGE("key is empty");
@@ -43,15 +43,24 @@ int32_t LocalSocket::Create(const std::string &key, int32_t backlog)
         return PROFILING_FAILED;
     }
 
+    OsalUnlink(key.c_str());
     auto sockAddr = GetUnixSockAddr(key);
-    auto ret = OsalBind(fd, reinterpret_cast<OsalSockAddr *>(&sockAddr),
-        offsetof(sockaddr_un, sun_path) + 1 + key.size());
+    auto ret =
+        OsalBind(fd, reinterpret_cast<OsalSockAddr*>(&sockAddr), offsetof(sockaddr_un, sun_path) + 1 + key.size());
     if (ret != OSAL_EN_OK) {
         if (OsalGetErrorCode() == EADDRINUSE) { // Address already in use
             Close(fd);
             return SOCKET_ERR_EADDRINUSE;
         }
         MSPROF_LOGE("bind exception info: %s", Utils::GetErrno());
+        OsalUnlink(key.c_str());
+        Close(fd);
+        return PROFILING_FAILED;
+    }
+
+    if (OsalChmod(key.c_str(), S_IRUSR | S_IWUSR) != OSAL_EN_OK) {
+        MSPROF_LOGE("chmod socket file %s failed: %s", key.c_str(), Utils::GetErrno());
+        OsalUnlink(key.c_str());
         Close(fd);
         return PROFILING_FAILED;
     }
@@ -59,6 +68,7 @@ int32_t LocalSocket::Create(const std::string &key, int32_t backlog)
     ret = OsalListen(fd, backlog);
     if (ret != OSAL_EN_OK) {
         MSPROF_LOGE("listen exception info: %s", Utils::GetErrno());
+        OsalUnlink(key.c_str());
         Close(fd);
         return PROFILING_FAILED;
     }
@@ -96,15 +106,15 @@ int32_t LocalSocket::Accept(int32_t fd)
     return clientFd;
 }
 
-int32_t LocalSocket::Connect(int32_t fd, const std::string &key)
+int32_t LocalSocket::Connect(int32_t fd, const std::string& key)
 {
     if (fd < 0 || key.empty()) {
         MSPROF_LOGE("fd:%d or key:%s invalid", fd, key.c_str());
         return PROFILING_FAILED;
     }
     auto sockAddr = GetUnixSockAddr(key);
-    if (OsalConnect(fd, reinterpret_cast<OsalSockAddr *>(&sockAddr),
-        offsetof(sockaddr_un, sun_path) + 1 + key.size()) != OSAL_EN_OK) {
+    if (OsalConnect(fd, reinterpret_cast<OsalSockAddr*>(&sockAddr), offsetof(sockaddr_un, sun_path) + 1 + key.size()) !=
+        OSAL_EN_OK) {
         MSPROF_LOGW("Unable to connect local socket %d to %s with return code %s", fd, key.c_str(), Utils::GetErrno());
         return PROFILING_FAILED;
     }
@@ -113,7 +123,7 @@ int32_t LocalSocket::Connect(int32_t fd, const std::string &key)
 
 int32_t LocalSocket::SetRecvTimeOut(int32_t fd, long sec, long usec)
 {
-    OsalTimeval timeout = { sec, usec };
+    OsalTimeval timeout = {sec, usec};
     if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1) {
         MSPROF_LOGE("set %d recv timeout failed: %s", fd, Utils::GetErrno());
         return PROFILING_FAILED;
@@ -123,7 +133,7 @@ int32_t LocalSocket::SetRecvTimeOut(int32_t fd, long sec, long usec)
 
 int32_t LocalSocket::SetSendTimeOut(int32_t fd, long sec, long usec)
 {
-    OsalTimeval timeout = { sec, usec };
+    OsalTimeval timeout = {sec, usec};
     if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) == -1) {
         MSPROF_LOGE("set %d send timeout failed: %s", fd, Utils::GetErrno());
         return PROFILING_FAILED;
@@ -131,7 +141,7 @@ int32_t LocalSocket::SetSendTimeOut(int32_t fd, long sec, long usec)
     return PROFILING_SUCCESS;
 }
 
-int32_t LocalSocket::Recv(int32_t fd, void *buff, int32_t len, int32_t flag)
+int32_t LocalSocket::Recv(int32_t fd, void* buff, int32_t len, int32_t flag)
 {
     if (fd < 0 || buff == nullptr || len <= 0) {
         return PROFILING_FAILED;
@@ -149,12 +159,12 @@ int32_t LocalSocket::Recv(int32_t fd, void *buff, int32_t len, int32_t flag)
     return receivedlen;
 }
 
-int32_t LocalSocket::Send(int32_t fd, const void *buff, int32_t len, int32_t flag)
+int32_t LocalSocket::Send(int32_t fd, const void* buff, int32_t len, int32_t flag)
 {
     if (fd < 0 || buff == nullptr || len <= 0) {
         return PROFILING_FAILED;
     }
-    const int ret = OsalSocketSend(fd, const_cast<void *>(buff), len, flag);
+    const int ret = OsalSocketSend(fd, const_cast<void*>(buff), len, flag);
     if (ret < 0) {
         if (OsalGetErrorCode() == EAGAIN) {
             return SOCKET_ERR_EAGAIN;
@@ -166,7 +176,7 @@ int32_t LocalSocket::Send(int32_t fd, const void *buff, int32_t len, int32_t fla
     return PROFILING_SUCCESS;
 }
 
-void LocalSocket::Close(int32_t &fd)
+void LocalSocket::Close(int32_t& fd)
 {
     if (fd >= 0) {
         (void)OsalClose(fd);

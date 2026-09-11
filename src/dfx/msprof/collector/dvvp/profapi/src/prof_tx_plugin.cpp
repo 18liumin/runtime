@@ -7,16 +7,23 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
+#include <atomic>
+#include <unistd.h>
 #include "prof_tx_plugin.h"
 #include "errno/error_code.h"
+#include "prof_acl_plugin.h"
+#include "prof_cann_plugin.h"
+#include "utils/utils.h"
+#include "runtime/rts/rts_stream.h"
 
 using namespace analysis::dvvp::common::error;
+using namespace analysis::dvvp::common::utils;
 
 namespace ProfAPI {
-void ProfTxPlugin::ProftxApiInit(VOID_PTR handle)
-{
-    loadApi_.ProfLoadApiInit(handle);
-}
+thread_local ACLPROF_EVENT_ATTR_PTR ProfTxPlugin::attr_ = nullptr;
+thread_local uint64_t ProfTxPlugin::timeStampPush_ = 0;
+
+void ProfTxPlugin::ProftxApiInit(VOID_PTR handle) { loadApi_.ProfLoadApiInit(handle); }
 
 VOID_PTR ProfTxPlugin::ProftxCreateStamp()
 {
@@ -66,7 +73,7 @@ int32_t ProfTxPlugin::ProftxPop()
     return proftxPop_();
 }
 
-int32_t ProfTxPlugin::ProftxRangeStart(VOID_PTR stamp, uint32_t *rangeId)
+int32_t ProfTxPlugin::ProftxRangeStart(VOID_PTR stamp, uint32_t* rangeId)
 {
     if (proftxRangeStart_ == nullptr) {
         proftxRangeStart_ = loadApi_.LoadProfTxApi<decltype(proftxRangeStart_)>("ProfAclRangeStart");
@@ -90,11 +97,11 @@ int32_t ProfTxPlugin::ProftxRangeStop(uint32_t rangeId)
     return proftxRangeStop_(rangeId);
 }
 
-int32_t ProfTxPlugin::ProftxSetStampTraceMessage(VOID_PTR stamp, const char *msg, uint32_t msgLen)
+int32_t ProfTxPlugin::ProftxSetStampTraceMessage(VOID_PTR stamp, const char* msg, uint32_t msgLen)
 {
     if (proftxSetStampTraceMessage_ == nullptr) {
-        proftxSetStampTraceMessage_ = loadApi_.LoadProfTxApi<decltype(proftxSetStampTraceMessage_)>(
-            "ProfAclSetStampTraceMessage");
+        proftxSetStampTraceMessage_ =
+            loadApi_.LoadProfTxApi<decltype(proftxSetStampTraceMessage_)>("ProfAclSetStampTraceMessage");
         if (proftxSetStampTraceMessage_ == nullptr) {
             return PROFILING_FAILED;
         }
@@ -115,7 +122,7 @@ int32_t ProfTxPlugin::ProftxMark(VOID_PTR stamp)
     return proftxMark_(stamp);
 }
 
-int32_t ProfTxPlugin::ProftxMarkEx(const char *msg, size_t msgLen, aclrtStream stream)
+int32_t ProfTxPlugin::ProftxMarkEx(const char* msg, size_t msgLen, aclrtStream stream)
 {
     if (proftxMarkEx_ == nullptr) {
         proftxMarkEx_ = loadApi_.LoadProfTxApi<decltype(proftxMarkEx_)>("ProfAclMarkEx");
@@ -127,7 +134,7 @@ int32_t ProfTxPlugin::ProftxMarkEx(const char *msg, size_t msgLen, aclrtStream s
     return proftxMarkEx_(msg, msgLen, stream);
 }
 
-int32_t ProfTxPlugin::ProftxSetCategoryName(uint32_t category, const char *categoryName)
+int32_t ProfTxPlugin::ProftxSetCategoryName(uint32_t category, const char* categoryName)
 {
     if (proftxSetCategoryName_ == nullptr) {
         proftxSetCategoryName_ = loadApi_.LoadProfTxApi<decltype(proftxSetCategoryName_)>("ProfAclSetCategoryName");
@@ -163,8 +170,193 @@ int32_t ProfTxPlugin::ProftxSetStampPayload(VOID_PTR stamp, const int32_t type, 
     return proftxSetStampPayload_(stamp, type, value);
 }
 
-void LoadProftxApiInit(VOID_PTR handle)
+int32_t ProfTxPlugin::ProftxRangePushEx(ACLPROF_EVENT_ATTR_PTR attr)
 {
-    ProfTxPlugin::GetProftxInstance().ProftxApiInit(handle);
+    MSPROF_LOGI("Start to execute ProftxRangePushEx.");
+    if (attr == nullptr) {
+        MSPROF_LOGE("Param attr is nullptr");
+        return ACL_ERROR_INVALID_PARAM;
+    }
+    if (attr->messageType != MESSAGE_TYPE_TENSOR_INFO) {
+        MSPROF_LOGE("Invalid message type, messageType=%d", attr->messageType);
+        return PROFILING_FAILED;
+    }
+    attr_ = attr;
+    timeStampPush_ = MsprofSysCycleTime();
+    return PROFILING_SUCCESS;
 }
+
+int32_t ProfTxPlugin::ProftxRangePop()
+{
+    if (attr_ == nullptr) {
+        MSPROF_LOGE("Param attr is nullptr, Please call ProftxRangePushEx");
+        return ACL_ERROR_INVALID_PARAM;
+    }
+    uint64_t timeStampPop = MsprofSysCycleTime();
+    uint64_t timeStampPush = timeStampPush_;
+    MSPROF_LOGI(
+        "Start to execute ProftxRangePop, timeStampPush is %llu, timeStampPop is %llu", timeStampPush, timeStampPop);
+    rtStreamAttr stmAttrId = RT_STREAM_ATTR_CACHE_OP_INFO;
+    rtStreamAttrValue_t value;
+    const ProfTensorInfo* tensorInfo = attr_->message.tensorInfo;
+    rtStream_t stream = static_cast<rtStream_t>(tensorInfo->stream);
+    int32_t ret = ProfAPI::ProfRuntimePlugin::instance()->ProfRtsStreamGetAttribute(stream, stmAttrId, &value);
+    if (ret != RT_ERROR_NONE) {
+        MSPROF_LOGE("Failed to execute rtsStreamGetAttribute, ret=%d", ret);
+        return PROFILING_FAILED;
+    }
+    if (static_cast<bool>(value.cacheOpInfoSwitch)) {
+        return ReportCacheOpInfo2RT(tensorInfo);
+    }
+    ProfCannPlugin::instance()->ProfApiInit();
+    if (!ProfAclPlugin::instance()->IsInited()) {
+        static std::atomic<pid_t> skipLogProcessId{0};
+        const pid_t currentProcessId = getpid();
+        if (skipLogProcessId.exchange(currentProcessId, std::memory_order_relaxed) != currentProcessId) {
+            MSPROF_LOGW("Profiling is not initialized, skip reporting custom tensor info.");
+        } else {
+            MSPROF_LOGD("Profiling is not initialized, skip reporting custom tensor info.");
+        }
+        return PROFILING_SUCCESS;
+    }
+    return ReportCustomTensorInfo(tensorInfo, timeStampPush, timeStampPop);
 }
+
+int32_t ProfTxPlugin::CopyTensorData(
+    const ProfTensorInfo* tensorInfo, uint8_t* dest, uint64_t& destOffset, size_t maxCopySize, size_t startIdx,
+    size_t tensorNum)
+{
+    for (size_t i = startIdx; i < startIdx + tensorNum; ++i) {
+        ProfTensor& tensor = tensorInfo->tensors[i];
+        MsrofTensorData msTensor;
+        msTensor.tensorType = tensor.type;
+        msTensor.format = tensor.format;
+        msTensor.dataType = tensor.dataType;
+        for (size_t j = 0; j < tensor.shapeDim && j < MSPROF_GE_TENSOR_DATA_SHAPE_LEN; ++j) {
+            msTensor.shape[j] = tensor.shape[j];
+        }
+        for (size_t k = tensor.shapeDim; k < MSPROF_GE_TENSOR_DATA_SHAPE_LEN; ++k) {
+            msTensor.shape[k] = 0;
+        }
+        errno_t err = memcpy_s(dest + destOffset, maxCopySize - destOffset, &msTensor, sizeof(MsrofTensorData));
+        if (err != EOK) {
+            MSPROF_LOGE("memcpy_s msTensor failed, result=%d.", err);
+            return PROFILING_FAILED;
+        }
+        destOffset += sizeof(MsrofTensorData);
+    }
+    return PROFILING_SUCCESS;
+}
+
+int32_t ProfTxPlugin::ReportCustomTensorInfoOnce(
+    const ProfTensorInfo* tensorInfo, uint64_t timeStamp, uint32_t startIdx, uint32_t tensorNum)
+{
+    size_t infoSize = sizeof(tensorInfo->opNameId) + sizeof(tensorNum) + (sizeof(MsrofTensorData) * tensorNum);
+    size_t totalSize = sizeof(MsprofShapeInfo) + infoSize;
+    VOID_PTR infoPtr = Utils::ProfMalloc(totalSize);
+    if (infoPtr == nullptr) {
+        MSPROF_LOGE("Failed to allocate MsprofShapeInfo, size=%zu", totalSize);
+        return PROFILING_FAILED;
+    }
+    auto* shapeInfo = static_cast<MsprofShapeInfo*>(infoPtr);
+    shapeInfo->magicNumber = MSPROF_REPORT_DATA_MAGIC_NUM;
+    shapeInfo->level = MSPROF_REPORT_NODE_LEVEL;
+    shapeInfo->type = MSPROF_REPORT_NODE_TENSOR_INFO_TYPE;
+    shapeInfo->threadId = static_cast<uint32_t>(OsalGetTid());
+    shapeInfo->dataLen = static_cast<uint32_t>(infoSize);
+    shapeInfo->timeStamp = timeStamp;
+    uint8_t* dest = shapeInfo->data;
+    uint64_t destOffset = 0;
+    errno_t err =
+        memcpy_s(dest + destOffset, infoSize - destOffset, &tensorInfo->opNameId, sizeof(tensorInfo->opNameId));
+    if (err != EOK) {
+        MSPROF_LOGE("memcpy_s tensorInfo->opNameId failed, result=%d.", err);
+        Utils::ProfFree(infoPtr);
+        return PROFILING_FAILED;
+    }
+    destOffset += sizeof(tensorInfo->opNameId);
+    err = memcpy_s(dest + destOffset, infoSize - destOffset, &tensorNum, sizeof(tensorNum));
+    if (err != EOK) {
+        MSPROF_LOGE("memcpy_s tensorNum failed, result=%d.", err);
+        Utils::ProfFree(infoPtr);
+        return PROFILING_FAILED;
+    }
+    destOffset += sizeof(tensorNum);
+    int32_t ret = CopyTensorData(tensorInfo, dest, destOffset, infoSize, startIdx, tensorNum);
+    if (ret != PROFILING_SUCCESS) {
+        Utils::ProfFree(infoPtr);
+        return ret;
+    }
+    MSPROF_LOGI("Execute ReportCustomTensorInfo successfully, report data to msprof.");
+    ret = MsprofReportAdditionalInfo(0, infoPtr, static_cast<uint32_t>(totalSize));
+    Utils::ProfFree(infoPtr);
+    return ret;
+}
+
+int32_t ProfTxPlugin::ReportCustomTensorInfo(
+    const ProfTensorInfo* tensorInfo, uint64_t timeStampPush, uint64_t timeStampPop)
+{
+    uint64_t timeStamp = (timeStampPush >> 1) + (timeStampPop >> 1) + ((timeStampPush & 1) & (timeStampPop & 1));
+    // 单次上报的tensorNum不能超过MSPROF_GE_TENSOR_DATA_NUM个，超过则分多次上报
+    uint32_t totalTensorNum = tensorInfo->tensorNum;
+    uint32_t reported = 0;
+    do {
+        uint32_t curNum = totalTensorNum - reported;
+        if (curNum > MSPROF_GE_TENSOR_DATA_NUM) {
+            curNum = MSPROF_GE_TENSOR_DATA_NUM;
+        }
+        int32_t ret = ReportCustomTensorInfoOnce(tensorInfo, timeStamp, reported, curNum);
+        if (ret != PROFILING_SUCCESS) {
+            MSPROF_LOGE(
+                "Failed to execute ReportCustomTensorInfoOnce, ret=%d, reported=%u, curNum=%u, "
+                "totalTensorNum=%u.",
+                ret, reported, curNum, totalTensorNum);
+            return ret;
+        }
+        reported += curNum;
+    } while (reported < totalTensorNum);
+    return PROFILING_SUCCESS;
+}
+
+int32_t ProfTxPlugin::ReportCacheOpInfo2RT(const ProfTensorInfo* tensorInfo)
+{
+    CacheOpInfoBasic cacheOpInfoBasic;
+    size_t infoSize = sizeof(CacheOpInfoBasic) + (sizeof(MsrofTensorData) * tensorInfo->tensorNum);
+    void* infoPtr = Utils::ProfMalloc(infoSize);
+    if (infoPtr == nullptr) {
+        MSPROF_LOGE("malloc CacheOpInfoBasic failed");
+        return PROFILING_FAILED;
+    }
+    uint8_t* dest = static_cast<uint8_t*>(infoPtr);
+    uint64_t destOffset = 0;
+    cacheOpInfoBasic.taskType = tensorInfo->kernelType;
+    cacheOpInfoBasic.blockdim = tensorInfo->blockNums;
+    cacheOpInfoBasic.nodeId = tensorInfo->opNameId;
+    cacheOpInfoBasic.opType = tensorInfo->opTypeId;
+    cacheOpInfoBasic.tensorNum = tensorInfo->tensorNum;
+    errno_t err = memcpy_s(dest + destOffset, infoSize - destOffset, &cacheOpInfoBasic, sizeof(cacheOpInfoBasic));
+    if (err != EOK) {
+        void* freeInfoPtr = static_cast<void*>(infoPtr);
+        Utils::ProfFree(freeInfoPtr);
+        MSPROF_LOGE("memcpy_s cacheOpInfoBasic failed, result=%d.", err);
+        return PROFILING_FAILED;
+    }
+    destOffset += sizeof(CacheOpInfoBasic);
+    int32_t ret = CopyTensorData(tensorInfo, dest, destOffset, infoSize, 0, tensorInfo->tensorNum);
+    if (ret != PROFILING_SUCCESS) {
+        void* freeInfoPtr = static_cast<void*>(infoPtr);
+        Utils::ProfFree(freeInfoPtr);
+        return ret;
+    }
+    ret = ProfAPI::ProfRuntimePlugin::instance()->ProfRtCacheLastTaskOpInfo(infoPtr, infoSize);
+    if (ret != RT_ERROR_NONE) {
+        void* freeInfoPtr = static_cast<void*>(infoPtr);
+        Utils::ProfFree(freeInfoPtr);
+        MSPROF_LOGE("Failed to execute rtCacheLastTaskOpInfo, ret=%d", ret);
+        return PROFILING_FAILED;
+    }
+    return PROFILING_SUCCESS;
+}
+
+void LoadProftxApiInit(VOID_PTR handle) { ProfTxPlugin::GetProftxInstance().ProftxApiInit(handle); }
+} // namespace ProfAPI

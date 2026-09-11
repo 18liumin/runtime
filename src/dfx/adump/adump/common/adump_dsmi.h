@@ -16,29 +16,35 @@
 #endif
 
 namespace Adx {
-constexpr uint32_t DEFAULT_CHIP_TYPE    = 2;
+constexpr uint32_t DEFAULT_CHIP_TYPE = 2;
 constexpr int32_t SUPPORTED_DRV_VERSION = 467735; // 2024.5.16
-enum class SysPlatformType {
-    DEVICE = 0,
-    HOST = 1,
-    INVALID = 2
-};
+enum class SysPlatformType { DEVICE = 0, HOST = 1, INVALID = 2 };
 
-enum class PlatformType : uint32_t{
-    CHIP_CLOUD_TYPE = 1,
+enum class PlatformType : uint32_t {
+    CHIP_MINI_TYPE = 0,
+    CHIP_CLOUD_TYPE,
+    CHIP_MDC_TYPE,
     CHIP_DC_TYPE = 4,
-    CHIP_CLOUD_V2 = 5,
-    END_TYPE = 16
+    CHIP_CLOUD_V2,
+    CHIP_MINI_V3_TYPE = 7,
+    CHIP_TINY_V1 = 8,
+    CHIP_NANO_V1 = 9,
+    CHIP_MDC_MINI_V3 = 11,
+    CHIP_MDC_LITE = 12,
+    CHIP_CLOUD_V3 = 13,
+    CHIP_CLOUD_V4 = 15,
+    CHIP_CLOUD_V5 = 16,
+    END_TYPE
 };
 
 class AdumpDsmi {
 public:
     static uint32_t DrvGetDevNum();
     static std::vector<uint32_t> DrvGetDeviceList();
-    static bool DrvGetDevIds(uint32_t numDevices, std::vector<uint32_t> &devIds);
+    static bool DrvGetDevIds(uint32_t numDevices, std::vector<uint32_t>& devIds);
     static bool DrvGetDeviceStatus(const uint32_t deviceId);
-    static bool DrvGetPlatformType(uint32_t &platformType);
-    static bool DrvGetPlatformInfo(uint32_t &platformInfo);
+    static bool DrvGetPlatformType(uint32_t& platformType);
+    static bool DrvGetPlatformInfo(uint32_t& platformInfo);
 #if !defined(ADUMP_SOC_HOST) || ADUMP_SOC_HOST == 1
     static int32_t DrvGetAPIVersion();
 #endif

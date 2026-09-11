@@ -9,9 +9,13 @@
  */
 #include "gtest/gtest.h"
 #include "mockcpp/mockcpp.hpp"
+#include <thread>
+#include <vector>
 #define private public
 #define protected public
 #include "runtime/rt.h"
+#include "runtime/rt_inner_dfx.h"
+#include "parse_kernel_dfx_info.hpp"
 #include "thread_local_container.hpp"
 #undef private
 #undef protected
@@ -21,22 +25,13 @@ using namespace cce::runtime;
 
 class DfxApiTest : public testing::Test {
 protected:
-    static void SetUpTestCase()
-    {
-    }
+    static void SetUpTestCase() {}
 
-    static void TearDownTestCase()
-    {
-    }
+    static void TearDownTestCase() {}
 
-    virtual void SetUp()
-    {
-    }
+    virtual void SetUp() {}
 
-    virtual void TearDown()
-    {
-        GlobalMockObject::verify();
-    }
+    virtual void TearDown() { GlobalMockObject::verify(); }
 };
 
 TEST_F(DfxApiTest, rtSetTaskTag_param_check)
@@ -52,9 +47,10 @@ TEST_F(DfxApiTest, rtSetTaskTag_param_check)
 TEST_F(DfxApiTest, rtSetTaskTag_success)
 {
     ThreadLocalContainer::ResetTaskTag();
-    bool isTaskTagValid = ThreadLocalContainer::IsTaskTagValid();;
+    bool isTaskTagValid = ThreadLocalContainer::IsTaskTagValid();
+    ;
     EXPECT_FALSE(isTaskTagValid);
-    const char *taskTag = "123456";
+    const char* taskTag = "123456";
     rtError_t error = rtSetTaskTag(taskTag);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
@@ -70,7 +66,8 @@ TEST_F(DfxApiTest, rtSetTaskTag_success)
 TEST_F(DfxApiTest, rtSetTaskTag_overlens)
 {
     ThreadLocalContainer::ResetTaskTag();
-    bool isTaskTagValid = ThreadLocalContainer::IsTaskTagValid();;
+    bool isTaskTagValid = ThreadLocalContainer::IsTaskTagValid();
+    ;
     EXPECT_FALSE(isTaskTagValid);
 
     constexpr size_t overLen = TASK_TAG_MAX_LEN + 10;
@@ -96,13 +93,11 @@ TEST_F(DfxApiTest, rtSetTaskTag_overlens)
 
 TEST_F(DfxApiTest, rtSetAicpuAttr_success)
 {
-    const char *key = "key";
-    const char *value = "value";
+    const char* key = "key";
+    const char* value = "value";
     rtError_t error = rtSetAicpuAttr(key, value);
     EXPECT_EQ(error, RT_ERROR_NONE);
-    auto func = [](const char_t * const, const char_t * const)->TDT_StatusType {
-        return 0U;
-    };
+    auto func = [](const char_t* const, const char_t* const) -> TDT_StatusType { return 0U; };
     Runtime::Instance()->tsdSetAttr_ = func;
     error = rtSetAicpuAttr(key, value);
     EXPECT_EQ(error, RT_ERROR_NONE);
@@ -110,20 +105,151 @@ TEST_F(DfxApiTest, rtSetAicpuAttr_success)
 
 TEST_F(DfxApiTest, getTsdQos_success)
 {
-    auto func = [](const int32_t, const int32_t, const uint64_t)->TDT_StatusType {
-        return 0U;
-    };
+    auto func = [](const int32_t, const int32_t, const uint64_t) -> TDT_StatusType { return 0U; };
 
     uint16_t qos;
     Runtime::Instance()->tsdGetCapability_ = func;
     rtError_t error = Runtime::Instance()->GetTsdQos(0, qos);
     EXPECT_EQ(error, RT_ERROR_NONE);
 
-    auto failStub = [](const int32_t, const int32_t, const uint64_t)->TDT_StatusType {
-        return 1U;
-    };
+    auto failStub = [](const int32_t, const int32_t, const uint64_t) -> TDT_StatusType { return 1U; };
 
     Runtime::Instance()->tsdGetCapability_ = failStub;
     error = Runtime::Instance()->GetTsdQos(0, qos);
     EXPECT_EQ(error, RT_ERROR_DRV_TSD_ERR);
+}
+
+class ArgsBufferTest : public testing::Test {
+protected:
+    virtual void SetUp() {}
+
+    virtual void TearDown() { GlobalMockObject::verify(); }
+};
+
+TEST_F(ArgsBufferTest, BasicAllocation_ReturnsValidBuffer)
+{
+    uint64_t requiredSize = 1024ULL;
+    void* buffer = ThreadLocalContainer::GetOrCreateArgsBuffer(requiredSize);
+    ASSERT_NE(buffer, nullptr) << "GetOrCreateArgsBuffer should return valid buffer for kernel args";
+}
+
+TEST_F(ArgsBufferTest, LargeSizeAllocation_ReturnsValidBuffer)
+{
+    uint64_t requiredSize = 8192ULL;
+    void* buffer = ThreadLocalContainer::GetOrCreateArgsBuffer(requiredSize);
+    ASSERT_NE(buffer, nullptr) << "GetOrCreateArgsBuffer should handle large kernel args";
+}
+
+TEST_F(ArgsBufferTest, MultipleCalls_StableBehavior)
+{
+    for (int i = 0; i < 10; i++) {
+        uint64_t size = 1024ULL + i * 100ULL;
+        void* buffer = ThreadLocalContainer::GetOrCreateArgsBuffer(size);
+        ASSERT_NE(buffer, nullptr) << "GetOrCreateArgsBuffer should be stable across multiple calls";
+    }
+}
+
+TEST_F(ArgsBufferTest, SmallSize_GetsDefaultSizeBuffer)
+{
+    uint64_t requiredSize = 64ULL;
+    void* buffer = ThreadLocalContainer::GetOrCreateArgsBuffer(requiredSize);
+    ASSERT_NE(buffer, nullptr) << "GetOrCreateArgsBuffer should allocate at least default size";
+}
+
+static void DummyParseCallback(const rtDfxParseParam* param, uint64_t* consumedLen)
+{
+    (void)param;
+    *consumedLen = 0U;
+}
+
+static void DummyParseCallback2(const rtDfxParseParam* param, uint64_t* consumedLen)
+{
+    (void)param;
+    *consumedLen = 0U;
+}
+
+class ParseDfxInfoApiTest : public testing::Test {
+protected:
+    virtual void SetUp()
+    {
+        ParseKernelDfxInfo* inst = ParseKernelDfxInfo::Instance();
+        if (inst != nullptr) {
+            (void)inst->SetCallback(nullptr);
+        }
+    }
+
+    virtual void TearDown()
+    {
+        ParseKernelDfxInfo* inst = ParseKernelDfxInfo::Instance();
+        if (inst != nullptr) {
+            (void)inst->SetCallback(nullptr);
+        }
+        GlobalMockObject::verify();
+    }
+};
+
+TEST_F(ParseDfxInfoApiTest, ParseKernelDfxInfo_SetCallback_WhenValidFunc_ExpectSuccess)
+{
+    rtError_t ret = ParseKernelDfxInfo::Instance()->SetCallback(DummyParseCallback);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    EXPECT_EQ(ParseKernelDfxInfo::Instance()->GetCallback(), DummyParseCallback);
+}
+
+TEST_F(ParseDfxInfoApiTest, ParseKernelDfxInfo_SetCallback_WhenDuplicate_ExpectOverwritten)
+{
+    (void)ParseKernelDfxInfo::Instance()->SetCallback(DummyParseCallback);
+    rtError_t ret = ParseKernelDfxInfo::Instance()->SetCallback(DummyParseCallback2);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    EXPECT_EQ(ParseKernelDfxInfo::Instance()->GetCallback(), DummyParseCallback2);
+}
+
+TEST_F(ParseDfxInfoApiTest, ParseKernelDfxInfo_SetCallback_WhenNullptrClear_ExpectSuccess)
+{
+    (void)ParseKernelDfxInfo::Instance()->SetCallback(DummyParseCallback);
+    rtError_t ret = ParseKernelDfxInfo::Instance()->SetCallback(nullptr);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    EXPECT_EQ(ParseKernelDfxInfo::Instance()->GetCallback(), nullptr);
+}
+
+TEST_F(ParseDfxInfoApiTest, rtRegisterParseDfxInfoFunc_WhenNullptr_ExpectSuccess)
+{
+    rtError_t ret = rtRegisterParseDfxInfoFunc(nullptr);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    EXPECT_EQ(ParseKernelDfxInfo::Instance()->GetCallback(), nullptr);
+}
+
+TEST_F(ParseDfxInfoApiTest, rtRegisterParseDfxInfoFunc_WhenValidFunc_ExpectCallbackSet)
+{
+    rtError_t ret = rtRegisterParseDfxInfoFunc(DummyParseCallback);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    EXPECT_EQ(ParseKernelDfxInfo::Instance()->GetCallback(), DummyParseCallback);
+}
+
+TEST_F(ParseDfxInfoApiTest, ParseKernelDfxInfo_SetCallback_WhenNullptrAndNoExisting_ExpectSuccess)
+{
+    (void)ParseKernelDfxInfo::Instance()->SetCallback(nullptr);
+    rtError_t ret = ParseKernelDfxInfo::Instance()->SetCallback(nullptr);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    EXPECT_EQ(ParseKernelDfxInfo::Instance()->GetCallback(), nullptr);
+}
+
+TEST_F(ParseDfxInfoApiTest, ParseKernelDfxInfo_WhenConcurrentAccess_ExpectNoCrash)
+{
+    ParseKernelDfxInfo* inst = ParseKernelDfxInfo::Instance();
+    ASSERT_NE(inst, nullptr);
+
+    const int threadNum = 4;
+    std::vector<std::thread> threads;
+    for (int i = 0; i < threadNum; i++) {
+        threads.emplace_back([inst]() {
+            for (int j = 0; j < 100; j++) {
+                (void)inst->GetCallback();
+            }
+        });
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    SUCCEED();
 }

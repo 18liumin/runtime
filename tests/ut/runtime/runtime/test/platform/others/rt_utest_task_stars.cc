@@ -1,0 +1,168 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+#include "gtest/gtest.h"
+#include "mockcpp/mockcpp.hpp"
+#include "securec.h"
+#define protected public
+#define private public
+#include "base.hpp"
+#include "task.hpp"
+#include "stars.hpp"
+#include "davinci_kernel_task.h"
+#include "hwts.hpp"
+#include "rt_unwrap.h"
+#include "notify.hpp"
+#include "count_notify.hpp"
+#undef protected
+#undef private
+#include "ffts_task.h"
+#include "rdma_task.h"
+#include "context.hpp"
+#include "runtime.hpp"
+#include "uma_arg_loader.hpp"
+#include "stars_cond_isa_define.hpp"
+#include "thread_local_container.hpp"
+#include "raw_device.hpp"
+#include "task_execute_time.h"
+#include "capture_model_utils.hpp"
+#include "../../rt_utest_config_define.hpp"
+#include "model_execute_task.h"
+#include "notify_task.h"
+#include "../../task_test_helper.h"
+using namespace testing;
+using namespace cce::runtime;
+
+class StarsTaskTest : public testing::Test {
+protected:
+    static void SetUpTestCase() { std::cout << "StarsTaskTest start" << std::endl; }
+
+    static void TearDownTestCase() { std::cout << "StarsTaskTest end" << std::endl; }
+
+    virtual void SetUp()
+    {
+        oriChipType = GlobalContainer::GetRtChipType();
+        int32_t devId = -1;
+        ASSERT_EQ(rtSetDevice(0), RT_ERROR_NONE);
+        ASSERT_EQ(rtGetDevice(&devId), RT_ERROR_NONE);
+        dev_ = ((Runtime*)Runtime::Instance())->DeviceRetain(devId, 0);
+        old = dev_->GetChipType();
+
+        const rtError_t streamRet = rtStreamCreate(&streamHandle_, 0);
+        ASSERT_EQ(streamRet, RT_ERROR_NONE);
+        if (streamRet == RT_ERROR_NONE) {
+            stream_ = rt_ut::UnwrapOrNull<Stream>(streamHandle_);
+            ASSERT_NE(stream_, nullptr);
+        } else {
+            stream_ = nullptr;
+        }
+        ctx_ = Runtime::Instance()->CurrentContext();
+        std::cout << "RtsStApi test start start. old chiptype=" << old << std::endl;
+    }
+    virtual void TearDown()
+    {
+        GlobalMockObject::verify();
+        if (streamHandle_ != nullptr) {
+            rtStreamDestroy(streamHandle_);
+        }
+        dev_->SetChipType(old);
+        ((Runtime*)Runtime::Instance())->DeviceRelease(dev_);
+        rtDeviceReset(0);
+        stream_ = nullptr;
+        streamHandle_ = nullptr;
+        dev_ = nullptr;
+        GlobalContainer::SetRtChipType(oriChipType);
+        std::cout << "RtsStApi test start end" << std::endl;
+    }
+
+protected:
+    rtChipType_t oriChipType;
+    Stream* stream_ = nullptr;
+    rtStream_t streamHandle_ = nullptr;
+    Device* dev_ = nullptr;
+    Context* ctx_ = nullptr;
+    rtChipType_t old;
+    static bool flag;
+};
+
+TEST_F(StarsTaskTest, DoCompleteStarsError_david)
+{
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    rtChipType_t oriChipType = rtInstance->GetChipType();
+    rtInstance->SetChipType(CHIP_DAVID);
+    GlobalContainer::SetRtChipType(CHIP_DAVID);
+
+    rtError_t ret;
+    Model* model;
+    Stream* stream;
+    Notify* notify;
+    rtModel_t modelHandle = nullptr;
+    rtStream_t streamHandle = nullptr;
+    rtNotify_t notifyHandle = nullptr;
+
+    ret = rtStreamCreate(&streamHandle, 0);
+    ASSERT_EQ(ret, RT_ERROR_NONE);
+    stream = rt_ut::UnwrapOrNull<Stream>(streamHandle);
+    ASSERT_NE(stream, nullptr);
+    ret = rtModelCreate(&modelHandle, 0);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    model = rt_ut::UnwrapOrNull<Model>(modelHandle);
+    ret = rtNotifyCreate(0, &notifyHandle);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    notify = rt_ut::UnwrapOrNull<Notify>(notifyHandle);
+    notify->SetEndGraphModel(model);
+
+    TaskInfo task = {};
+    InitByStream(&task, stream);
+
+    task.u.notifywaitTask.u.notify = notify;
+    ret = NotifyWaitTaskInit(&task, 0, 0, nullptr, notify, false);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    ToConstructSqe(&task, &sqe);
+    uint32_t errorcode = 10;
+
+    rtCqReport_t wait_cqe = {};
+    wait_cqe.errorType = 1U;
+    wait_cqe.errorCode = 1U;
+
+    TaskFactory* taskFactory = stream->Device_()->GetTaskFactory();
+    ASSERT_NE(taskFactory, nullptr);
+    TaskInfo* errTask = taskFactory->Alloc(stream, TS_TASK_TYPE_KERNEL_AICORE, ret);
+    taskFactory->SetSerialId(stream, errTask);
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    AicTaskInit(errTask, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+    EXPECT_EQ(errTask->type, TS_TASK_TYPE_KERNEL_AICORE);
+
+    rtStarsCqeSwStatus_t sw_status;
+    sw_status.model_exec.stream_id = errTask->stream->Id_();
+    sw_status.model_exec.task_id = errTask->id;
+    GetRealReportFaultTask(&task, static_cast<const void*>(&sw_status));
+    (void)dev_->GetTaskFactory()->Recycle(errTask);
+    SetStarsResult(&task, wait_cqe);
+    Complete(&task, 0);
+
+    TaskInfo execTask = {};
+    execTask.stream = stream;
+    ModelExecuteTaskInit(&execTask, model, 0, 0);
+    rtCqReport_t cqe = {};
+    cqe.errorType = 1U;
+    SetStarsResult(&execTask, cqe);
+
+    ret = rtNotifyDestroy(notifyHandle);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    ret = rtStreamDestroy(streamHandle);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    ret = rtModelDestroy(modelHandle);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    rtInstance->SetChipType(oriChipType);
+    GlobalContainer::SetRtChipType(oriChipType);
+}

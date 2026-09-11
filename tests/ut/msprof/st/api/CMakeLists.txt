@@ -1,6 +1,6 @@
 # -----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2025 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
@@ -8,11 +8,11 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 set(API_STUB_DIR
-    ${TOP_DIR}/llt/abl/msprof/st/stub
+    ${TOP_DIR}/tests/ut/msprof/st/stub
 )
 
 set(LLT_DATA_DIR
-    ${TOP_DIR}/llt/abl/msprof/st/data/
+    ${TOP_DIR}/tests/ut/msprof/st/data
 )
 
 set(TEST_STUB_SRC
@@ -24,16 +24,19 @@ set(TEST_STUB_SRC
     ${API_STUB_DIR}/device/stars_device_simulator.cpp
     ${API_STUB_DIR}/device/david_device_simulator.cpp
     ${API_STUB_DIR}/device/david_v121_device_simulator.cpp
+    ${API_STUB_DIR}/device/modena_device_simulator.cpp
     ${API_STUB_DIR}/device/cloud_device_simulator.cpp
     ${API_STUB_DIR}/device/dc_device_simulator.cpp
     ${API_STUB_DIR}/device/mdc_device_simulator.cpp
     ${API_STUB_DIR}/device/mdc_lite_device_simulator.cpp
+    ${API_STUB_DIR}/device/mdc_lite_v2_device_simulator.cpp
     ${API_STUB_DIR}/device/mini_device_simulator.cpp
     ${API_STUB_DIR}/device/tiny_device_simulator.cpp
     ${API_STUB_DIR}/device/nano_device_simulator.cpp
     ${API_STUB_DIR}/device/mdc_mini_v3_device_simulator.cpp
     ${API_STUB_DIR}/device/mini_stars_device_simulator.cpp
     ${API_STUB_DIR}/host/msprof_stub.cpp
+    ${API_STUB_DIR}/aicpu_report_hdc.cpp
     ${API_STUB_DIR}/mmpa_stub.cpp
     ${API_STUB_DIR}/hdc-log-stub.cpp
     ${API_STUB_DIR}/ide-cmd-stub.cpp
@@ -53,7 +56,6 @@ set(MSPROFAPI_SRC_FILE
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_plugin_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_cann_plugin.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_atls_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_tx_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_acl_plugin.cpp
 )
@@ -71,10 +73,12 @@ set(PROFIMPL_SRC_FILE
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/analyzer_ffts.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/analyzer_ts.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/analyzer_rt.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/stats_analyzer_api.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/stats_analyzer.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/op_desc_parser.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/cmd_log/cmd_log.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/common/config/config_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/config/feature_manager.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/common/config/config_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/memory/chunk_pool.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/platform/platform.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/socket/local_socket.cpp
@@ -83,14 +87,17 @@ set(PROFIMPL_SRC_FILE
     ${MSPROF_SOURCE_DIR}/dvvp/common/thread/thread_pool.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/json/json.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/utils/utils.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/common/utils/llc_event_utils.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/validation/param_validation.cpp
     ${MSPROF_SOURCE_DIR}/basic/osal/osal.c
     ${MSPROF_SOURCE_DIR}/dvvp/driver/channel/ai_drv_prof_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dev_api.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/msprof_drv_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dsmi_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/collection_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/collection_register.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/job_device_soc.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/job_device_rpc.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/job_factory.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_channel_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_comm_job.cpp
@@ -105,6 +112,7 @@ set(PROFIMPL_SRC_FILE
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_hwts_log_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_instr_perf_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_biu_perf_job.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_collect_info.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_aicore_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_aicpu_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_adprof_job.cpp
@@ -128,9 +136,14 @@ set(PROFIMPL_SRC_FILE
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/src/msprof_tx_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/src/msprof_tx_reporter.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/src/prof_stamp_pool.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/mstx/src/mstx_inject.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/mstx/src/mstx_domain_mgr.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/mstx/src/mstx_data_handler.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/injection_transport.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/command_handle.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msproftx_adaptor.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msprofiler_impl.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/compute_profiling_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msprofiler_adaptor.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msprofiler_acl_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/json_parser.cpp
@@ -141,16 +154,8 @@ set(PROFIMPL_SRC_FILE
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/base_analyzer.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/cloud_platform.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/cloud_v2_platform.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/david_platform.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/david_v121_platform.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/dc_platform.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mdc_lite_platform.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mdc_mini_v3_platform.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mdc_platform.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mini_platform.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mini_v3_platform.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/nano_platform.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/tiny_v1_platform.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/channel/nano_stars_profile.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/channel/channel_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/task_handle/src/device.cpp
@@ -162,25 +167,56 @@ set(PROFIMPL_SRC_FILE
     ${MSPROF_SOURCE_DIR}/dvvp/transport/file_ageing.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/file_slice.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/file_transport.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/stats_transport.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/hdc/hdc_transport.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/hdc/helper_transport.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/hdc/platform/soc/dev_mgr_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/parser_transport.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/pipe_transport.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/ctrl_files_dumper.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/prof_channel.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/uploader.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/uploader_mgr.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/hash_data.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/hdc/device_transport.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/hdc/data_handle.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/msprof_manager.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/msprof_task.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/running_mode.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/input_parser.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/input_parser_host_sys.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/msprof_params_adapter.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/msopprof_manager.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/dynamic_profiling/src/dyn_prof_client.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/app/application.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/app/env_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/depend/wrapper/error_manager/msprof_error_manager.cpp
     ${HDC_SRC_FILE}
 )
+
+if(NOT BUILD_PROFILING_OPEN_PROJECT)
+    list(APPEND PROFIMPL_SRC_FILE
+        ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/david_platform.cpp
+        ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/david_v121_platform.cpp
+        ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/modena_platform.cpp
+        ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mdc_lite_platform.cpp
+        ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mdc_lite_v2_platform.cpp
+        ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mdc_mini_v3_platform.cpp
+        ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mdc_platform.cpp
+        ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mdc_v2_platform.cpp
+        ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mini_platform.cpp
+        ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/nano_platform.cpp
+        ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/tiny_v1_platform.cpp
+        ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/input_parser_commercial.cpp
+    )
+endif()
 
 set(DEVPROF_SRC_FILE
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/adprof_collector.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/devprof_drv_aicpu.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/devprof_drv_adprof.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/devprof_adprof_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/devprof_common.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/aicpu_report_hdc.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/devprof_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/drvprof/src/engine_mgr.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/drvprof/src/module_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/drvprof/src/rpc_data_handle.cpp
@@ -201,10 +237,40 @@ protobuf_generate(profiler
     ${MSPROF_SOURCE_DIR}/dvvp/proto/profiler.proto
 )
 
+set(libmsprofHeaderDir
+    ${LIBC_SEC_HEADER}
+    ${TOP_DIR}/output/third_party/gtest_shared/include
+    ${TOP_DIR}/third_party/libc_sec/include
+    ${TOP_DIR}/pkg_inc/driver
+    ${TOP_DIR}/include/external
+    ${TOP_DIR}/include/external/acl
+    ${TOP_DIR}/src/dfx/error_manager
+    ${TOP_DIR}/include/dfx
+    ${TOP_DIR}/src/inc
+    ${TOP_DIR}/src/dfx/adump/inc
+    ${TOP_DIR}/src/dfx/adump/inc/adump
+    ${TOP_DIR}/src/dfx/adump/inc/metadef
+    ${TOP_DIR}/pkg_inc/aicpu_sched
+    ${TOP_DIR}/pkg_inc/base
+    ${TOP_DIR}/pkg_inc/profiling
+    ${TOP_DIR}/pkg_inc/runtime
+    ${TOP_DIR}/pkg_inc/runtime/runtime
+    ${TOP_DIR}/src/dfx/adump/inc/metadef/external
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/mstx/inc
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform
+    ${MSPROF_SOURCE_DIR}/dvvp/common/config
+    ${MSPROF_SOURCE_DIR}/dvvp/profapi/inc
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/include
+    ${CMAKE_BINARY_DIR}/json/single_include
+)
+
 set(INCLUDE_DIR
+    ${libmsprofHeaderDir}
+    ${API_STUB_DIR}/host
     stub
     data
     testcase/common
+    ${API_STUB_DIR}
     ${API_STUB_DIR}/device
     ${API_STUB_DIR}/host
     ${TOP_DIR}/inc/driver
@@ -216,8 +282,6 @@ set(INCLUDE_DIR
     ${TOP_DIR}/ace/npuruntime/inc/external
     ${TOP_DIR}/abl/msprof/inc
     ${TOP_DIR}/abl/msprof/inc/external
-    ${TOP_DIR}/metadef/inc
-    ${TOP_DIR}/metadef/inc/external
     ${TOP_DIR}/abl/msprof/inc/toolchain
     ${TOP_DIR}/graphengine/inc
     ${TOP_DIR}/graphengine/inc/external
@@ -277,8 +341,8 @@ set(INCLUDE_DIR
 set(TEST_SRC
     stub/acl_api_stub.cpp
     testcase/common/main.cpp
-    testcase/common/api_stest.cpp
-    testcase/common/api_inner_stest.cpp
+    # testcase/common/api_stest.cpp
+    # testcase/common/api_inner_stest.cpp
 )
 
 ####################### api_dc_stest ###########################
@@ -288,15 +352,14 @@ add_executable(api_dc_stest
     ${TEST_SRC}
     ${SRC_FILE}
     ${CppPath}
+    stub/aoe_stub.cpp
     testcase/api_dc_stest.cpp
 )
 
 target_compile_options(api_dc_stest PRIVATE
     -g
     -Wall
-    -std=c++11
     -fno-access-control
-    -Werror
 )
 
 target_include_directories(api_dc_stest PRIVATE
@@ -304,7 +367,6 @@ target_include_directories(api_dc_stest PRIVATE
 )
 
 target_compile_definitions(api_dc_stest PRIVATE
-    C_SEC
     __PROF_LLT
     google=ascend_private
     LLT_DATA_DIR="${LLT_DATA_DIR}"
@@ -312,6 +374,9 @@ target_compile_definitions(api_dc_stest PRIVATE
     PLATFORM_TYPE=4
     SOC_TYPE="dc"
 )
+if(BUILD_PROFILING_OPEN_PROJECT)
+    target_compile_definitions(api_dc_stest PRIVATE BUILD_PROFILING_OPEN_PROJECT)
+endif()
 
 target_link_options(api_dc_stest PRIVATE
    -ldl
@@ -324,7 +389,7 @@ target_link_libraries(api_dc_stest PRIVATE
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:adump_headers>
     profapi_share_st
-    ascend_protobuf
+    ascend_protobuf_static
     c_sec
     json
 )
@@ -335,19 +400,14 @@ set_target_properties(api_dc_stest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-run_llt_test(
-    TARGET api_dc_stest
-    TASK_NUM 1
-)
-
 ####################### api_david_stest ###########################
-
+if(NOT BUILD_PROFILING_OPEN_PROJECT)
 add_executable(api_david_stest
     ${TEST_STUB_SRC}
     ${TEST_SRC}
     ${SRC_FILE}
     ${CppPath}
-    testcase/api_david_stest.cpp
+    testcase/acl_api/api_david_stest.cpp
 )
 
 target_include_directories(api_david_stest PRIVATE
@@ -357,7 +417,7 @@ target_include_directories(api_david_stest PRIVATE
 target_compile_options(api_david_stest PRIVATE
     -g
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Werror
 )
@@ -383,7 +443,7 @@ target_link_libraries(api_david_stest PRIVATE
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:adump_headers>
     profapi_share_st
-    ascend_protobuf
+    ascend_protobuf_static
     c_sec
     json
 )
@@ -393,11 +453,7 @@ set_target_properties(api_david_stest
     OUTPUT_NAME api_david_stest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
-
-run_llt_test(
-    TARGET api_david_stest
-    TASK_NUM 1
-)
+endif()
 
 ####################### api_mini_v3_stest ###########################
 
@@ -416,7 +472,7 @@ target_include_directories(api_mini_v3_stest PRIVATE
 target_compile_options(api_mini_v3_stest PRIVATE
     -g
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Werror
 )
@@ -430,6 +486,9 @@ target_compile_definitions(api_mini_v3_stest PRIVATE
     PLATFORM_TYPE=7
     SOC_TYPE="mini_v3"
 )
+if(BUILD_PROFILING_OPEN_PROJECT)
+    target_compile_definitions(api_mini_v3_stest PRIVATE BUILD_PROFILING_OPEN_PROJECT)
+endif()
 
 target_link_options(api_mini_v3_stest PRIVATE
    -ldl
@@ -442,7 +501,7 @@ target_link_libraries(api_mini_v3_stest PRIVATE
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:adump_headers>
     profapi_share_st
-    ascend_protobuf
+    ascend_protobuf_static
     c_sec
     json
 )
@@ -453,13 +512,8 @@ set_target_properties(api_mini_v3_stest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-run_llt_test(
-    TARGET api_mini_v3_stest
-    TASK_NUM 1
-)
-
 ####################### api_mdc_mini_v3_stest ###########################
-
+if(NOT BUILD_PROFILING_OPEN_PROJECT)
 add_executable(api_mdc_mini_v3_stest
     ${TEST_STUB_SRC}
     ${TEST_SRC}
@@ -475,7 +529,7 @@ target_include_directories(api_mdc_mini_v3_stest PRIVATE
 target_compile_options(api_mdc_mini_v3_stest PRIVATE
     -g
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Werror
 )
@@ -501,7 +555,7 @@ target_link_libraries(api_mdc_mini_v3_stest PRIVATE
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:adump_headers>
     profapi_share_st
-    ascend_protobuf
+    ascend_protobuf_static
     c_sec
     json
 )
@@ -511,11 +565,7 @@ set_target_properties(api_mdc_mini_v3_stest
     OUTPUT_NAME api_mdc_mini_v3_stest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
-
-run_llt_test(
-    TARGET api_mdc_mini_v3_stest
-    TASK_NUM 1
-)
+endif()
 
 ####################### api_cloud_stest ###########################
 
@@ -534,7 +584,7 @@ target_include_directories(api_cloud_stest PRIVATE
 target_compile_options(api_cloud_stest PRIVATE
     -g
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Werror
 )
@@ -548,6 +598,9 @@ target_compile_definitions(api_cloud_stest PRIVATE
     PLATFORM_TYPE=1
     SOC_TYPE="cloud"
 )
+if(BUILD_PROFILING_OPEN_PROJECT)
+    target_compile_definitions(api_cloud_stest PRIVATE BUILD_PROFILING_OPEN_PROJECT)
+endif()
 
 target_link_options(api_cloud_stest PRIVATE
    -ldl
@@ -560,7 +613,7 @@ target_link_libraries(api_cloud_stest PRIVATE
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:adump_headers>
     profapi_share_st
-    ascend_protobuf
+    ascend_protobuf_static
     c_sec
     json
 )
@@ -571,18 +624,14 @@ set_target_properties(api_cloud_stest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-run_llt_test(
-    TARGET api_cloud_stest
-    TASK_NUM 1
-)
-
 ####################### api_mdc_stest ###########################
-
+if(NOT BUILD_PROFILING_OPEN_PROJECT)
 add_executable(api_mdc_stest
     ${TEST_STUB_SRC}
     ${TEST_SRC}
     ${SRC_FILE}
     ${CppPath}
+    testcase/acl_api/api_mdc_stest.cpp
 )
 
 target_include_directories(api_mdc_stest PRIVATE
@@ -592,7 +641,7 @@ target_include_directories(api_mdc_stest PRIVATE
 target_compile_options(api_mdc_stest PRIVATE
     -g
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Werror
 )
@@ -618,7 +667,7 @@ target_link_libraries(api_mdc_stest PRIVATE
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:adump_headers>
     profapi_share_st
-    ascend_protobuf
+    ascend_protobuf_static
     c_sec
     json
 )
@@ -628,11 +677,7 @@ set_target_properties(api_mdc_stest
     OUTPUT_NAME api_mdc_stest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
-
-run_llt_test(
-    TARGET api_mdc_stest
-    TASK_NUM 1
-)
+endif()
 
 ####################### acl_api_stest ###########################
 
@@ -641,10 +686,8 @@ add_executable(acl_api_stest
     ${TEST_SRC}
     ${SRC_FILE}
     ${CppPath}
-    testcase/api_milan_stest.cpp
+    # testcase/api_milan_stest.cpp
     testcase/acl_api/api_milan_stest.cpp
-    testcase/acl_api/api_david_stest.cpp
-    testcase/acl_api/api_david_v121_stest.cpp
     testcase/acl_api/api_mdc_stest.cpp
     testcase/acl_api/api_cloud_stest.cpp
     testcase/acl_api/api_mdc_mini_v3_stest.cpp
@@ -659,7 +702,7 @@ target_include_directories(acl_api_stest PRIVATE
 target_compile_options(acl_api_stest PRIVATE
     -g
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Werror
 )
@@ -673,6 +716,9 @@ target_compile_definitions(acl_api_stest PRIVATE
     PLATFORM_TYPE=5
     SOC_TYPE="milan"
 )
+if(BUILD_PROFILING_OPEN_PROJECT)
+    target_compile_definitions(acl_api_stest PRIVATE BUILD_PROFILING_OPEN_PROJECT)
+endif()
 
 target_link_options(acl_api_stest PRIVATE
    -ldl
@@ -685,7 +731,7 @@ target_link_libraries(acl_api_stest PRIVATE
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:adump_headers>
     profapi_share_st
-    ascend_protobuf
+    ascend_protobuf_static
     c_sec
     json
 )
@@ -696,12 +742,116 @@ set_target_properties(acl_api_stest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-run_llt_test(
-    TARGET acl_api_stest
-    TASK_NUM 1
-)
-####################### api_tiny_stest ###########################
+####################### api_david_v121_stest ###########################
 
+add_executable(api_david_v121_stest
+    ${TEST_STUB_SRC}
+    ${TEST_SRC}
+    ${SRC_FILE}
+    ${CppPath}
+    testcase/acl_api/api_david_v121_stest.cpp
+)
+
+####################### api_modena_stest ###########################
+
+add_executable(api_modena_stest
+    ${TEST_STUB_SRC}
+    ${TEST_SRC}
+    ${SRC_FILE}
+    ${CppPath}
+    testcase/acl_api/api_modena_stest.cpp
+)
+
+target_include_directories(api_modena_stest PRIVATE
+    ${INCLUDE_DIR}
+)
+
+target_compile_options(api_modena_stest PRIVATE
+    -g
+    -Wall
+    -std=c++14
+    -fno-access-control
+    -Werror
+)
+
+target_compile_definitions(api_modena_stest PRIVATE
+    C_SEC
+    __PROF_LLT
+    google=ascend_private
+    LLT_DATA_DIR="${LLT_DATA_DIR}"
+    API_STEST
+    PLATFORM_TYPE=21
+    SOC_TYPE="modena"
+)
+
+target_link_options(api_modena_stest PRIVATE
+   -ldl
+   -lpthread
+)
+
+target_link_libraries(api_modena_stest PRIVATE
+    $<BUILD_INTERFACE:intf_llt_pub>
+    $<BUILD_INTERFACE:mmpa_headers>
+    $<BUILD_INTERFACE:slog_headers>
+    $<BUILD_INTERFACE:adump_headers>
+    profapi_share_st
+    ascend_protobuf_static
+    c_sec
+    json
+)
+
+set_target_properties(api_modena_stest
+    PROPERTIES
+    OUTPUT_NAME api_modena_stest
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+target_include_directories(api_david_v121_stest PRIVATE
+    ${INCLUDE_DIR}
+)
+
+target_compile_options(api_david_v121_stest PRIVATE
+    -g
+    -Wall
+    -std=c++14
+    -fno-access-control
+    -Werror
+)
+
+target_compile_definitions(api_david_v121_stest PRIVATE
+    C_SEC
+    __PROF_LLT
+    google=ascend_private
+    LLT_DATA_DIR="${LLT_DATA_DIR}"
+    API_STEST
+    PLATFORM_TYPE=16
+    SOC_TYPE="david_v121"
+)
+
+target_link_options(api_david_v121_stest PRIVATE
+   -ldl
+   -lpthread
+)
+
+target_link_libraries(api_david_v121_stest PRIVATE
+    $<BUILD_INTERFACE:intf_llt_pub>
+    $<BUILD_INTERFACE:mmpa_headers>
+    $<BUILD_INTERFACE:slog_headers>
+    $<BUILD_INTERFACE:adump_headers>
+    profapi_share_st
+    ascend_protobuf_static
+    c_sec
+    json
+)
+
+set_target_properties(api_david_v121_stest
+    PROPERTIES
+    OUTPUT_NAME api_david_v121_stest
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+####################### api_tiny_stest ###########################
+if(NOT BUILD_PROFILING_OPEN_PROJECT)
 add_executable(api_tiny_stest
     ${TEST_STUB_SRC}
     ${TEST_SRC}
@@ -717,7 +867,7 @@ target_include_directories(api_tiny_stest PRIVATE
 target_compile_options(api_tiny_stest PRIVATE
     -g
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Werror
 )
@@ -743,7 +893,7 @@ target_link_libraries(api_tiny_stest PRIVATE
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:adump_headers>
     profapi_share_st
-    ascend_protobuf
+    ascend_protobuf_static
     c_sec
     json
 )
@@ -753,12 +903,9 @@ set_target_properties(api_tiny_stest
     OUTPUT_NAME api_tiny_stest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
+endif()
 
-run_llt_test(
-    TARGET api_tiny_stest
-    TASK_NUM 1
-)
-####################### libprofapi.so ###########################
+####################### libprofapi_st.so ###########################
 set(prof_api_src_file
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_inner_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_acl_inner_api.cpp
@@ -766,10 +913,10 @@ set(prof_api_src_file
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_plugin_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_cann_plugin.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_atls_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_tx_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_acl_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_runtime_plugin.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_mstx_plugin.cpp
 )
 
 add_library(profapi_share_st SHARED
@@ -783,8 +930,10 @@ add_library(profapi_share_st SHARED
     ${MSPROF_SOURCE_DIR}/basic/osal/osal.c
     ${MSPROFILER_SRC_FILE}
     stub/aoe_stub.cpp
-    ../../stub/error_manager_stub.cpp
+    ../../stub/error_manager_stub2.cpp
 )
+
+add_dependencies(profapi_share_st csec_src)
 
 target_compile_definitions(profapi_share_st PRIVATE
     $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:WIN32>
@@ -793,7 +942,7 @@ target_compile_definitions(profapi_share_st PRIVATE
 
 set_target_properties(profapi_share_st
     PROPERTIES
-    OUTPUT_NAME profapi
+    OUTPUT_NAME profapi_st
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/
 )
 
@@ -814,6 +963,8 @@ target_link_options(profapi_share_st PRIVATE
 )
 
 target_include_directories(profapi_share_st PRIVATE
+    ${libmsprofHeaderDir}
+    ${API_STUB_DIR}/host
     ${MSPROF_SOURCE_DIR}/dvvp/profapi/inc
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/inc
     ${MSPROF_SOURCE_DIR}/dvvp
@@ -823,6 +974,7 @@ target_include_directories(profapi_share_st PRIVATE
     ${MSPROF_SOURCE_DIR}/basic/osal
     ${MSPROF_SOURCE_DIR}/dvvp/transport
     ${MSPROF_SOURCE_DIR}/dvvp/depend/include/wrapper
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/inc
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/inc
     ${MSPROF_SOURCE_DIR}/dvvp/common/utils
     ${TOP_DIR}/abl/msprof/inc/toolchain
@@ -838,8 +990,6 @@ target_include_directories(profapi_share_st PRIVATE
     ${TOP_DIR}/ace/npuruntime/inc
     ${TOP_DIR}/ace/npuruntime/inc/external
     ${TOP_DIR}/inc/external
-    ${TOP_DIR}/metadef/inc
-    ${TOP_DIR}/metadef/inc/external
     ${API_STUB_DIR}/device
     ${API_STUB_DIR}/host
     ${LLT_DATA_DIR}
@@ -851,6 +1001,8 @@ target_link_libraries(profapi_share_st
         intf_pub
         mmpa_headers
         slog_headers
+        $<BUILD_INTERFACE:error_manager_headers>
+        c_sec
     PUBLIC
         msprof_headers
     json

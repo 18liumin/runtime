@@ -1,0 +1,363 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include "davinci_kernel_task.h"
+#include "stream_david.hpp"
+#include "task_scheduler_error.h"
+#include "runtime_task_manager.h"
+#include "device_error_proc.hpp"
+#include "runtime.hpp"
+#include "event_david.hpp"
+#include "stars.hpp"
+#include "stars_david.hpp"
+#include "device.hpp"
+#include "error_code.h"
+#include "thread_local_container.hpp"
+#include "aic_aiv_sqe_common.hpp"
+#include "aicpu_timeout_manager.h"
+#include "program.hpp"
+
+namespace cce {
+namespace runtime {
+
+#if F_DESC("DavinciKernelTask")
+
+void ConstructDavidAICpuSqeForDavinciTaskResFieldPart(
+    RtDavidStarsAicpuKernelSqe* const sqe, const uint64_t addr, const uint8_t kernelFlag, const Stream* const stm)
+{
+    /* word8-9 */
+    sqe->taskNameStrPtrLow = static_cast<uint32_t>(addr);
+    sqe->taskNameStrPtrHigh = static_cast<uint16_t>(addr >> UINT32_BIT_NUM);
+
+    /* word10-11 */
+    sqe->pL2ctrlLow = 0U;
+    sqe->pL2ctrlHigh = 0U;
+    sqe->overflowEn = stm->IsOverflowEnable();
+    sqe->dumpEn = 0U;
+    if ((kernelFlag & RT_KERNEL_DUMPFLAG) != 0U) {
+        sqe->dumpEn = 1U; // 1: aicpu dump enable
+        sqe->kernelCredit = RT_STARS_ADJUST_KERNEL_CREDIT;
+    }
+    sqe->debugDumpEn = 0U;
+    if (stm->IsDebugRegister() && stm->GetBindFlag()) {
+        sqe->debugDumpEn = 1U;
+    }
+    return;
+}
+
+static void ConstructDavidAICpuSqeForDavinciTaskResField(
+    AicpuTaskInfo* const aicpuTaskInfo, rtDavidSqe_t* const davidSqe, const Stream* const stm, const uint8_t kernelFlag)
+{
+    RtDavidStarsAicpuKernelSqe* const sqe = &(davidSqe->aicpuSqe);
+
+    /* word4-5 */
+    uint64_t addr = RtPtrToValue(aicpuTaskInfo->soName);
+    sqe->taskSoAddrLow = static_cast<uint32_t>(addr);
+    sqe->taskSoAddrHigh = static_cast<uint16_t>(addr >> UINT32_BIT_NUM);
+
+    /* word6-7 */
+    const uint8_t* tmpAddr = RtPtrToPtr<const uint8_t*, void*>(aicpuTaskInfo->comm.args);
+    const void* paramAddr = tmpAddr + aicpuTaskInfo->headParamOffset;
+    addr = RtPtrToValue(paramAddr);
+    sqe->paramAddrLow = static_cast<uint32_t>(addr);
+    sqe->paramAddrHigh = static_cast<uint16_t>(addr >> UINT32_BIT_NUM);
+    // for kfcArgsFmtOffset, A1算子目前不用，先赋默认值
+    sqe->res5 = 0xFFFFU;
+
+    /* word8-11 */
+    addr = RtPtrToValue(aicpuTaskInfo->funcName);
+    ConstructDavidAICpuSqeForDavinciTaskResFieldPart(sqe, addr, kernelFlag, stm);
+    return;
+}
+
+void FillTopicType(RtDavidStarsAicpuKernelSqe* const sqe, const uint32_t kernelFlag)
+{
+    if ((kernelFlag & RT_KERNEL_HOST_FIRST) == RT_KERNEL_HOST_FIRST) {
+        sqe->topicType = TOPIC_TYPE_HOST_AICPU_FIRST;
+    } else if ((kernelFlag & RT_KERNEL_HOST_ONLY) == RT_KERNEL_HOST_ONLY) {
+        sqe->topicType = TOPIC_TYPE_HOST_AICPU_ONLY;
+    } else if ((kernelFlag & RT_KERNEL_DEVICE_FIRST) == RT_KERNEL_DEVICE_FIRST) {
+        sqe->header.type = RT_DAVID_SQE_TYPE_AICPU_D;
+        sqe->topicType = TOPIC_TYPE_DEVICE_AICPU_FIRST;
+    } else {
+        sqe->header.type = RT_DAVID_SQE_TYPE_AICPU_D;
+        sqe->topicType = TOPIC_TYPE_DEVICE_AICPU_ONLY;
+    }
+    return;
+}
+
+void ConstructDavidAICpuSqeForDavinciTaskBase(
+    TaskInfo* const taskInfo, rtDavidSqe_t* const davidSqe, uint64_t sqBaseAddr)
+{
+    UNUSED(sqBaseAddr);
+    ConstructDavidSqeForHeadCommon(taskInfo, davidSqe);
+    RtDavidStarsAicpuKernelSqe* const sqe = &(davidSqe->aicpuSqe);
+
+    AicpuTaskInfo* aicpuTaskInfo = &(taskInfo->u.aicpuTaskInfo);
+    Stream* const stm = taskInfo->stream;
+
+    /* word0-1 */
+    sqe->header.type = RT_DAVID_SQE_TYPE_AICPU_H; // modified by kernelFlag
+    if (stm->IsDebugRegister() && (!stm->GetBindFlag())) {
+        sqe->header.postP = RT_STARS_SQE_INT_DIR_TO_TSCPU;
+    }
+    sqe->header.wrCqe = stm->GetStarsWrCqeFlag();
+    sqe->header.blockDim = aicpuTaskInfo->comm.dim;
+
+    /* word2 */
+    sqe->kernelType = static_cast<uint16_t>(aicpuTaskInfo->aicpuKernelType);
+    sqe->batchMode = 0U;
+
+    const uint8_t kernelFlag = aicpuTaskInfo->comm.kernelFlag;
+    FillTopicType(sqe, kernelFlag);
+
+    // MC2走fusion的A1算子流程
+    if ((stm->Device_()->IsSupportHcomcpu() == 1U) && (sqe->kernelType == KERNEL_TYPE_AICPU_KFC) &&
+        (aicpuTaskInfo->comm.dim == 1U)) {
+        sqe->header.type = RT_DAVID_SQE_TYPE_FUSION;
+        sqe->resv.fusionSubTypeDesc.subType = 1U;
+    }
+
+    sqe->qos = GetAICpuQos(taskInfo);
+
+    /* word3 */
+    sqe->sqeIndex = 0U; // useless
+    const bool isSupportTimeout =
+        AicpuTimeoutManager::IsTimeoutSupportedByKernelType(stm->Device_(), static_cast<uint32_t>(sqe->kernelType));
+    const bool isNeedNoTimeout = ((aicpuTaskInfo->timeout > RUNTIME_DAVINCI_MAX_TIMEOUT) && isSupportTimeout) ||
+                                 (aicpuTaskInfo->timeout == MAX_UINT64_NUM);
+    sqe->kernelCredit = isNeedNoTimeout ?
+                            RT_STARS_NEVER_TIMEOUT_KERNEL_CREDIT :
+                            static_cast<uint8_t>(GetAicpuKernelCreditV200(stm->Device_(), aicpuTaskInfo->timeout));
+    sqe->sqeLength = 0U;
+
+    /* words4-13 use reserved field */
+    /* word4-11 */
+    ConstructDavidAICpuSqeForDavinciTaskResField(aicpuTaskInfo, davidSqe, stm, kernelFlag);
+
+    /* word12-13 */
+    sqe->extraFieldLow = taskInfo->taskSn; // send task id info to aicpu
+    sqe->extraFieldHigh = 0U;
+
+    /* word14 */
+    sqe->subTopicId = 0U;
+    sqe->topicId = 3U;     // EVENT_TS_HWTS_KERNEL
+    sqe->groupId = 0U;
+    sqe->usrDataLen = 40U; /* size: word4-13 */
+
+    /* word15 */
+    sqe->destPid = 0U;
+
+    return;
+}
+
+void StarsV2DoCompleteSuccessForDavinciTask(TaskInfo* taskInfo, const uint32_t devId)
+{
+    PreCheckTaskErr(taskInfo, devId);
+    const uint32_t errorCode = taskInfo->errorCode;
+    Stream* const stream = taskInfo->stream;
+    if ((errorCode != TS_ERROR_AICORE_OVERFLOW) && (errorCode != TS_ERROR_AIVEC_OVERFLOW) &&
+        (errorCode != TS_ERROR_AICPU_OVERFLOW) && (errorCode != TS_ERROR_SDMA_OVERFLOW) && (errorCode != 0U)) {
+        TaskFailCallBack(
+            static_cast<uint32_t>(stream->Id_()), static_cast<uint32_t>(taskInfo->id), taskInfo->tid, errorCode,
+            stream->Device_());
+    }
+}
+
+void StarsV2DavinciTaskUnInit(TaskInfo* taskInfo)
+{
+    if ((taskInfo->stream != nullptr) && (taskInfo->stream->Context_() != nullptr)) {
+        static_cast<DavidStream*>(taskInfo->stream)->ArgReleaseSingleTask(taskInfo, true);
+    }
+    if (taskInfo->type == TS_TASK_TYPE_KERNEL_AICPU) {
+        AicpuTaskInfo* aicpuTaskInfo = &(taskInfo->u.aicpuTaskInfo);
+        aicpuTaskInfo->comm.args = nullptr;
+        aicpuTaskInfo->funcName = nullptr;
+        aicpuTaskInfo->soName = nullptr;
+    } else {
+        AicTaskInfo* aicTaskInfo = &(taskInfo->u.aicTaskInfo);
+        aicTaskInfo->comm.args = nullptr;
+    }
+}
+
+static void MapAicpuErrorCodeForFastRecovery(TaskInfo* taskInfo, const rtCqReport_t& logicCq)
+{
+    taskInfo->errorCode = TS_ERROR_AICPU_EXCEPTION;
+    Stream* const stream = taskInfo->stream;
+    const bool hasMteErr = HasMteErr(stream->Device_());
+    if ((logicCq.errorCode >> RT_AICPU_ERROR_CODE_BIT_MOVE) == AICPU_HCCL_OP_UB_DDRC_FAILED) {
+        if (hasMteErr && !HasMemUceErr(stream->Device_(), g_aicOrSdmaOrHcclLocalMulBitEccEventIdBlkList)) {
+            taskInfo->errorCode = TS_ERROR_LOCAL_MEM_ERROR;
+            (RtPtrToUnConstPtr<Device*>(stream->Device_()))->SetDeviceFaultType(DeviceFaultType::HBM_UCE_ERROR);
+            RT_LOG(
+                RT_LOG_ERROR,
+                "hccl aicpu task error is local mem error, device_id=%u, stream_id=%d, task_id=%hu, "
+                "logicCq.errorCode=%u, logicCq.errorType=%hhu, taskInfo->errorCode=%u",
+                stream->Device_()->Id_(), stream->Id_(), taskInfo->id, logicCq.errorCode, logicCq.errorType,
+                taskInfo->errorCode);
+        }
+    } else if ((logicCq.errorCode >> RT_AICPU_ERROR_CODE_BIT_MOVE) == AICPU_HCCL_OP_UB_POISON_FAILED) {
+        if (!hasMteErr && !HasMemUceErr(stream->Device_(), g_hcclRemoteMulBitEccEventIdBlkList)) {
+            taskInfo->errorCode = TS_ERROR_REMOTE_MEM_ERROR;
+            RT_LOG(
+                RT_LOG_ERROR,
+                "hccl aicpu task error is remote mem error, device_id=%u, stream_id=%d, task_id=%hu, "
+                "logicCq.errorCode=%u, logicCq.errorType=%hhu, taskInfo->errorCode=%u",
+                stream->Device_()->Id_(), stream->Id_(), taskInfo->id, logicCq.errorCode, logicCq.errorType,
+                taskInfo->errorCode);
+        }
+    } else if ((logicCq.errorCode >> RT_AICPU_ERROR_CODE_BIT_MOVE) == AICPU_HCCL_OP_UB_LINK_FAILED) {
+        if (!HasBlacklistEventOnDevice(stream->Device_()->Id_(), g_ccuTimeoutEventIdBlkList)) {
+            taskInfo->errorCode = TS_ERROR_LINK_ERROR;
+            (RtPtrToUnConstPtr<Device*>(stream->Device_()))->SetDeviceFaultType(DeviceFaultType::LINK_ERROR);
+            RT_LOG(
+                RT_LOG_ERROR,
+                "hccl aicpu task error is link error, device_id=%u, stream_id=%d, task_id=%hu, logicCq.errorCode=%u, "
+                "logicCq.errorType=%hhu, taskInfo->errorCode=%u",
+                stream->Device_()->Id_(), stream->Id_(), taskInfo->id, logicCq.errorCode, logicCq.errorType,
+                taskInfo->errorCode);
+        }
+    } else {
+        // no operation
+    }
+}
+
+static void SetStarsResultByErrorType(TaskInfo* taskInfo, const rtCqReport_t& logicCq)
+{
+    if ((logicCq.errorType & RT_STARS_EXIST_ERROR) == 0U) {
+        return;
+    }
+    Stream* const reportStream = GetReportStream(taskInfo->stream);
+
+    if (taskInfo->type == TS_TASK_TYPE_KERNEL_AIVEC) {
+        taskInfo->errorCode = GetStarsV2VectorErrorCode(logicCq);
+        COND_PROC(
+            CheckErrPrint(taskInfo->errorCode),
+            STREAM_REPORT_ERR_MSG(
+                reportStream, ERR_MODULE_TBE, "Vector Core kernel execution failed, retCode=%#x.",
+                taskInfo->errorCode));
+    } else if (taskInfo->type == TS_TASK_TYPE_KERNEL_AICPU) {
+        taskInfo->errorCode = GetStarsV2AicpuErrorCode(logicCq);
+        COND_PROC(
+            CheckErrPrint(taskInfo->errorCode),
+            STREAM_REPORT_ERR_MSG(
+                reportStream, ERR_MODULE_AICPU, "AI CPU kernel task execution failed, retCode=%#x.",
+                taskInfo->errorCode));
+    } else {
+        taskInfo->errorCode = GetStarsV2AicoreErrorCode(logicCq);
+        COND_PROC(
+            CheckErrPrint(taskInfo->errorCode),
+            STREAM_REPORT_ERR_MSG(
+                reportStream, ERR_MODULE_TBE, "AI Core kernel task execution failed, retCode=%#x.",
+                taskInfo->errorCode));
+    }
+}
+
+void StarsV2SetStarsResultForDavinciTask(TaskInfo* taskInfo, const rtCqReport_t& logicCq)
+{
+    if (taskInfo->type == TS_TASK_TYPE_KERNEL_AICPU) {
+        RT_LOG(RT_LOG_DEBUG, "AI CPU Kernel task happen error, retCode=%#x.", logicCq.errorCode);
+        const uint32_t aicpuErrorCode = logicCq.errorCode >> RT_AICPU_ERROR_CODE_BIT_MOVE;
+        if (aicpuErrorCode == AICPU_HCCL_OP_UB_DDRC_FAILED || aicpuErrorCode == AICPU_HCCL_OP_UB_POISON_FAILED ||
+            aicpuErrorCode == AICPU_HCCL_OP_UB_LINK_FAILED) {
+            MapAicpuErrorCodeForFastRecovery(taskInfo, logicCq);
+            return;
+        } else if (aicpuErrorCode == AE_END_OF_SEQUENCE) {
+            taskInfo->errorCode = TS_ERROR_END_OF_SEQUENCE;
+            return;
+        }
+    }
+    SetStarsResultByErrorType(taskInfo, logicCq);
+}
+
+static void ConstructDavidCommonSqeForDavinciTask(TaskInfo* taskInfo, rtDavidSqe_t* const command, uint64_t sqBaseAddr)
+{
+    UNUSED(sqBaseAddr);
+    RtDavidStarsAicAivKernelSqe* sqe = &(command->aicAivSqe);
+    Stream* const stm = taskInfo->stream;
+    AicTaskInfo* aicTaskInfo = &(taskInfo->u.aicTaskInfo);
+    ConstructDavidSqeForHeadCommon(taskInfo, command);
+    ConstructCommonAicAivSqeWord(&(aicTaskInfo->comm), sqe, taskInfo, stm);
+
+    const Kernel* kernelPtr = GetKernelByTaskType(taskInfo);
+    uint32_t minStackSize = 0U;
+    if (kernelPtr != nullptr) {
+        minStackSize = kernelPtr->GetMinStackSize1();
+    }
+    uint64_t stackPhyBase = RtPtrToValue(stm->Device_()->GetStackPhyBase32k());
+    if (unlikely(minStackSize > KERNEL_STACK_SIZE_32K)) {
+        stackPhyBase = RtPtrToValue(stm->Device_()->GetCustomerStackPhyBase());
+    }
+    sqe->stackPhyBaseLow = static_cast<uint32_t>(stackPhyBase);
+    sqe->stackPhyBaseHigh = static_cast<uint32_t>(stackPhyBase >> UINT32_BIT_NUM);
+    sqe->res4 = 0U;
+    return;
+}
+
+static void ConstructDavidAICoreSqeForDavinciTask(TaskInfo* taskInfo, rtDavidSqe_t* const command, uint64_t sqBaseAddr)
+{
+    ConstructDavidCommonSqeForDavinciTask(taskInfo, command, sqBaseAddr);
+    RtDavidStarsAicAivKernelSqe* sqe = &(command->aicAivSqe);
+    AicTaskInfo* aicTaskInfo = &(taskInfo->u.aicTaskInfo);
+    const uint64_t addr = RtPtrToValue(aicTaskInfo->comm.args) + aicTaskInfo->simtParamOffset;
+    Stream* const stm = taskInfo->stream;
+    ConstructAicSqePart(aicTaskInfo, sqe, addr, stm);
+    UpdateDavidAICoreSqeForDavinciTask(taskInfo, sqe);
+    PrintDavidSqe(command, "AICore Task");
+    return;
+}
+
+static void ConstructDavidAivSqeForDavinciTask(TaskInfo* taskInfo, rtDavidSqe_t* const command, uint64_t sqBaseAddr)
+{
+    ConstructDavidCommonSqeForDavinciTask(taskInfo, command, sqBaseAddr);
+    RtDavidStarsAicAivKernelSqe* sqe = &(command->aicAivSqe);
+    AicTaskInfo* aicTaskInfo = &(taskInfo->u.aicTaskInfo);
+    const uint64_t addr = RtPtrToValue(aicTaskInfo->comm.args) + aicTaskInfo->simtParamOffset;
+    Stream* const stm = taskInfo->stream;
+    ConstructAivSqePart(aicTaskInfo, sqe, addr, stm);
+
+    PrintDavidSqe(command, "AIV Task");
+    return;
+}
+
+static void ConstructDavidMixSqeForDavinciTask(TaskInfo* taskInfo, rtDavidSqe_t* const command, uint64_t sqBaseAddr)
+{
+    ConstructDavidCommonSqeForDavinciTask(taskInfo, command, sqBaseAddr);
+    RtDavidStarsAicAivKernelSqe* sqe = &(command->aicAivSqe);
+    ConstructMixSqeCommonForDavinciTask(taskInfo, sqe);
+
+    PrintDavidSqe(command, "MIX Task");
+
+    return;
+}
+
+void ConstructDavidAicAivSqeForDavinciTask(TaskInfo* const taskInfo, void* const sqe, const TaskSqeInfo& sqeInfo)
+{
+    rtDavidSqe_t* davidSqe = static_cast<rtDavidSqe_t*>(sqe);
+    uint64_t sqBaseAddr = sqeInfo.sqBaseAddr;
+    AicTaskInfo* aicTaskInfo = &(taskInfo->u.aicTaskInfo);
+    const uint8_t mixType =
+        (aicTaskInfo->kernel != nullptr) ? aicTaskInfo->kernel->GetMixType() : static_cast<uint8_t>(NO_MIX);
+    if (mixType != NO_MIX) {
+        ConstructDavidMixSqeForDavinciTask(taskInfo, davidSqe, sqBaseAddr);
+    } else {
+        if (taskInfo->type == TS_TASK_TYPE_KERNEL_AICORE) {
+            ConstructDavidAICoreSqeForDavinciTask(taskInfo, davidSqe, sqBaseAddr);
+        } else {
+            ConstructDavidAivSqeForDavinciTask(taskInfo, davidSqe, sqBaseAddr);
+        }
+    }
+
+    return;
+}
+#endif
+
+} // namespace runtime
+} // namespace cce

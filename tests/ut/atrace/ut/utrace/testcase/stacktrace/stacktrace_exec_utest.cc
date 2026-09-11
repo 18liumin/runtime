@@ -11,54 +11,71 @@
 #include "gtest/gtest.h"
 #include "mockcpp/mockcpp.hpp"
 
-#include <pwd.h>
+#include <fstream>
 #include <signal.h>
+#include <string>
 #include "stacktrace_exec.h"
 #include "stacktrace_safe_recorder.h"
 #include "stacktrace_err_code.h"
-#include "dumper_core.h"
 #include "scd_process.h"
+#include "stacktrace_logger.h"
+#include "stacktrace_ut_common.h"
 
 extern "C" {
-    void TraceInit(void);
-    void TraceExit(void);
-    int32_t ScExecEntry(void *args);
+int32_t ScExecEntry(void* args);
 }
 
-void Mocker_Subprocess(void)
+static void CheckFileContains(const char* filePath, const char* content)
 {
-    // 通过mocker使st执行走到新的父进程框架
-    MOCKER(ScdCoreStart).stubs().will(invoke(ScExecStart));
-    MOCKER(ScdCoreEnd).stubs().will(invoke(ScExecEnd));
+    std::ifstream file(filePath);
+    ASSERT_TRUE(file.is_open());
+    std::string log((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    EXPECT_NE(std::string::npos, log.find(content)) << "missing log content: " << content << ", file: " << filePath;
 }
 
-class TraceExecUtest: public testing::Test {
+static void SetLogPath(const char* name) { StacktraceLogSetPathSuffix(LLT_TEST_DIR, name, ".log"); }
+
+static void SaveAndCheckLogContains(const char* name, const char* content)
+{
+    StackcoreLogSave();
+    const std::string path = std::string(LLT_TEST_DIR) + "/" + name + ".log";
+    CheckFileContains(path.c_str(), content);
+}
+
+static int32_t g_sigprocmask_checked = 0;
+static int sigprocmask_unblock_stub(int how, const sigset_t* set, sigset_t* oldset)
+{
+    (void)oldset;
+    g_sigprocmask_checked++;
+    EXPECT_EQ(SIG_UNBLOCK, how);
+    EXPECT_NE(nullptr, set);
+    if (set == nullptr) {
+        return -1;
+    }
+    EXPECT_EQ(1, sigismember(set, SIGSEGV));
+    EXPECT_EQ(1, sigismember(set, SIG_ATRACE));
+    return 0;
+}
+
+class TraceExecUtest : public testing::Test {
 protected:
     virtual void SetUp()
     {
-        system("mkdir -p " LLT_TEST_DIR );
-        system("rm -rf " LLT_TEST_DIR "/*");
-        struct passwd *pwd = getpwuid(getuid());
-        pwd->pw_dir = LLT_TEST_DIR;
-        MOCKER(getpwuid).stubs().will(returnValue(pwd));
-        Mocker_Subprocess();
-        TraceInit();
+        g_sigprocmask_checked = 0;
+        SetupTraceUtestEnv();
     }
 
     virtual void TearDown()
     {
         TraceExit();
         GlobalMockObject::verify();
-        system("rm -rf " LLT_TEST_DIR );
+        g_sigprocmask_checked = 0;
+        system("rm -rf " LLT_TEST_DIR);
     }
 
-    static void SetUpTestCase()
-    {
-    }
+    static void SetUpTestCase() {}
 
-    static void TearDownTestCase()
-    {
-    }
+    static void TearDownTestCase() {}
 
     void EXPECT_CheckArgs(int32_t pid, int32_t tid, int32_t signo);
 };
@@ -81,24 +98,22 @@ TEST_F(TraceExecUtest, TestScExecSetArgs)
     int32_t ret = 0;
 
     MOCKER(memcpy_s).stubs().will(returnValue(-1));
-    ret = ScExecEntry((void * )&args);
+    ret = ScExecEntry((void*)&args);
     EXPECT_EQ(SCD_ERR_CODE_SET_ARG, ret);
     GlobalMockObject::verify();
 
-    MOCKER(memcpy_s).stubs().will(returnValue(0))
-        .then(returnValue(-1));
-    ret = ScExecEntry((void * )&args);
+    MOCKER(memcpy_s).stubs().will(returnValue(0)).then(returnValue(-1));
+    ret = ScExecEntry((void*)&args);
     EXPECT_EQ(SCD_ERR_CODE_SET_ARG, ret);
     GlobalMockObject::verify();
 
     MOCKER(strcpy_s).stubs().will(returnValue(-1));
-    ret = ScExecEntry((void * )&args);
+    ret = ScExecEntry((void*)&args);
     EXPECT_EQ(SCD_ERR_CODE_SET_ARG, ret);
     GlobalMockObject::verify();
 
-    MOCKER(strcpy_s).stubs().will(returnValue(0))
-        .then(returnValue(-1));
-    ret = ScExecEntry((void * )&args);
+    MOCKER(strcpy_s).stubs().will(returnValue(0)).then(returnValue(-1));
+    ret = ScExecEntry((void*)&args);
     EXPECT_EQ(SCD_ERR_CODE_SET_ARG, ret);
     GlobalMockObject::verify();
 }
@@ -112,23 +127,24 @@ TEST_F(TraceExecUtest, TestScExecEntry)
     ret = ScExecEntry(NULL);
     EXPECT_EQ(1, ret);
 
+    MOCKER(sigprocmask).stubs().will(invoke(sigprocmask_unblock_stub));
     MOCKER(pipe2).stubs().will(returnValue(-1));
-    ret = ScExecEntry((void * )&args);
+    ret = ScExecEntry((void*)&args);
     EXPECT_EQ(SCD_ERR_CODE_PIPE2, ret);
     GlobalMockObject::verify();
 
     MOCKER(mocker_fcntl).stubs().will(returnValue(-1));
-    ret = ScExecEntry((void * )&args);
+    ret = ScExecEntry((void*)&args);
     EXPECT_EQ(SCD_ERR_CODE_FCNTL, ret);
     GlobalMockObject::verify();
 
     MOCKER(dup2).stubs().will(returnValue(-1));
-    ret = ScExecEntry((void * )&args);
+    ret = ScExecEntry((void*)&args);
     EXPECT_EQ(SCD_ERR_CODE_DUP2, ret);
     GlobalMockObject::verify();
 
     MOCKER(writev).stubs().will(returnValue(-1));
-    ret = ScExecEntry((void * )&args);
+    ret = ScExecEntry((void*)&args);
     EXPECT_EQ(SCD_ERR_CODE_WRITEV, ret);
     GlobalMockObject::verify();
 
@@ -136,8 +152,78 @@ TEST_F(TraceExecUtest, TestScExecEntry)
     args.siginfo.si_value.sival_int = 0xAABB0003U;
     args.signo = SIG_ATRACE;
     MOCKER(writev).stubs().will(returnValue(-1));
-    ret = ScExecEntry((void * )&args);
+    ret = ScExecEntry((void*)&args);
     EXPECT_EQ(SCD_ERR_CODE_WRITEV, ret);
+    GlobalMockObject::verify();
+}
+
+TEST_F(TraceExecUtest, TestScExecEntrySyscallFailedLog)
+{
+    ThreadArgument args = {0};
+    int32_t ret = 0;
+    auto mocker_fcntl = reinterpret_cast<int (*)(int, int)>(fcntl);
+
+    MOCKER(sigprocmask).stubs().will(invoke(sigprocmask_unblock_stub));
+    SetLogPath("test_exec_entry_pipe2_failed");
+    MOCKER(pipe2).stubs().will(returnValue(-1));
+    ret = ScExecEntry((void*)&args);
+    EXPECT_EQ(SCD_ERR_CODE_PIPE2, ret);
+    SaveAndCheckLogContains("test_exec_entry_pipe2_failed", "create args pipe failed");
+    GlobalMockObject::verify();
+
+    SetLogPath("test_exec_entry_fcntl_failed");
+    MOCKER(mocker_fcntl).stubs().will(returnValue(-1));
+    ret = ScExecEntry((void*)&args);
+    EXPECT_EQ(SCD_ERR_CODE_FCNTL, ret);
+    SaveAndCheckLogContains("test_exec_entry_fcntl_failed", "set args pipe size failed");
+    GlobalMockObject::verify();
+
+    SetLogPath("test_exec_entry_writev_failed");
+    MOCKER(writev).stubs().will(returnValue(-1));
+    ret = ScExecEntry((void*)&args);
+    EXPECT_EQ(SCD_ERR_CODE_WRITEV, ret);
+    SaveAndCheckLogContains("test_exec_entry_writev_failed", "write args to pipe failed");
+    GlobalMockObject::verify();
+
+    SetLogPath("test_exec_entry_dup2_failed");
+    MOCKER(dup2).stubs().will(returnValue(-1));
+    ret = ScExecEntry((void*)&args);
+    EXPECT_EQ(SCD_ERR_CODE_DUP2, ret);
+    SaveAndCheckLogContains("test_exec_entry_dup2_failed", "dup2 stdin failed");
+    GlobalMockObject::verify();
+}
+
+TEST_F(TraceExecUtest, TestScExecEntryUnblocksSignalsBeforeExec)
+{
+    ThreadArgument args = {0};
+
+    MOCKER(sigprocmask).stubs().will(invoke(sigprocmask_unblock_stub));
+    MOCKER(pipe2).stubs().will(returnValue(-1));
+    EXPECT_EQ(SCD_ERR_CODE_PIPE2, ScExecEntry((void*)&args));
+    EXPECT_EQ(1, g_sigprocmask_checked);
+    GlobalMockObject::verify();
+}
+
+TEST_F(TraceExecUtest, TestScExecEntryUnblockSignalsFailure)
+{
+    ThreadArgument args = {0};
+
+    SetLogPath("test_exec_entry_sigemptyset_failed");
+    MOCKER(sigemptyset).stubs().will(returnValue(-1));
+    EXPECT_EQ(SCD_ERR_CODE_SIGMASK, ScExecEntry((void*)&args));
+    SaveAndCheckLogContains("test_exec_entry_sigemptyset_failed", "empty signal mask failed");
+    GlobalMockObject::verify();
+
+    SetLogPath("test_exec_entry_sigaddset_failed");
+    MOCKER(sigaddset).stubs().will(returnValue(-1));
+    EXPECT_EQ(SCD_ERR_CODE_SIGMASK, ScExecEntry((void*)&args));
+    SaveAndCheckLogContains("test_exec_entry_sigaddset_failed", "add signal");
+    GlobalMockObject::verify();
+
+    SetLogPath("test_exec_entry_sigprocmask_failed");
+    MOCKER(sigprocmask).stubs().will(returnValue(-1));
+    EXPECT_EQ(SCD_ERR_CODE_SIGMASK, ScExecEntry((void*)&args));
+    SaveAndCheckLogContains("test_exec_entry_sigprocmask_failed", "unblock stacktrace signals failed");
     GlobalMockObject::verify();
 }
 
@@ -145,7 +231,7 @@ TEST_F(TraceExecUtest, TestScExecStart)
 {
     ThreadArgument args = {0};
     int32_t child = -1;
-    void *stack = malloc(1024);
+    void* stack = malloc(1024);
     EXPECT_NE(nullptr, stack);
     TraStatus ret = TRACE_FAILURE;
 
@@ -164,8 +250,7 @@ TEST_F(TraceExecUtest, TestScExecStart)
     EXPECT_EQ(TRACE_FAILURE, ret);
     GlobalMockObject::verify();
 
-    MOCKER(mocker_prctl).stubs().will(returnValue(0))
-        .then(returnValue(-1));
+    MOCKER(mocker_prctl).stubs().will(returnValue(0)).then(returnValue(-1));
     MOCKER(mocker_clone).stubs().will(returnValue(123));
     ret = ScExecStart(stack, &args, &child);
     EXPECT_EQ(TRACE_SUCCESS, ret);
@@ -182,13 +267,56 @@ TEST_F(TraceExecUtest, TestScExecStart)
     stack = NULL;
 }
 
-static int32_t g_waitpid_status = 0;
-static void waitpid_set(int32_t status)
+TEST_F(TraceExecUtest, TestScExecStartSyscallFailedLog)
 {
-    g_waitpid_status = status;
+    ThreadArgument args = {0};
+    args.signo = SIG_ATRACE;
+    int32_t child = -1;
+    void* stack = malloc(1024);
+    ASSERT_NE(nullptr, stack);
+    TraStatus ret = TRACE_FAILURE;
+    auto mocker_prctl = reinterpret_cast<int (*)(int)>(prctl);
+    auto mocker_clone = reinterpret_cast<int (*)(int)>(clone);
+
+    SetLogPath("test_exec_start_prctl_failed");
+    MOCKER(mocker_prctl).stubs().will(returnValue(-1));
+    ret = ScExecStart(stack, &args, &child);
+    EXPECT_EQ(TRACE_FAILURE, ret);
+    SaveAndCheckLogContains("test_exec_start_prctl_failed", "set dumpable failed");
+    GlobalMockObject::verify();
+
+    SetLogPath("test_exec_start_clone_failed");
+    MOCKER(mocker_prctl).stubs().will(returnValue(0));
+    MOCKER(mocker_clone).stubs().will(returnValue(-1));
+    ret = ScExecStart(stack, &args, &child);
+    EXPECT_EQ(TRACE_FAILURE, ret);
+    SaveAndCheckLogContains("test_exec_start_clone_failed", "clone failed");
+    GlobalMockObject::verify();
+
+    SetLogPath("test_exec_start_ptracer_failed");
+    MOCKER(mocker_prctl).stubs().will(returnValue(0)).then(returnValue(-1));
+    MOCKER(mocker_clone).stubs().will(returnValue(123));
+    ret = ScExecStart(stack, &args, &child);
+    EXPECT_EQ(TRACE_SUCCESS, ret);
+    SaveAndCheckLogContains("test_exec_start_ptracer_failed", "set ptracer failed");
+    GlobalMockObject::verify();
+
+    SetLogPath("test_exec_start_mkdir_failed");
+    MOCKER(mocker_prctl).stubs().will(returnValue(0));
+    MOCKER(mocker_clone).stubs().will(returnValue(123));
+    MOCKER(TraceSafeMkdirPath).stubs().will(returnValue(TRACE_FAILURE));
+    ret = ScExecStart(stack, &args, &child);
+    EXPECT_EQ(TRACE_SUCCESS, ret);
+    SaveAndCheckLogContains("test_exec_start_mkdir_failed", "mkdir path failed");
+    GlobalMockObject::verify();
+
+    free(stack);
 }
 
-static pid_t waitpid_stub(pid_t pid, int *wstatus, int options)
+static int32_t g_waitpid_status = 0;
+static void waitpid_set(int32_t status) { g_waitpid_status = status; }
+
+static pid_t waitpid_stub(pid_t pid, int* wstatus, int options)
 {
     if (pid == -1) {
         errno = 0;
@@ -200,6 +328,14 @@ static pid_t waitpid_stub(pid_t pid, int *wstatus, int options)
         return 0;
     }
     return 0;
+}
+
+static void CheckScExecEndFailure(pid_t child, int32_t status, const char* logName, const char* expectedLog)
+{
+    SetLogPath(logName);
+    waitpid_set(status);
+    EXPECT_EQ(TRACE_FAILURE, ScExecEnd(child));
+    SaveAndCheckLogContains(logName, expectedLog);
 }
 
 TEST_F(TraceExecUtest, TestScExecEnd)
@@ -215,22 +351,36 @@ TEST_F(TraceExecUtest, TestScExecEnd)
     // waitpid return -1
     child = -1;
     MOCKER(waitpid).stubs().will(invoke(waitpid_stub));
-    ret = ScExecEnd(child);
-    EXPECT_EQ(TRACE_FAILURE, ret);
+    CheckScExecEndFailure(child, 0, "test_exec_end_waitpid_failed", "waitpid failed");
 
     child = 123;
     // child terminated normally with non-zero exit status(1)
-    waitpid_set(0x0100);
-    ret = ScExecEnd(child);
-    EXPECT_EQ(TRACE_FAILURE, ret);
+    CheckScExecEndFailure(
+        child, 0x0100, "test_exec_end_nonzero_failed", "child 123 exited normally with non-zero exit status(1)");
+
+    // child execlp failed, expect explicit error log instead of only exit code.
+    CheckScExecEndFailure(
+        child, SCD_ERR_CODE_EXECLP << 8, "test_exec_end_execlp_failed", "execlp stacktrace dumper process failed");
+
+    struct ExitLogCase {
+        int32_t errCode;
+        const char* logName;
+        const char* expectedLog;
+    };
+    const ExitLogCase exitLogCases[] = {
+        {SCD_ERR_CODE_PIPE2, "test_exec_end_pipe2_failed", "create args pipe failed"},
+        {SCD_ERR_CODE_FCNTL, "test_exec_end_fcntl_failed", "set args pipe size failed"},
+        {SCD_ERR_CODE_WRITEV, "test_exec_end_writev_failed", "write args to pipe failed"},
+        {SCD_ERR_CODE_DUP2, "test_exec_end_dup2_failed", "dup2 stdin failed"},
+        {SCD_ERR_CODE_SIGMASK, "test_exec_end_sigmask_failed", "unblock stacktrace signals failed"},
+    };
+    for (const auto& item : exitLogCases) {
+        CheckScExecEndFailure(child, item.errCode << 8, item.logName, item.expectedLog);
+    }
 
     // child terminated by a signal(3)
-    waitpid_set(0x0083);
-    ret = ScExecEnd(child);
-    EXPECT_EQ(TRACE_FAILURE, ret);
+    CheckScExecEndFailure(child, 0x0083, "test_exec_end_signal_failed", "sub process exited by signal, signal(3)");
 
     // child terminated with other error status(255)
-    waitpid_set(0x00FF);
-    ret = ScExecEnd(child);
-    EXPECT_EQ(TRACE_FAILURE, ret);
+    CheckScExecEndFailure(child, 0x00FF, "test_exec_end_unknown_failed", "child 123 did not exit normally");
 }

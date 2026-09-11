@@ -9,9 +9,6 @@
 # -----------------------------------------------------------------------------------------------------------
 set(MSPROF_SOURCE_DIR ${TOP_DIR}/src/dfx/msprof/collector)
 
-include_directories(${OPEN_SOURCE_DIR}/boost)
-include_directories(${OPEN_SOURCE_DIR}/mockcpp_src/include)
-
 ############# intf_llt_pub ####################
 add_library(msprof_intf_llt_pub INTERFACE)
 
@@ -21,6 +18,7 @@ target_include_directories(msprof_intf_llt_pub INTERFACE
 target_compile_definitions(msprof_intf_llt_pub INTERFACE
     CFG_BUILD_DEBUG
     _GLIBCXX_USE_CXX11_ABI=0
+    _GNU_SOURCE
 )
 target_compile_options(msprof_intf_llt_pub INTERFACE
     -g
@@ -42,8 +40,8 @@ target_link_directories(msprof_intf_llt_pub INTERFACE
 link_directories(${TOP_DIR}/output/third_party)
 
 target_link_libraries(msprof_intf_llt_pub INTERFACE
-    GTest::gtest
-    ${OPEN_SOURCE_DIR}/mockcpp/lib/libmockcpp.a
+    GTestShared::gtest
+    mockcpp
     dl
     -lpthread
     $<$<BOOL:${ENABLE_GCOV}>:-lgcov>
@@ -61,6 +59,7 @@ target_link_libraries(msprof_utestonetrack_pub INTERFACE
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:msprof_headers>
     $<BUILD_INTERFACE:npu_runtime_headers>
+    $<BUILD_INTERFACE:error_manager_headers>
     -Wl,--as-needed
     -lpthread
 )
@@ -71,26 +70,78 @@ protobuf_generate(profiler
     ${MSPROF_SOURCE_DIR}/dvvp/proto/profiler.proto
 )
 
-add_subdirectory(ut/app)
-add_subdirectory(ut/device)
-add_subdirectory(ut/driver)
-add_subdirectory(ut/message)
-add_subdirectory(ut/profapi)
-add_subdirectory(ut/profhal)
-add_subdirectory(ut/streamio)
-add_subdirectory(ut/stub_utest)
-add_subdirectory(ut/transport)
+add_subdirectory(acp)
+add_subdirectory(app)
+add_subdirectory(avp)
+add_subdirectory(common)
+add_subdirectory(device)
+add_subdirectory(driver)
+add_subdirectory(job_wrapper)
+add_subdirectory(message)
+add_subdirectory(msprof)
+add_subdirectory(msprofbin)
+add_subdirectory(profapi)
+add_subdirectory(profhal)
+add_subdirectory(streamio)
+add_subdirectory(stub_utest)
+add_subdirectory(transport)
+add_subdirectory(st/adda)
+add_subdirectory(st/cli)
+add_subdirectory(st/geoption)
+add_subdirectory(st/acljson)
+add_subdirectory(st/api)
 
 ###################################################################################################
 
-set(MSPROF_TARGET
+set(MSPROF_TARGET_PART1
+    prof_c_utest
+    proftransport_ut_static
+    acp_utest
     application_utest
+    osal_linux_utest
+    osal_liteos_utest
+    device_utest
+    driver_utest
+    job_wrapper
     message_utest
+    msprofiler_utest
+    msprof_utest
+    msprof_bin_utest
     prof_api_utest
     prof_hal_utest
     client_utest
     streamio_common_utest
     stub_file_utest
+    transport
+    adda_stest
+    c_base_msprof_err_mgr_utest
+    prof_device_api_utest
+    prof_avp_api_utest
+    devprof_api_utest
 )
 
+set(MSPROF_TARGET_PART2
+    cli_stest
+    acl_api_stest
+    geoption_stest
+    acljson_stest
+    proftransport_st_static
+    profapi_lite_st
+    api_dc_stest
+    api_david_stest
+    api_david_v121_stest
+    api_mini_v3_stest
+    api_mdc_mini_v3_stest
+    api_cloud_stest
+    api_mdc_stest
+    api_tiny_stest
+)
+
+set(MSPROF_TARGET
+    ${MSPROF_TARGET_PART1}
+    ${MSPROF_TARGET_PART2}
+)
+
+add_custom_target(msprof_ut_part1 DEPENDS ${MSPROF_TARGET_PART1})
+add_custom_target(msprof_ut_part2 DEPENDS ${MSPROF_TARGET_PART2})
 add_custom_target(msprof_ut DEPENDS ${MSPROF_TARGET})

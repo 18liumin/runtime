@@ -9,8 +9,10 @@
  */
 #include <gtest/gtest.h>
 #include "mockcpp/mockcpp.hpp"
+#include "dlog_pub.h"
 #include "ide_task_register.h"
 #include "ide_common_util.h"
+#include "ide_platform_util.h"
 
 using namespace Adx;
 extern int IdeDaemonTestMain(int argc, char *argv[]);
@@ -96,30 +98,14 @@ TEST_F(IDE_DAEMON_TEST_STEST, AdxStartUpInit)
 TEST_F(IDE_DAEMON_TEST_STEST, IdeDaemonStartUp)
 {
     GlobalMockObject::verify();
-    std::string lock;
 
     MOCKER(SingleProcessStart)
         .stubs()
         .will(returnValue(-1))
+        .then(returnValue(1))
         .then(returnValue(1));
 
-    MOCKER(dlog_init)
-        .stubs();
-
     MOCKER(AdxStartUpInit)
-        .stubs()
-        .will(returnValue(IDE_DAEMON_ERROR))
-        .then(returnValue(IDE_DAEMON_OK));
-
-    MOCKER(DlogSetAttr)
-        .stubs()
-        .will(returnValue(IDE_DAEMON_ERROR))
-        .then(returnValue(IDE_DAEMON_OK));
-
-    MOCKER(DaemonDestroy)
-        .stubs();
-
-    MOCKER(IdeRealFileRemove)
         .stubs()
         .will(returnValue(IDE_DAEMON_ERROR))
         .then(returnValue(IDE_DAEMON_OK));
@@ -127,4 +113,23 @@ TEST_F(IDE_DAEMON_TEST_STEST, IdeDaemonStartUp)
     EXPECT_EQ(IDE_DAEMON_ERROR, IdeDaemonStartUp());
     EXPECT_EQ(IDE_DAEMON_ERROR, IdeDaemonStartUp());
     EXPECT_EQ(IDE_DAEMON_OK, IdeDaemonStartUp());
+}
+
+TEST_F(IDE_DAEMON_TEST_STEST, IdeDaemonStartUp_open_failed)
+{
+    GlobalMockObject::verify();
+
+    MOCKER(mmUmask)
+        .stubs()
+        .will(returnValue(0));
+
+    MOCKER(mmOpen2)
+        .stubs()
+        .will(returnValue(-1));
+
+    MOCKER(IdeRealFileRemove)
+        .stubs()
+        .will(returnValue(IDE_DAEMON_OK));
+
+    EXPECT_EQ(IDE_DAEMON_ERROR, IdeDaemonStartUp());
 }

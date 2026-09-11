@@ -8,10 +8,14 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-#include "acl/acl_rt_impl.h"
+#include "acl_rt_impl.h"
 #include "init_callback_manager.h"
 
-aclError aclInitCallbackRegisterImpl(aclRegisterCallbackType type, aclInitCallbackFunc cbFunc, void *userData)
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+aclError aclInitCallbackRegisterImpl(aclRegisterCallbackType type, aclInitCallbackFunc cbFunc, void* userData)
 {
     return acl::InitCallbackManager::GetInstance().RegInitCallback(type, cbFunc, userData);
 }
@@ -21,7 +25,7 @@ aclError aclInitCallbackUnRegisterImpl(aclRegisterCallbackType type, aclInitCall
     return acl::InitCallbackManager::GetInstance().UnRegInitCallback(type, cbFunc);
 }
 
-aclError aclFinalizeCallbackRegisterImpl(aclRegisterCallbackType type, aclFinalizeCallbackFunc cbFunc, void *userData)
+aclError aclFinalizeCallbackRegisterImpl(aclRegisterCallbackType type, aclFinalizeCallbackFunc cbFunc, void* userData)
 {
     return acl::InitCallbackManager::GetInstance().RegFinalizeCallback(type, cbFunc, userData);
 }
@@ -30,3 +34,6 @@ aclError aclFinalizeCallbackUnRegisterImpl(aclRegisterCallbackType type, aclFina
 {
     return acl::InitCallbackManager::GetInstance().UnRegFinalizeCallback(type, cbFunc);
 }
+#ifdef __cplusplus
+}
+#endif

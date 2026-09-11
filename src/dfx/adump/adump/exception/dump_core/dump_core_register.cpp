@@ -11,42 +11,133 @@
 #include <iomanip>
 #include "log/adx_log.h"
 #include "runtime/mem.h"
-#include "adump_dsmi.h"
+#include "adump_platform_manager.h"
 #include "register_config.h"
 #include "exception_info_common.h"
 #include "dump_core.h"
 
 namespace Adx {
-constexpr int32_t REG_FIELD_WIDTH  = 2;
+constexpr int32_t REG_FIELD_WIDTH = 2;
 
-std::string DumpCore::FormatRegisterData(const uint8_t *valAddr, uint8_t valSize) const
+void DumpCore::DumpRegister(uint8_t coreType, uint16_t coreId)
+{
+    auto* plat = CoredumpManager::Get();
+    if (plat == nullptr) {
+        IDE_LOGW("[DumpCore] Platform unavailable, register dump skipped.");
+        return;
+    }
+    plat->DumpRegister(*this, coreType, coreId);
+}
+
+std::string DumpCore::FormatRegisterData(const uint8_t* valAddr, uint8_t valSize) const
 {
     std::stringstream ss;
     ss << std::hex << std::setfill('0');
     for (uint8_t i = 0; i < valSize; ++i) {
-        ss << " " << std::setw(REG_FIELD_WIDTH) << static_cast<uint32_t>(valAddr[i]);
+        ss << std::setw(REG_FIELD_WIDTH) << static_cast<uint32_t>(valAddr[i]);
     }
     return ss.str();
 }
 
-bool DumpCore::DumpReadDebugAICoreRegister(uint8_t coreType, uint16_t coreId, const RegisterTable &table,
-    std::string &data) const
+bool DumpCore::DumpReadDebugAICoreRegister(
+    uint8_t coreType, uint16_t coreId, RegisterType regType, const RegisterTable& table,
+    std::vector<uint8_t>& data) const
 {
-    data.clear();
-    data.reserve(table.num * table.byteWith);
-    rtDebugMemoryParam_t param = {coreType, 0, coreId, RT_MEM_TYPE_REGISTER, 0, 0, 0, 0, 0};
+    data.resize(table.num * table.byteWidth);
+    rtDebugMemoryType_t memType;
+    if (regType == RegisterType::AIC || regType == RegisterType::AIV) {
+        memType = RT_MEM_TYPE_REGISTER_DIRECT;
+    } else if (regType == RegisterType::AIC_DBG || regType == RegisterType::AIV_DBG) {
+        memType = RT_MEM_TYPE_REGISTER;
+    } else {
+        IDE_LOGE("Wrong regType. regType: %d", regType);
+        return false;
+    }
+    rtDebugMemoryParam_t param = {coreType, 0, coreId, memType, 0, 0, 0, 0, 0};
     param.srcAddr = table.startAddr;
     param.dstAddr = reinterpret_cast<uint64_t>(data.data());
-    param.memLen = table.num * table.byteWith;
-    param.elementSize = table.byteWith;
+    param.memLen = table.num * table.byteWidth;
+    param.elementSize = table.byteWidth;
     rtError_t ret = rtDebugReadAICore(&param);
     if (ret != RT_ERROR_NONE) {
-        IDE_LOGE("Failed to read debug register data. coreType: %hhu, coreId: %hu, start addr: 0x%llx, "
-            "num: %u, byteWith: %hhu, ret: %d",
-            coreType, coreId, param.srcAddr, table.num, table.byteWith, static_cast<int32_t>(ret));
+        IDE_LOGE(
+            "Failed to read debug register data. coreType: %hhu, coreId: %hu, start addr: 0x%llx, "
+            "num: %u, byteWidth: %hhu, ret: %d",
+            coreType, coreId, param.srcAddr, table.num, table.byteWidth, static_cast<int32_t>(ret));
         return false;
     }
     return true;
+}
+
+template <typename T>
+void DumpCore::DumpDebugRegisterImpl(
+    uint8_t coreType, uint16_t coreId, RegisterType regType, const std::vector<RegisterTable>& tables,
+    std::vector<T>& regData) const
+{
+    std::stringstream ss;
+    for (const RegisterTable& table : tables) {
+        std::vector<uint8_t> data;
+        bool dataValid = DumpReadDebugAICoreRegister(coreType, coreId, regType, table, data);
+        errno_t err = EOK;
+        const uint8_t* dataPtr = data.data();
+        for (uint32_t i = 0; i < table.num; ++i) {
+            T regInfo{table.startAddr + i, REG_DATA_VALID, {0}, table.byteWidth, {0}};
+            if (dataValid) {
+                err = memcpy_s(&regInfo.value, sizeof(regInfo.value), dataPtr, table.byteWidth);
+                if (err != EOK) {
+                    IDE_LOGE(
+                        "Failed to copy debug register data from cache buffer. "
+                        "coreType: %hhu, coreId: %hu, addr: 0x%llx, ret: %d",
+                        coreType, coreId, regInfo.addr, err);
+                    regInfo.validFlag = REG_DATA_INVALID;
+                }
+            } else {
+                regInfo.validFlag = REG_DATA_INVALID;
+            }
+            dataPtr += table.byteWidth;
+            regData.emplace_back(regInfo);
+        }
+    }
+    std::string dataStr = ss.str();
+    if (!dataStr.empty()) {
+        IDE_LOGW(
+            "Debug register data. coreType=%d, coreId=%d.%s", static_cast<int32_t>(coreType), coreId, dataStr.c_str());
+    }
+}
+
+template <typename T>
+void DumpCore::DumpErrorRegisterImpl(
+    uint8_t coreType, uint16_t coreId, const std::vector<ErrorRegisterTable>& tables, std::vector<T>& regData) const
+{
+    std::stringstream ss;
+    std::vector<std::string> regLogs;
+    for (uint32_t i = 0; i < exceptionRegInfo_.coreNum; i++) {
+        rtExceptionErrRegInfo_t core = exceptionRegInfo_.errRegInfo[i];
+        if (coreId != core.coreId || coreType != core.coreType) {
+            continue;
+        }
+        for (const auto& table : tables) {
+            T regInfo{table.offsetAddr, REG_DATA_VALID, {0}, table.byteWidth, {0}};
+            errno_t err =
+                memcpy_s(&regInfo.value, sizeof(regInfo.value), core.errReg + table.errIndex, table.byteWidth);
+            if (err != EOK) {
+                IDE_LOGE(
+                    "Failed to copy error register data from exception args. "
+                    "coreType: %hhu, coreId: %hu, addr: 0x%llx, ret: %d",
+                    coreType, coreId, regInfo.addr, err);
+                regInfo.validFlag = REG_DATA_INVALID;
+            } else {
+                std::string value = FormatRegisterData(regInfo.value, regInfo.regSize);
+                ss << table.name << "[0x" << std::hex << regInfo.addr << "]: " << value << ",";
+            }
+            regData.emplace_back(regInfo);
+        }
+    }
+    std::string dataStr = ss.str();
+    if (!dataStr.empty()) {
+        IDE_LOGW(
+            "Error register data. coreType=%d, coreId=%d. %s", static_cast<int32_t>(coreType), coreId, dataStr.c_str());
+    }
 }
 
 void DumpCore::DumpV2Register(uint8_t coreType, uint16_t coreId)
@@ -55,80 +146,79 @@ void DumpCore::DumpV2Register(uint8_t coreType, uint16_t coreId)
     std::string sectionName = ASCEND_SHNAME_REGS + "." + std::to_string(ConvertCoreId(coreType, coreId));
     std::shared_ptr<RegisterInterface> reg = RegisterManager::GetInstance().GetRegister();
     IDE_CTRL_VALUE_FAILED(reg != nullptr, return, "Get register failed, null register.");
-    for (const auto &regType : reg->GetRegisterTypes(coreType)) {
+    for (const auto& regType : reg->GetRegisterTypes(coreType)) {
         DumpV2DebugRegister(coreType, coreId, reg->GetRegisterTable(regType), regData);
     }
     DumpV2ErrorRegister(coreType, coreId, reg->GetErrorRegisterTable(), regData);
 
     size_t totalSize = regData.size() * sizeof(RegInfo);
-    std::string data(reinterpret_cast<const char *>(regData.data()), totalSize);
+    std::string data(reinterpret_cast<const char*>(regData.data()), totalSize);
     ELF::SectionPtr registerSection = coreFile_.AddSection(ASCEND_SHTYPE_REGS, sectionName);
     IDE_CTRL_VALUE_FAILED(registerSection != nullptr, return, "Create %s section failed.", sectionName.c_str());
     registerSection->SetData(data);
     registerSection->SetEntSize(sizeof(RegInfo));
 }
 
-void DumpCore::DumpV2DebugRegister(uint8_t coreType, uint16_t coreId, const std::vector<RegisterTable> &tables,
-    std::vector<RegInfo> &regData) const
+void DumpCore::DumpV2DebugRegister(
+    uint8_t coreType, uint16_t coreId, const std::vector<RegisterTable>& tables, std::vector<RegInfo>& regData) const
 {
-    std::string data;
-    std::stringstream ss;
-    ss << "Debug register data. coreType:" << static_cast<int32_t>(coreType) << ", coreId:" << coreId << ".";
-    bool dataValid = true;
-    for (const RegisterTable &table : tables) {
-        dataValid = DumpReadDebugAICoreRegister(coreType, coreId, table, data);
-        errno_t err = EOK;
-        const char *dataPtr = data.data();
-        for (uint32_t i = 0; i < table.num; ++i) {
-            RegInfo regInfo{table.startAddr + i, REG_DATA_VALID, {0}, table.byteWith, {0}};
-            if (dataValid) {
-                err = memcpy_s(&regInfo.value, sizeof(regInfo.value), dataPtr, table.byteWith);
-                if (err != EOK) {
-                    IDE_LOGE("Failed to copy debug register data from cache buffer. "
-                        "coreType: %hhu, coreId: %hu, addr: 0x%llx, ret: %d",
-                        coreType, coreId, regInfo.addr, err);
-                    regInfo.validFlag = REG_DATA_INVALID;
-                } else {
-                    std::string value = FormatRegisterData(regInfo.value, regInfo.regSize);
-                    ss << " 0x" << std::hex << regInfo.addr << ":" << value << ",";
-                }
-            } else {
-                regInfo.validFlag = REG_DATA_INVALID;
-            }
-            regData.emplace_back(regInfo);
-            dataPtr += table.byteWith;
-        }
+    RegisterType regType;
+    if (coreType == CORE_TYPE_AIC) {
+        regType = RegisterType::AIC_DBG;
+    } else {
+        regType = RegisterType::AIV_DBG;
     }
-    IDE_LOGI("%s", ss.str().c_str());
+    DumpDebugRegisterImpl(coreType, coreId, regType, tables, regData);
 }
 
-void DumpCore::DumpV2ErrorRegister(uint8_t coreType, uint16_t coreId, const std::vector<ErrorRegisterTable> &tables,
-    std::vector<RegInfo> &regData) const
+void DumpCore::DumpV2ErrorRegister(
+    uint8_t coreType, uint16_t coreId, const std::vector<ErrorRegisterTable>& tables,
+    std::vector<RegInfo>& regData) const
 {
-    errno_t err = EOK;
-    std::stringstream ss;
-    ss << "Error register data. coreType=" << static_cast<int32_t>(coreType) << ", coreId=" << coreId << ".";
-    for (uint32_t i = 0; i < exceptionRegInfo_.coreNum; i++) {
-        rtExceptionErrRegInfo_t coreErrRegInfo = exceptionRegInfo_.errRegInfo[i];
-        if (coreId != coreErrRegInfo.coreId || coreType != coreErrRegInfo.coreType) {
-            continue;
-        }
-        for (const ErrorRegisterTable &table: tables) {
-            RegInfo regInfo{table.offsetAddr, REG_DATA_VALID, {0}, table.byteWidth, {0}};
-            err = memcpy_s(&regInfo.value, sizeof(regInfo.value), coreErrRegInfo.errReg + table.errIndex,
-                table.byteWidth);
-            if (err != EOK) {
-                IDE_LOGE("Failed to copy error register data from exception args. "
-                    "coreType: %hhu, coreId: %hu, addr: 0x%llx, ret: %d",
-                    coreType, coreId, regInfo.addr, err);
-                regInfo.validFlag = REG_DATA_INVALID;
-            } else {
-                std::string value = FormatRegisterData(regInfo.value, regInfo.regSize);
-                ss << " " << table.name << "[0x" << std::hex << regInfo.addr << "]: " << value << ",";
-            }
-            regData.emplace_back(regInfo);
-        }
-    }
-    IDE_LOGI("%s", ss.str().c_str());
+    DumpErrorRegisterImpl(coreType, coreId, tables, regData);
 }
-}  // namespace Adx
+
+void DumpCore::DumpV4Register(uint8_t coreType, uint16_t coreId)
+{
+    std::vector<RegInfoWide> regData;
+    std::string sectionName = ASCEND_SHNAME_REGS + "." + std::to_string(ConvertCoreId(coreType, coreId));
+    std::shared_ptr<RegisterInterface> reg = RegisterManager::GetInstance().GetRegister();
+    IDE_CTRL_VALUE_FAILED(reg != nullptr, return, "Get register failed, null register.");
+    for (const auto& regType : reg->GetRegisterTypes(coreType)) {
+        DumpV4DebugRegister(coreType, coreId, regType, reg->GetRegisterTable(regType), regData);
+    }
+    DumpV4ErrorRegister(coreType, coreId, reg->GetErrorRegisterTable(), regData);
+
+    size_t totalSize = regData.size() * sizeof(RegInfoWide);
+    IDE_LOGI("coreType=%d, coreId=%d, register num=%zu", static_cast<int32_t>(coreType), coreId, regData.size());
+    std::string data(reinterpret_cast<const char*>(regData.data()), totalSize);
+    ELF::SectionPtr registerSection = coreFile_.AddSection(ASCEND_SHTYPE_REGS, sectionName);
+    IDE_CTRL_VALUE_FAILED(registerSection != nullptr, return, "Create %s section failed.", sectionName.c_str());
+    registerSection->SetData(data);
+    registerSection->SetEntSize(sizeof(RegInfoWide));
+}
+
+void DumpCore::DumpV4DebugRegister(
+    uint8_t coreType, uint16_t coreId, RegisterType regType, const std::vector<RegisterTable>& tables,
+    std::vector<RegInfoWide>& regData) const
+{
+    DumpDebugRegisterImpl(coreType, coreId, regType, tables, regData);
+}
+
+void DumpCore::DumpV4ErrorRegister(
+    uint8_t coreType, uint16_t coreId, const std::vector<ErrorRegisterTable>& tables,
+    std::vector<RegInfoWide>& regData) const
+{
+    DumpErrorRegisterImpl(coreType, coreId, tables, regData);
+}
+
+uint16_t DumpCore::ConvertCoreId(uint8_t coreType, uint16_t coreId) const
+{
+    auto* plat = CoredumpManager::Get();
+    if (plat == nullptr) {
+        IDE_LOGW("[DumpCore] Platform unavailable, coreId not converted.");
+        return coreId;
+    }
+    return plat->ConvertCoreId(coreType, coreId);
+}
+} // namespace Adx

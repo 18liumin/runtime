@@ -15,43 +15,17 @@
 #include "log/adx_log.h"
 #include "adx_dump_record.h"
 namespace Adx {
-static IdeThreadArg AdxDumpRecordSocProcess(const IdeThreadArg arg)
+int32_t AdxSocDataDumpInit(const std::string& hostPid)
 {
-    UNUSED(arg);
-    AdxDumpRecord::Instance().RecordDumpInfo();
-    return nullptr;
-}
-
-static IdeThreadArg AdxDataDumpServerSocProcess(const IdeThreadArg arg)
-{
-    UNUSED(arg);
-    mmUserBlock_t funcBlock;
-    funcBlock.pulArg = nullptr;
-    mmThread tid = 0;
-    funcBlock.procFunc = AdxDumpRecordSocProcess;
-    int ret = Thread::CreateTaskWithDefaultAttr(tid, funcBlock);
-    if (ret != EN_OK) {
-        return nullptr;
-    }
-
-    (void)mmJoinTask(&tid);
-    return nullptr;
-}
-
-int32_t AdxSocDataDumpInit(const std::string &hostPid)
-{
-    mmUserBlock_t funcBlock;
-    funcBlock.procFunc = AdxDataDumpServerSocProcess;
-    funcBlock.pulArg = nullptr;
-    mmThread tid = 0;
     // soc case, pass host pid to record instance
     int ret = AdxDumpRecord::Instance().Init(hostPid);
     if (ret != IDE_DAEMON_OK) {
         IDE_LOGE("AdxDumpRecord init failed.");
         return IDE_DAEMON_ERROR;
     }
-    ret = Thread::CreateDetachTaskWithDefaultAttr(tid, funcBlock);
-    if (ret != EN_OK) {
+    ret = AdxDumpRecord::Instance().StartRecord();
+    if (ret != IDE_DAEMON_OK) {
+        IDE_LOGE("start dump record thread failed.");
         return IDE_DAEMON_ERROR;
     }
     IDE_LOGI("Adx soc dump thread has been started.");
@@ -63,7 +37,7 @@ int32_t AdxSocDataDumpUnInit()
     IDE_LOGI("start to do soc dump uninit");
     return AdxDumpRecord::Instance().UnInit();
 }
-}
+} // namespace Adx
 
 #if !defined(__IDE_UT) && !defined(__IDE_ST)
 /**
@@ -73,10 +47,7 @@ int32_t AdxSocDataDumpUnInit()
  * @return
  *      IDE_DAEMON_OK: datadump server init success
  */
-int32_t AdxDataDumpServerInit()
-{
-    return IDE_DAEMON_OK;
-}
+int32_t AdxDataDumpServerInit() { return IDE_DAEMON_OK; }
 
 /**
  * @brief      stub for uninit in soc case, real uninit
@@ -85,8 +56,5 @@ int32_t AdxDataDumpServerInit()
  * @return
  *      IDE_DAEMON_OK: datadump server uninit success
  */
-int32_t AdxDataDumpServerUnInit()
-{
-    return IDE_DAEMON_OK;
-}
+int32_t AdxDataDumpServerUnInit() { return IDE_DAEMON_OK; }
 #endif

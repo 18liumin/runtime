@@ -8,13 +8,14 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include "slog.h"
+#include <stdio.h>
 #include <unistd.h>
 
 int g_log_level = DLOG_WARN;
 
-char *GetLevelString(int level)
+char* GetLevelString(int level)
 {
-    switch(level) {
+    switch (level) {
         case DLOG_DEBUG:
             return "DEBUG";
         case DLOG_INFO:
@@ -29,7 +30,7 @@ char *GetLevelString(int level)
     return "";
 }
 
-void DlogRecord(int moduleId, int level, const char *fmt, ...)
+void DlogRecord(int moduleId, int level, const char* fmt, ...)
 {
     va_list args;
     char buffer[4096] = {0};

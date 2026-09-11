@@ -17,6 +17,8 @@
 #include "validation/param_validation.h"
 #include "config_manager.h"
 #include "platform/platform.h"
+#include "msprof_dlog.h"
+#include "llc_event_utils.h"
 namespace Analysis {
 namespace Dvvp {
 namespace Msprof {
@@ -27,46 +29,11 @@ using namespace Analysis::Dvvp::Common::Config;
 using namespace analysis::dvvp::common::utils;
 using namespace Analysis::Dvvp::Common::Platform;
 
-MsprofParamsAdapter::MsprofParamsAdapter()
-{
-}
+MsprofParamsAdapter::MsprofParamsAdapter() {}
 
-MsprofParamsAdapter::~MsprofParamsAdapter()
-{
-}
+MsprofParamsAdapter::~MsprofParamsAdapter() {}
 
-int32_t MsprofParamsAdapter::Init() const
-{
-    return PROFILING_SUCCESS;
-}
-
-std::string MsprofParamsAdapter::GenerateCapacityEvents() const
-{
-    std::vector<std::string> llcProfilingEvents;
-    const int32_t maxLlcEvents = 8; // llc events list size
-    for (int32_t i = 0; i < maxLlcEvents; i++) {
-        std::string tempEvents;
-        tempEvents.append("hisi_l3c0_1/dsid");
-        tempEvents.append(std::to_string(i));
-        tempEvents.append("/");
-        llcProfilingEvents.push_back(tempEvents);
-    }
-    analysis::dvvp::common::utils::UtilsStringBuilder<std::string> builder;
-    return builder.Join(llcProfilingEvents, ",");
-}
-
-std::string MsprofParamsAdapter::GenerateBandwidthEvents() const
-{
-    std::vector<std::string> llcProfilingEvents;
-    llcProfilingEvents.push_back("hisi_l3c0_1/read_allocate/");
-    llcProfilingEvents.push_back("hisi_l3c0_1/read_hit/");
-    llcProfilingEvents.push_back("hisi_l3c0_1/read_noallocate/");
-    llcProfilingEvents.push_back("hisi_l3c0_1/write_allocate/");
-    llcProfilingEvents.push_back("hisi_l3c0_1/write_hit/");
-    llcProfilingEvents.push_back("hisi_l3c0_1/write_noallocate/");
-    analysis::dvvp::common::utils::UtilsStringBuilder<std::string> builder;
-    return builder.Join(llcProfilingEvents, ",");
-}
+int32_t MsprofParamsAdapter::Init() const { return PROFILING_SUCCESS; }
 
 int32_t MsprofParamsAdapter::UpdateParams(SHARED_PTR_ALIA<analysis::dvvp::message::ProfileParams> params) const
 {
@@ -91,8 +58,8 @@ int32_t MsprofParamsAdapter::UpdateParams(SHARED_PTR_ALIA<analysis::dvvp::messag
     }
     if (params->hardware_mem.compare("on") == 0) {
         const int32_t periodUs = params->hardware_mem_sampling_interval;
-        const int32_t periodMs = (periodUs > DEFAULT_PROFILING_INTERVAL_10000US) ?
-            (periodUs / US_CONVERT_MS) : DEFAULT_PROFILING_INTERVAL_10MS;
+        const int32_t periodMs = (periodUs > DEFAULT_PROFILING_INTERVAL_10000US) ? (periodUs / US_CONVERT_MS) :
+                                                                                   DEFAULT_PROFILING_INTERVAL_10MS;
         params->msprof_llc_profiling = "on";
         params->llc_interval = periodMs;
         params->ddr_profiling = "on";
@@ -119,6 +86,14 @@ int32_t MsprofParamsAdapter::UpdateParams(SHARED_PTR_ALIA<analysis::dvvp::messag
 
     return PROFILING_SUCCESS;
 }
+
+void MsprofParamsAdapter::GenerateLlcEvents(SHARED_PTR_ALIA<analysis::dvvp::message::ProfileParams> params) const
+{
+    if (params == nullptr || params->hardware_mem.compare("on") != 0) {
+        return;
+    }
+    analysis::dvvp::common::utils::LlcEventUtils::GenerateLlcEvents(params);
 }
-}
-}
+} // namespace Msprof
+} // namespace Dvvp
+} // namespace Analysis

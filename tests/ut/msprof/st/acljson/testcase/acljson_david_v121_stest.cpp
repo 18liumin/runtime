@@ -28,7 +28,7 @@ static const char DAVID_V121_RM_RF[] = "rm -rf ./acljsonDavidV121stest_workspace
 static const char DAVID_V121_MKDIR[] = "mkdir ./acljsonDavidV121stest_workspace";
 static const char DAVID_V121_OUTPUT_DIR[] = "./acljsonDavidV121stest_workspace/output";
 
-class AclJsonDavidV121Stest: public testing::Test {
+class AclJsonDavidV121Stest : public testing::Test {
 protected:
     virtual void SetUp()
     {
@@ -48,6 +48,7 @@ protected:
         DataMgr().UnInit();
         MsprofMgr().UnInit();
         system(DAVID_V121_RM_RF);
+        GlobalMockObject::reset();
     }
     void DlStub()
     {
@@ -63,14 +64,14 @@ TEST_F(AclJsonDavidV121Stest, AclJsonDefault)
     // david: TaskTime
     nlohmann::json data;
     data["output"] = DAVID_V121_OUTPUT_DIR;
-    std::vector<std::string> deviceDataList = {"ts_track.data", "ccu0.instr", "ccu1.instr"};
-    MsprofMgr().SetDeviceCheckList(deviceDataList);
-    std::vector<std::string> hostDataList = {
-        "unaging.api_event.data", "unaging.compact.node_basic_info", "unaging.compact.task_track", "unaging.additional.context_id_info"
-    };
-    MsprofMgr().SetHostCheckList(hostDataList);
-    std::vector<uint64_t> bitList = {PROF_ACL_API, PROF_TASK_TIME_L1, PROF_AICORE_METRICS};
-    MsprofMgr().SetBitSwitchCheckList(bitList);
+    const std::vector<std::string> davidV121DeviceData = {"ts_track.data", "ccu0.instr", "ccu1.instr"};
+    const std::vector<std::string> davidV121HostData = {
+        "unaging.api_event.data", "unaging.compact.node_basic_info", "unaging.compact.task_track",
+        "unaging.additional.context_id_info"};
+    const std::vector<uint64_t> davidV121BitSwitches = {PROF_ACL_API, PROF_TASK_TIME_L1, PROF_AICORE_METRICS};
+    MsprofMgr().SetDeviceCheckList(davidV121DeviceData);
+    MsprofMgr().SetHostCheckList(davidV121HostData);
+    MsprofMgr().SetBitSwitchCheckList(davidV121BitSwitches);
     EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().AclJsonStart(0, data));
 }
 
@@ -87,27 +88,26 @@ TEST_F(AclJsonDavidV121Stest, AclJsonScale)
     // david: scale
     nlohmann::json data;
     data["output"] = DAVID_V121_OUTPUT_DIR;
-    data["scale"] = "opType:MatMulV3,Index;opName:aclnnMatmul_MatMulV3Common_MatMulV3,aclnnIndex_IndexAiCore_Index";
+    data["optype"] = "MatMulV3,Index";
     EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().AclJsonStart(1, data));
 }
 
-TEST_F(AclJsonDavidV121Stest, AclJsonScaleEmpty)
+TEST_F(AclJsonDavidV121Stest, AclJsonScaleEmptyItem)
 {
-    // david: scale empty
+    // david: scale empty item
     nlohmann::json data;
     data["output"] = DAVID_V121_OUTPUT_DIR;
-    data["scale"] = "opType:MatMulV3,Index;opName:aclnnMatmul_MatMulV3Common_MatMulV3,,,,,,";
-    EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().AclJsonStart(1, data));
+    data["optype"] = "MatMulV3,,Index";
+    EXPECT_EQ(PROFILING_FAILED, MsprofMgr().AclJsonStart(1, data));
 }
 
 TEST_F(AclJsonDavidV121Stest, AclJsonScaleOverflow)
 {
     // david: scale overflow
     nlohmann::json data;
-    std::string opName(512, 't');
-    std::string scaleCmd = "opType:MatMulV3;opName:" + opName;
+    std::string opType(257, 't');
     data["output"] = DAVID_V121_OUTPUT_DIR;
-    data["scale"] = scaleCmd;
+    data["optype"] = opType;
     EXPECT_EQ(PROFILING_FAILED, MsprofMgr().AclJsonStart(1, data));
 }
 
@@ -115,25 +115,33 @@ TEST_F(AclJsonDavidV121Stest, AclJsonScaleCritical)
 {
     // david: scale critical
     nlohmann::json data;
-    std::string opName(511, 't');
-    std::string scaleCmd = "opType:MatMulV3;opName:" + opName;
+    std::string opType(256, 't');
     data["output"] = DAVID_V121_OUTPUT_DIR;
-    data["scale"] = scaleCmd;
+    data["optype"] = opType;
     EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().AclJsonStart(1, data));
 }
 
 TEST_F(AclJsonDavidV121Stest, AclJsonScaleDuplicate)
 {
-    // david: scale dumplicate
+    // david: scale duplicate
     nlohmann::json data;
-    std::string opName = "aclnnIndex_IndexAiCore_Index";
-    std::string scaleCmd = "opType:MatMulV3;opName:";
+    std::string opType = "MatMulV3";
+    std::string scaleCmd = "";
     for (auto i = 0; i < 20; ++i) {
-        scaleCmd += opName;
+        scaleCmd += opType;
         scaleCmd += ",";
     }
     scaleCmd.pop_back();
     data["output"] = DAVID_V121_OUTPUT_DIR;
-    data["scale"] = scaleCmd;
+    data["optype"] = scaleCmd;
     EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().AclJsonStart(1, data));
+}
+
+TEST_F(AclJsonDavidV121Stest, AclJsonInstrProfilingFreqUnsupported)
+{
+    nlohmann::json data;
+    data["output"] = DAVID_V121_OUTPUT_DIR;
+    data["instr_profiling"] = "on";
+    data["instr_profiling_freq"] = 10000;
+    EXPECT_EQ(PROFILING_FAILED, MsprofMgr().AclJsonStart(1, data));
 }

@@ -1,16 +1,31 @@
-observability:
-   json:
-     cpeName: json
-     groupId:
-     url: https://gitcode.com/cann-src-third-party/json.git
-     version: 3.11.3
-  makeself:
-     cpeName: makeself
-     groupId:
-     url: https://gitcode.com/cann-src-third-party/makeself.git
-     version: release-2.5.0-patch1
-  protobuf:
-     cpeName: protobuf
-     groupId:
-     url: https://gitcode.com/cann-src-third-party/protobuf.git
-     version: v3.13.0
+json:
+    version: 3.12.0
+    type: run
+makeself:
+    version: release-2.5.0-patch1
+    type: build
+libboundscheck:
+    version: 1.1.16
+    type: run
+eigen:
+    version: 5.0.0
+    type: run
+protobuf:
+    version: 25.1
+    type: run
+abseil-cpp:
+    version: 20230802.1
+    type: run
+libseccomp:
+    version: 2.5.4
+    type: run
+boost:
+    version: 1.87.0
+    type: test
+googletest:
+    version: 1.14.0
+    type: test
+mockcpp:
+    version: 2.7
+    type: test
+   

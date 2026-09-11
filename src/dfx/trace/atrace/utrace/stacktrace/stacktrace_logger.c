@@ -13,11 +13,11 @@
 #include "trace_system_api.h"
 #include "scd_util.h"
 
-#define STACKTRACE_LOG_TITLE_SIZE   32U
-#define STACKTRACE_LOG_MAX_NUM      200
-#define STACKTRACE_LOG_SIZE         128U
+#define STACKTRACE_LOG_TITLE_SIZE 32U
+#define STACKTRACE_LOG_MAX_NUM 200
+#define STACKTRACE_LOG_SIZE 128U
 
-#define AO_F_ADD(ptr, value)        ((__typeof__(*(ptr)))__sync_fetch_and_add((ptr), (value)))
+#define AO_F_ADD(ptr, value) ((__typeof__(*(ptr)))__sync_fetch_and_add((ptr), (value)))
 
 typedef struct {
     char title[STACKTRACE_LOG_TITLE_SIZE];
@@ -26,9 +26,9 @@ typedef struct {
     char logContent[STACKTRACE_LOG_MAX_NUM][STACKTRACE_LOG_SIZE];
 } StacktraceLogMgr;
 
-STATIC StacktraceLogMgr *g_stackLogMgr = NULL;
+STATIC StacktraceLogMgr* g_stackLogMgr = NULL;
 
-void StacktraceLogSetPath(const char *path, const char *name)
+void StacktraceLogSetPathSuffix(const char* path, const char* name, const char* suffix)
 {
     if (g_stackLogMgr == NULL) {
         return;
@@ -37,36 +37,39 @@ void StacktraceLogSetPath(const char *path, const char *name)
         LOGE("file path [%s] or file name [%s] is not allowed", path, name);
         return;
     }
-    int32_t ret = snprintf_s(g_stackLogMgr->path, SCD_MAX_FULLPATH_LEN + 1U, SCD_MAX_FULLPATH_LEN, "%s/%s.txt", path, name);
+    int32_t ret =
+        snprintf_s(g_stackLogMgr->path, SCD_MAX_FULLPATH_LEN + 1U, SCD_MAX_FULLPATH_LEN, "%s/%s%s", path, name, suffix);
     if (ret == -1) {
         LOGE("snprintf_s file path failed");
         return;
     }
 }
 
-void StacktraceLogInner(const char *format, ...)
+void StacktraceLogSetPath(const char* path, const char* name) { StacktraceLogSetPathSuffix(path, name, ".txt"); }
+
+void StacktraceLogInner(const char* format, ...)
 {
     if (g_stackLogMgr == NULL) {
         return;
     }
-    int32_t writeIdx = AO_F_ADD(&g_stackLogMgr->logIndex, 1); 
+    int32_t writeIdx = AO_F_ADD(&g_stackLogMgr->logIndex, 1);
     if (writeIdx >= STACKTRACE_LOG_MAX_NUM) {
-       return;
+        return;
     }
 
     va_list args;
     va_start(args, format);
-    (void)vsnprintf_s(g_stackLogMgr->logContent[writeIdx], STACKTRACE_LOG_SIZE, STACKTRACE_LOG_SIZE, format, args) ;
+    (void)vsnprintf_s(g_stackLogMgr->logContent[writeIdx], STACKTRACE_LOG_SIZE, STACKTRACE_LOG_SIZE, format, args);
     va_end(args);
 }
 
-void StackcoreLogSave(void)
+void StackcoreLogSaveWithFlag(uint32_t flag)
 {
     if (g_stackLogMgr == NULL) {
         return;
     }
 
-    int32_t fd = TraceOpen(g_stackLogMgr->path, (uint32_t)O_CREAT | (uint32_t)O_RDWR | (uint32_t)O_APPEND, 0640);
+    int32_t fd = TraceOpen(g_stackLogMgr->path, flag, 0640);
     if (fd < 0) {
         LOGE("open log file \"%s\" failed, fd=%d.", g_stackLogMgr->path, fd);
         return;
@@ -81,7 +84,9 @@ void StackcoreLogSave(void)
     TraceClose(&fd);
 }
 
-TraStatus StacktraceLogInit(const char *title)
+void StackcoreLogSave(void) { StackcoreLogSaveWithFlag((uint32_t)O_CREAT | (uint32_t)O_RDWR | (uint32_t)O_APPEND); }
+
+TraStatus StacktraceLogInit(const char* title)
 {
     g_stackLogMgr = AdiagMalloc(sizeof(StacktraceLogMgr));
     if (g_stackLogMgr == NULL) {
@@ -89,8 +94,9 @@ TraStatus StacktraceLogInit(const char *title)
         return TRACE_FAILURE;
     }
     errno_t err = strcpy_s(g_stackLogMgr->title, STACKTRACE_LOG_TITLE_SIZE, title);
-    STACK_CHK_EXPR_ACTION(err != EOK, return TRACE_FAILURE,
-        "strcpy_s failed, result=%d, strerr=%s.", (int32_t)err, strerror(AdiagGetErrorCode()));
+    STACK_CHK_EXPR_ACTION(
+        err != EOK, return TRACE_FAILURE, "strcpy_s failed, result=%d, strerr=%s.", (int32_t)err,
+        strerror(AdiagGetErrorCode()));
     return TRACE_SUCCESS;
 }
 

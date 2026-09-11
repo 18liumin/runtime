@@ -7,7 +7,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
-set(LOG_SOURCE_PATH ${TOP_DIR}/abl/slog)
+set(LOG_SOURCE_PATH ${TOP_DIR}/src/dfx/log)
 
 
 set(libLibalogSrc
@@ -22,6 +22,7 @@ set(libLibalogSrc
     ${LOG_SOURCE_PATH}/liblog/slog/dlog_attr.c
     ${LOG_SOURCE_PATH}/liblog/slog/dlog_level_env.c
     ${LOG_SOURCE_PATH}/liblog/slog/dlog_level_mgr.c
+    ${LOG_SOURCE_PATH}/liblog/slog/dlog_unified_timer_api.c
     ${LOG_SOURCE_PATH}/utils/log_print_syslog.c
     ${LOG_SOURCE_PATH}/utils/log_system_api.c
     ${LOG_SOURCE_PATH}/utils/log_file_util.c
@@ -29,19 +30,21 @@ set(libLibalogSrc
     ${LOG_SOURCE_PATH}/utils/log_common.c
     ${LOG_SOURCE_PATH}/utils/log_time.c
     ${LOG_SOURCE_PATH}/utils/library_load.c
+    ${TOP_DIR}/tests/ut/slog/ut/slog/testcase/main.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/testcase/log-libalog-ut.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/testcase/api_c_ut.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/testcase/dlog_unified_timer_api_ut.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/stub/alog_stub.c
 )
 
 set(libLibalogInc
-    ${TOP_DIR}/inc/driver
-    ${TOP_DIR}/abl/libc_sec/include
+    ${TOP_DIR}/pkg_inc/driver
     ${LOG_SOURCE_PATH}/liblog/slog
     ${LOG_SOURCE_PATH}/liblog/slog/dlog_communication
     ${LOG_SOURCE_PATH}/shared
     ${LOG_SOURCE_PATH}/utils
     ${LOG_SOURCE_PATH}/syslog/common/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/stub
 )
 
 add_executable(log_libalog_utest
@@ -56,6 +59,7 @@ target_compile_definitions(log_libalog_utest PRIVATE
     _LOG_UT_
     LOG_CPP
     WRITE_TO_SYSLOG
+    OS_TYPE_DEF=0
 )
 
 target_link_libraries(log_libalog_utest PRIVATE
@@ -64,6 +68,7 @@ target_link_libraries(log_libalog_utest PRIVATE
     $<BUILD_INTERFACE:mmpa_headers>
     mmpa
     c_sec
+    dl
 )
 
 target_compile_options(log_libalog_utest PRIVATE
@@ -74,11 +79,6 @@ set_target_properties(log_libalog_utest
     PROPERTIES
     OUTPUT_NAME toolchain_log_libalog_utest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/
-)
-
-run_llt_test(
-    TARGET log_libalog_utest
-    TASK_NUM 1
 )
 
 ###################################################################

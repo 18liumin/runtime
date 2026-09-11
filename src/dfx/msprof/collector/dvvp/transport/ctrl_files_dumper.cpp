@@ -58,14 +58,13 @@ int CtrlFilesDumper::DumpCollectionTimeInfo(uint32_t deviceId, bool isHostProfil
     int32_t ret = UploaderMgr::instance()->UploadCtrlFileData(devIdStr, content, fileDataParams, jobCtx);
     if (ret != PROFILING_SUCCESS) {
         MSPROF_LOGE("Failed to upload data for %s", fileName.c_str());
-        MSPROF_INNER_ERROR("EK9999", "Failed to upload data for %s", fileName.c_str());
         return PROFILING_FAILED;
     }
     return PROFILING_SUCCESS;
 }
 
-void CtrlFilesDumper::GeneratorCollectionTimeInfoName(std::string &fileName, const std::string &deviceId,
-                                                      bool isHostProfiling, bool isStart)
+void CtrlFilesDumper::GeneratorCollectionTimeInfoName(
+    std::string& fileName, const std::string& deviceId, bool isHostProfiling, bool isStart)
 {
     std::string prefix = isStart ? "start_info" : "end_info";
     fileName.append(prefix);

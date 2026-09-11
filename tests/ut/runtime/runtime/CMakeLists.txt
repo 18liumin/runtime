@@ -9,7 +9,1543 @@
 # -----------------------------------------------------------------------------------------------------------
 add_subdirectory(test)
 set(BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-include_directories(${OPEN_SOURCE_DIR}/boost-1.87.0)
+include_directories(${CANN_3RD_LIB_PATH}/boost-1.87.0)
+
+set(runtimeut_common_src_task_list
+    ${TOP_DIR}/src/runtime/core/src/task/task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_execute_time.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_res_manage/task_res.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_submit/v100/task_submit.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/task_manager.cc
+    ${TOP_DIR}/src/runtime/feature/ffts/ffts_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/davinci/davinci_kernel_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/davinci/davinci_multiple_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_execute_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_execute_task_func_call.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/event/event_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/memory/memory_memcpy_async_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/memory/memory_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/dma/rdma_task.cc
+    ${TOP_DIR}/src/runtime/feature/ffts/rdma_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/reduce/reduce_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/cond_op_stream_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/cond_op_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/cond_op_label_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/cond_op_stream_task_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/profiling/profiling_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/dump/dump_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/stream/stream_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/stream/stream_task_active.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/common/common_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/random_num_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/barrier/barrier_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cmo/cmo_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_maintaince_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/event/notify_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/timeout_set/timeout_set_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/ringbuffer_maintain/ringbuffer_maintain_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_update_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_graph_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_to_aicpu_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/maintenance/maintenance_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/kernel_fusion_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/maintenance/float_status_task.cc
+)
+
+set(runtimeut_src_task_list
+    ${runtimeut_common_src_task_list}
+    ${TOP_DIR}/src/runtime/core/src/task/v100/task_checker.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/memory_corruption_checker.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/task_adapter.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/barrier/barrier_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cmo/cmo_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/profiling/profiling_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/stream/stream_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/dump/dump_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/cond_op_stream_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/cond_op_label_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/aclgraph_cond_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/event/event_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/event/notify_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/memory/memory_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/memory/memory_task_v100_external_event.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_execute_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_maintaince_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_to_aicpu_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_update_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_graph_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/kernel_fusion_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/davinci/davinci_kernel_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/davinci/davinci_multiple_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/reduce/reduce_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/ringbuffer_maintain/ringbuffer_maintain_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/maintenance/maintenance_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/maintenance/float_status_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/common/common_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/timeout_set/timeout_set_task_v100.cc
+    ${TOP_DIR}/src/runtime/feature/ffts/ffts_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/dma/rdma_task_v100.cc
+    ${TOP_DIR}/src/runtime/feature/ffts/rdma_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/stars_cond_isa_construct_common.cc
+)
+
+set(runtimeut_david_series_common_src_task_list
+    ${runtimeut_common_src_task_list}
+    ${TOP_DIR}/src/runtime/core/src/task/task_submit/v200/task_david.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_res_manage/v200/task_res_da.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_recycle/v200/task_recycle.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_recycle/v200/task_recycle_common_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_recycle/v200/task_recycle_cqrpt_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_recycle/v200/task_recycle_dvpp.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_recycle/v200/task_recycle_send_sync.cc
+    ${TOP_DIR}/src/runtime/feature/ccu/ccu_task.cc
+    ${TOP_DIR}/src/runtime/feature/ccu/ccu_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/event/david_event_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/event/notify_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/dma/ubdma_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/dma/rdma_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/barrier/barrier_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/reduce/reduce_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_graph_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader/arg_loader_ub.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader/load_policy.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader/arg_manage_ub.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader/arg_manage_pcie.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader/stars_arg_manager.cc
+    ${TOP_DIR}/src/runtime/feature/cntnotify/count_notify.cc
+    ${TOP_DIR}/src/runtime/core/src/event/event_david.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/davinci/davinci_kernel_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/davinci/davinci_multiple_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v200_base/davinci_task_launch_config.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v200_base/task_adapter.cc
+    ${TOP_DIR}/src/runtime/feature/fusion/fusion_task.cc
+    ${TOP_DIR}/src/runtime/feature/ffts/ffts_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v200_base/stars_david.cc
+    ${TOP_DIR}/src/runtime/feature/ccu/ccu_sqe.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cmo/cmo_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/profiling/profiling_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/stream/stream_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/dump/dump_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/cond_op_stream_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/cond_op_label_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/aclgraph_cond_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/memory/memory_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_execute_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_maintaince_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_to_aicpu_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_update_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/kernel_fusion_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/ringbuffer_maintain/ringbuffer_maintain_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/maintenance/maintenance_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/common/common_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/maintenance/float_status_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/timeout_set/timeout_set_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/stars_external_event_cond_isa_helper.cc
+
+)
+
+set(runtimeut_david_src_task_list
+    ${runtimeut_david_series_common_src_task_list}
+    # david & solomon 专用差异化文件
+    ${TOP_DIR}/src/runtime/feature/fusion/fusion_task_v200.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v200/task_checker.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/event/notify_task_v200.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v200/memory_corruption_checker.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cmo/cmo_task_v200.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cmo/cmo_task_arch920x.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/memory/memory_task_v200.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/davinci/davinci_kernel_task_v200.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/stars_cond_isa_construct_v200.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/stars_cond_isa_construct_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/stars_cond_isa_construct_arch920x.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/cond_isa_task_arch920x.cc
+    ${TOP_DIR}/src/runtime/feature/fusion/fusion_task_arch920x.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/davinci/davinci_kernel_task_arch920x.cc
+)
+
+set(runtimeut_src_api_list
+    ${TOP_DIR}/src/runtime/api/api_c.cc
+    ${TOP_DIR}/src/runtime/api/api_c_standard_soc.cc
+    ${TOP_DIR}/src/runtime/api/api_c_soma.cc
+    ${TOP_DIR}/src/runtime/api/api_david.cc
+    ${TOP_DIR}/src/runtime/api/api_preload_task.cc
+    ${TOP_DIR}/src/runtime/api/api_c_context.cc
+    ${TOP_DIR}/src/runtime/api/api_c_device.cc
+    ${TOP_DIR}/src/runtime/api/api_c_kernel.cc
+    ${TOP_DIR}/src/runtime/api/api_c_memory.cc
+    ${TOP_DIR}/src/runtime/api/api_c_stream.cc
+    ${TOP_DIR}/src/runtime/api/api_c_model.cc
+    ${TOP_DIR}/src/runtime/api/api_c_event.cc
+    ${TOP_DIR}/src/runtime/api/api_c_mbuf.cc
+    ${TOP_DIR}/src/runtime/api/inner.cc
+    ${TOP_DIR}/src/runtime/api/api_handle_guard.cc
+    ${TOP_DIR}/src/runtime/api/api_global_err.cc
+    ${TOP_DIR}/src/runtime/api/api_c_soc.cc
+    ${TOP_DIR}/src/runtime/api/api_c_dqs.cc
+    ${TOP_DIR}/src/runtime/api/api_c_snapshot.cc
+    ${TOP_DIR}/src/runtime/api/api_c_uvm.cc
+)
+
+set(runtimeut_src_david_series_common_c_list
+    ${TOP_DIR}/src/runtime/core/src/launch/aix_starsv2.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/aicpu_starsv2.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/dvpp_starsv2.cc
+    ${TOP_DIR}/src/runtime/feature/fusion/fusion_c.cc
+    ${TOP_DIR}/src/runtime/feature/fusion/fusion_task.cc
+
+    ${TOP_DIR}/src/runtime/core/src/stream/stream_c.cc
+    ${TOP_DIR}/src/runtime/feature/ccu/ccu_stream.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/coredump_c.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/fast_recover.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/memory_common.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/memcpy_starsv2.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/memory_starsv2.cc
+    ${TOP_DIR}/src/runtime/core/src/device/v200_base/device_error_proc_c.cc
+    ${TOP_DIR}/src/runtime/feature/ccu/ccu_device_error_proc.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/cond_starsv2.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/label_common.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/label_starsv2.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/cmo_barrier_common.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/cmo_barrier_starsv2.cc
+    ${TOP_DIR}/src/runtime/core/src/notify/notify_c.cc
+    ${TOP_DIR}/src/runtime/core/src/event/event_c.cc
+    ${TOP_DIR}/src/runtime/feature/model/model_c.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/profiler_c.cc
+)
+
+set(runtimeut_src_david_c_list
+    ${runtimeut_src_david_series_common_c_list}
+)
+
+set(runtimeut_src_v201_c_list
+    ${runtimeut_src_david_series_common_c_list}
+)
+
+set(runtimeut_src_common_list
+    ${TOP_DIR}/src/runtime/core/src/common/enum_desc.cc
+    ${TOP_DIR}/src/runtime/core/src/common/api_enum_desc.cc
+    ${TOP_DIR}/src/runtime/core/src/common/optional_enum_desc.cc
+    ${TOP_DIR}/src/runtime/core/src/common/error_code.cc
+    ${TOP_DIR}/src/runtime/core/src/common/thread_local_container.cc
+    ${TOP_DIR}/src/runtime/core/src/common/utils.cc
+    ${TOP_DIR}/src/runtime/core/src/common/heterogenous.cc
+    ${TOP_DIR}/src/runtime/core/src/common/soc_info.cc
+    ${TOP_DIR}/src/runtime/core/src/common/context_data_manage.cc
+    ${TOP_DIR}/src/runtime/core/src/common/task_fail_callback_data_manager.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_task_fail_callback_data_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/common/performance_record.cc
+    ${TOP_DIR}/src/runtime/core/src/common/profiling_agent.cc
+    ${TOP_DIR}/src/runtime/core/src/common/errcode_manage.cc
+    ${TOP_DIR}/src/runtime/core/src/common/error_message_manage.cc
+    ${TOP_DIR}/src/runtime/core/src/common/prof_ctrl_callback_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/common/rt_log.cc
+    ${TOP_DIR}/src/runtime/core/src/common/dev_info_manage.cc
+    ${TOP_DIR}/src/runtime/core/src/common/global_state_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/common/runtime_handle_guard.cc
+    ${TOP_DIR}/src/runtime/core/src/common/register_memory.cc
+)
+
+set(runtimeut_platform_list
+    ${TOP_DIR}/src/runtime/config/610_lite/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/950/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/350/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/910_B_93/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/as31xm1/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/bs9sx1a/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/cloud/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/dc/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/mc62cm12a/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/mc32dm11a/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/adc/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/mini/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/mini_v3/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/nano/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/tiny/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/arch9201/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/arch9202/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/xpu/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/kirinx90/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/kirin9030/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/kirin_dev_0000/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/kirin_dev_0001/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/kirin_dev_0002/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/kirin_dev_0003/dev_info_reg.cc
+    ${TOP_DIR}/src/runtime/config/910_B_93/dev_info_proc_func.cc
+)
+
+set(runtimeut_src_context_list
+    ${TOP_DIR}/src/runtime/core/src/context/context.cc
+    ${TOP_DIR}/src/runtime/core/src/context/context_standard_soc.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/context_standard_soc_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/ffts/context_ffts_standard_soc.cc
+    ${TOP_DIR}/src/runtime/core/src/context/context_manage.cc
+)
+
+set(runtimeut_src_aclgraph_list
+    ${TOP_DIR}/src/runtime/feature/aclgraph/api_decorator_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v100/api_impl_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v100/api_impl_capture_event.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/api_error_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/context_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/model_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/capture_model.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/cond_handle.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/capture_model_utils.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/event_capture.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/stream_capture.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/aclgraph_cond_task.cc
+    ${TOP_DIR}/src/runtime/feature/jetty/jetty_manager.cc
+    ${TOP_DIR}/src/runtime/feature/jetty/jetty_pool.cc
+    ${TOP_DIR}/src/runtime/feature/jetty/stream_jetty_context.cc
+    ${TOP_DIR}/src/runtime/feature/jetty/stream_jetty_handler.cc
+    ${TOP_DIR}/src/runtime/feature/jetty/stream_ub_db_stub.cc
+)
+
+set(runtimeut_common_src_stream_list
+    ${TOP_DIR}/src/runtime/core/src/stream/stream_sqcq_manage.cc
+    ${TOP_DIR}/src/runtime/core/src/stream/engine_stream_observer.cc
+    ${TOP_DIR}/src/runtime/core/src/stream/stream.cc
+    ${TOP_DIR}/src/runtime/core/src/stream/ctrl_stream.cc
+    ${TOP_DIR}/src/runtime/core/src/stream/coprocessor_stream.cc
+    ${TOP_DIR}/src/runtime/core/src/stream/stream_factory.cc
+)
+
+set(runtimeut_src_stream_list
+    ${runtimeut_common_src_stream_list}
+
+    ${TOP_DIR}/src/runtime/core/src/stream/v100/stream_creator_c.cc
+)
+
+set(runtimeut_david_src_stream_list
+    ${runtimeut_common_src_stream_list}
+
+    ${TOP_DIR}/src/runtime/core/src/stream/stream_david.cc
+    ${TOP_DIR}/src/runtime/core/src/stream/v200/stream_creator_c.cc
+)
+
+set(runtimeut_src_profile_list
+    ${TOP_DIR}/src/runtime/core/src/profiler/profiler.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/api_profile_decorator.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/api_profile_log_decorator.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/api_profile_decorator_standard_soc.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/api_profile_log_decorator_standard_soc.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/prof_map_ge_model_device.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/profile_log_record.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/npu_driver_record.cc
+)
+
+set(runtime_src_arg_loader_list
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader/uma_arg_loader.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader/load_policy.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader/stars_arg_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader/arg_manage_pcie.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/memory_list.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/memory_pool.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/memory_pool_manager.cc
+)
+
+set(runtimeut_src_pool_list
+    ${TOP_DIR}/src/runtime/core/src/pool/bitmap.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/buffer_allocator.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/task_allocator.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/spm_pool.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/h2d_copy_mgr.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/event_pool.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/event_expanding.cc
+)
+
+set(runtimeut_src_ttlv_list
+    ${TOP_DIR}/src/runtime/core/src/ttlv/ttlv_decoder_utils.cc
+    ${TOP_DIR}/src/runtime/core/src/ttlv/ttlv.cc
+    ${TOP_DIR}/src/runtime/core/src/ttlv/ttlv_word_decoder.cc
+    ${TOP_DIR}/src/runtime/core/src/ttlv/ttlv_sentence_decoder.cc
+    ${TOP_DIR}/src/runtime/core/src/ttlv/ttlv_paragraph_decoder.cc
+)
+
+set(runtimeut_src_callback_list
+    ${TOP_DIR}/src/runtime/core/src/device/device_state_callback_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_fail_callback_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/stream/stream_state_callback_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/event/event_state_callback_manager.cc
+)
+
+set(runtimeut_src_tiny_exclude_list
+    ${TOP_DIR}/src/runtime/api/api_c_dqs.cc
+    ${TOP_DIR}/src/runtime/api/api_c_standard_soc.cc
+    ${TOP_DIR}/src/runtime/api/api_c_soma.cc
+    ${TOP_DIR}/src/runtime/api/api_david.cc
+    ${TOP_DIR}/src/runtime/api/api_preload_task.cc
+    ${TOP_DIR}/src/runtime/api/api_c_snapshot.cc
+    ${TOP_DIR}/src/runtime/api/api_c_uvm.cc
+    ${TOP_DIR}/src/runtime/api/api_c_kernel.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error_standard_soc.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/api_decorator_xpu.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_standard_soc.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_soma.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_event.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_event_common.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_david.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v200/api_impl_david_capture_event.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/api_error_xpu.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error_uvm.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_uvm.cc
+    ${TOP_DIR}/src/runtime/core/src/context/context_standard_soc.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/api_decorator_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/api_error_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v100/api_impl_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v100/api_impl_capture_event.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/context_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/model_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/capture_model.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/capture_model_utils.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/event_capture.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/stream_capture.cc
+    ${TOP_DIR}/src/runtime/feature/jetty/jetty_manager.cc
+    ${TOP_DIR}/src/runtime/feature/jetty/jetty_pool.cc
+    ${TOP_DIR}/src/runtime/feature/jetty/stream_jetty_context.cc
+    ${TOP_DIR}/src/runtime/feature/jetty/stream_jetty_handler.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v100/capture_adapt_v100.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v100/capture_model_adapt_v100.cc
+    ${TOP_DIR}/src/runtime/feature/model/v100/capture_adapt.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/device_snapshot.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/snapshot_process_helper.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/snapshot_callback_manager.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/v100/device_snapshot_adapter.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/context_standard_soc_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/ffts/context_ffts_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/direct_hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/async_hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/shm_cq.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/engine_factory.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/binary_loader.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/fp16_t.cpp
+    ${TOP_DIR}/src/runtime/core/src/dfx/hifloat.cpp
+    ${TOP_DIR}/src/runtime/core/src/dfx/printf.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/aicpu_dfx.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/parse_kernel_dfx_info.cc
+    ${TOP_DIR}/src/runtime/feature/cntnotify/count_notify.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/api_profile_decorator_standard_soc.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/api_profile_log_decorator_standard_soc.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_to_sqe.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/dma/rdma_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/dma/rdma_task_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/ffts_task.cc
+    ${TOP_DIR}/src/runtime/feature/ffts/ffts_task.cc
+    ${TOP_DIR}/src/runtime/feature/ffts/rdma_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/dma/ubdma_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/model/model_update_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/event/notify_task_v200_base.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v200_base/stars_david.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/memory/memory_task_v200.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/davinci/davinci_kernel_task_v200.cc
+    ${TOP_DIR}/src/runtime/feature/fusion/fusion_task_v200.cc
+    ${TOP_DIR}/src/runtime/core/src/event/ipc_event.cc
+    ${TOP_DIR}/src/runtime/core/src/event/ipc_event_starsV2.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/event_pool.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/event_expanding.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/event/notify_task_v200.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/funcsymbol_table.cc
+    ${TOP_DIR}/src/runtime/core/src/memory/common_memset_d32.cpp
+    ${TOP_DIR}/src/runtime/core/src/memory/simd_memsetd32.cpp
+    ${TOP_DIR}/src/runtime/core/src/kernel/symbol_table.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/aclgraph_cond_task.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/aclgraph_cond_task_v100.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_task_fail_callback_data_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/memory/memory_task_v100_external_event.cc
+    ${TOP_DIR}/src/runtime/core/src/task/stars_external_event_cond_isa_helper.cc
+)
+
+set(runtimeut_src_tiny_include_list
+    ${TOP_DIR}/src/runtime/api/api_c_stub.cc
+    ${TOP_DIR}/src/runtime/api/api_c_tiny.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_stub.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_tiny.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_event_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_decorator_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/fast_recover.cc
+    ${TOP_DIR}/src/runtime/api/impl/v100/api_impl_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/context/context_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/tiny/context_tiny_stub_aclgraph.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/tiny/capture_adapt_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/tiny/capture_model_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/tiny/capture_model_utils_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/tiny/event_capture_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/tiny/stream_capture_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/model/tiny/model_aclgraph_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/tiny/device_snapshot_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/tiny/snapshot_process_helper_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/tiny/snapshot_callback_manager_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/ffts/context_ffts_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/printf_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/aicpu_dfx_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/kernel_dfx_info.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/engine_factory_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/binary_loader_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/program_common.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/symbol_table_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/kernel_utils.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/funcsymbol_table_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/api_profile_log_decorator_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/api_profile_decorator_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/task/tiny/rdma_task_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/ffts/ffts_task_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/task/tiny/task_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/task/tiny/memory_task_v100_external_event_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/event_pool_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/event/ipc_event_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/event_expanding_tiny_stub.cc
+    ${TOP_DIR}/src/runtime/feature/jetty/jetty_stub.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_task_fail_callback_data_manager_tiny_stub.cc
+)
+
+set(runtime_raw_device_adpt_common_list
+    ${TOP_DIR}/src/runtime/core/src/device/raw_device_adpt_comm.cc
+    ${TOP_DIR}/src/runtime/core/src/device/dev_simt_stack_checker.cc
+)
+
+set(runtime_david_simt_adpt_list
+    ${TOP_DIR}/src/runtime/core/src/device/dev_simt_stack_checker.cc
+)
+
+set(runtime_v201_simt_adpt_list
+    ${TOP_DIR}/src/runtime/core/src/device/v201/dev_simt_stack_checker.cc
+)
+
+set(runtime_raw_device_adpt_david_list
+    ${TOP_DIR}/src/runtime/core/src/device/raw_device_adpt_david.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_david.cpp
+)
+
+set(runtime_xpu_src
+    ${TOP_DIR}/src/runtime/api/api_c_xpu.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/json_parse.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/runtime_xpu_adapt.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/task_manager_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/stream_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_aicpu_c.hpp
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_context.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_device.cc
+    ${TOP_DIR}/src/runtime/driver/xpu_driver.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_aicpu_c.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/stream_sqcq_manage_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/stream_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/task_xpu.cc
+    ${TOP_DIR}/src/tprt/c/tprt_api.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_cqhandle.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_device.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_log.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_sqhandle.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_worker.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_timer.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_res_manage/v200/task_res_da.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/task_xpu_recycle.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader/load_policy.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader/stars_arg_manager.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/arg_manage_xpu.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/h2h_copy_mgr.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/arg_loader_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/stream_xpu_c.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_kernel_task.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_profiling.cc
+)
+
+set(runtimeut_src_list
+    ${runtimeut_src_task_list}
+    ${runtimeut_src_api_list}
+    ${runtimeut_src_aclgraph_list}
+    ${runtimeut_src_context_list}
+    ${runtimeut_src_stream_list}
+    ${runtimeut_src_profile_list}
+    ${runtime_src_arg_loader_list}
+    ${runtimeut_src_pool_list}
+    ${runtimeut_src_ttlv_list}
+    ${runtimeut_src_callback_list}
+    ${TOP_DIR}/src/runtime/api/api.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/api_decorator_xpu.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_decorator.cc
+    ${TOP_DIR}/src/runtime/api/impl/v100/api_impl_v100.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_kernel_args.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_memory.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_mbuf.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_standard_soc.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_soma.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_event.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_event_common.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_esched.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/api_error_xpu.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error_standard_soc.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_creator.cc
+    ${TOP_DIR}/src/runtime/api/impl/v100/api_impl_creator_c.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error_uvm.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_uvm.cc
+    ${TOP_DIR}/src/runtime/core/src/uvm/uvm_callback.cc
+    ${TOP_DIR}/src/runtime/core/src/context/context.cc
+    ${TOP_DIR}/src/runtime/core/src/context/context_standard_soc.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device.cc
+    ${TOP_DIR}/src/runtime/core/src/device/raw_device.cc
+    ${TOP_DIR}/src/runtime/core/src/device/raw_device_res.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/fast_recover.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/device_snapshot.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/snapshot_process_helper.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/snapshot_callback_manager.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/v100/device_snapshot_adapter.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device_sq_cq_pool.cc
+    ${TOP_DIR}/src/runtime/core/src/device/sq_addr_memory_pool.cc
+    ${TOP_DIR}/src/runtime/core/src/device/ctrl_sq.cc
+    ${TOP_DIR}/src/runtime/core/src/device/ctrl_msg.cc
+    ${TOP_DIR}/src/runtime/driver/driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_common.cpp
+    ${TOP_DIR}/src/runtime/feature/model/model.cc
+    ${TOP_DIR}/src/runtime/feature/model/model_rebuild.cc
+    ${TOP_DIR}/src/runtime/feature/model/v100/capture_adapt.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v100/capture_adapt_v100.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v100/capture_model_adapt_v100.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/args/args_handle_allocator.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/args/para_convertor.cc
+    ${TOP_DIR}/src/runtime/core/src/common/args_buffer_guard.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/binary_loader.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/elf.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/json_parse.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/funcsymbol_table.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/module.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/program_common.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/program_plat.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/program.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/symbol_table.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/kernel_utils.cc
+    ${TOP_DIR}/src/runtime/feature/soma/soma.cc
+    ${TOP_DIR}/src/runtime/feature/soma/stream_mem_pool.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/cmo_barrier_common.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/cmo_barrier_stars.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/label.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/cond_stars.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/label_common.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/label_stars.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/memory_common.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/memcpy_stars.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/memory_stars.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/aix_stars.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/aicpu_stars.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/dvpp_stars.cc
+    ${TOP_DIR}/src/runtime/core/src/device/aicpu_err_msg.cc
+    ${TOP_DIR}/src/runtime/core/src/aicpu_timeout/aicpu_timeout_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/aicpu_timeout/aicpu_timeout_control.cc
+    ${TOP_DIR}/src/runtime/core/src/notify/notify.cc
+    ${TOP_DIR}/src/runtime/core/src/event/event.cc
+    ${TOP_DIR}/src/runtime/core/src/event/ipc_event.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/logger.cc
+    ${TOP_DIR}/src/runtime/core/src/runtime.cc
+    ${TOP_DIR}/src/runtime/core/src/device/ini_parse_utils.cc
+    ${TOP_DIR}/src/runtime/core/src/memory/mem_type.cc
+    ${TOP_DIR}/src/runtime/core/src/memory/common_memset_d32.cpp
+    ${TOP_DIR}/src/runtime/core/src/memory/simd_memsetd32.cpp
+    ${TOP_DIR}/src/runtime/core/src/plugin_manage/runtime_keeper.cc
+    ${TOP_DIR}/src/runtime/core/src/plugin_manage/v100/plugin_old_arch.cc
+    ${TOP_DIR}/src/runtime/core/src/utils/capability.cc
+    ${TOP_DIR}/src/runtime/core/src/task/ctrl_res_pool.cpp
+    ${TOP_DIR}/src/runtime/core/src/utils/osal.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/scheduler.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/profiler.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/atrace_log.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/fp16_t.cpp
+    ${TOP_DIR}/src/runtime/core/src/dfx/hifloat.cpp
+    ${TOP_DIR}/src/runtime/core/src/dfx/printf.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/aicpu_dfx.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/kernel_dfx_info.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/parse_kernel_dfx_info.cc
+    ${TOP_DIR}/src/runtime/core/src/utils/subscribe.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/onlineprof.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device_error_proc.cc
+    ${TOP_DIR}/src/runtime/core/src/device/v100/device_error_proc.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device_error_core_proc.cc
+    ${TOP_DIR}/src/runtime/core/src/task/stars_cond_isa_helper.cc
+    ${TOP_DIR}/src/runtime/core/src/task/stars_external_event_cond_isa_helper.cc
+    ${TOP_DIR}/src/runtime/core/src/common/thread_local_container.cc
+    ${TOP_DIR}/src/runtime/core/src/common/inner_thread_local.cpp
+    ${TOP_DIR}/src/runtime/core/src/device/device_msg_handler.cc
+    ${TOP_DIR}/src/runtime/core/src/utils/aicpu_scheduler_agent.cc
+    ${TOP_DIR}/src/runtime/core/src/task/host_task.cc
+    ${TOP_DIR}/src/runtime/core/src/stream/dvpp_grp.cc
+    ${TOP_DIR}/src/runtime/api/inner.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_to_sqe.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_tiny.cpp
+    ${TOP_DIR}/src/runtime/core/src/engine/engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/package_rebuilder.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/stars/stars_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/async_hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/direct_hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/engine_factory.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/shm_cq.cc
+    ${TOP_DIR}/src/runtime/core/src/runtime_v100/runtime_adapt.cc
+    ${runtimeut_src_common_list}
+    ${runtimeut_platform_list}
+)
+
+set(runtimeut_david_src_list
+    ${runtimeut_david_src_task_list}
+    ${runtimeut_src_api_list}
+    ${runtimeut_src_aclgraph_list}
+    ${runtimeut_src_context_list}
+    ${runtimeut_david_src_stream_list}
+    ${runtimeut_src_profile_list}
+    ${runtime_src_arg_loader_list}
+    ${runtimeut_src_pool_list}
+    ${runtimeut_src_ttlv_list}
+    ${runtimeut_src_callback_list}
+    ${runtimeut_src_david_c_list}
+    ${runtime_raw_device_adpt_david_list}
+    ${runtime_david_simt_adpt_list}
+    ${runtime_xpu_src}
+    ${TOP_DIR}/src/runtime/api/api.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/api_decorator_xpu.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_decorator.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_kernel_args.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_memory.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_mbuf.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_event.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_event_common.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_esched.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_david.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v200/api_impl_david_capture_event.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_creator.cc
+    ${TOP_DIR}/src/runtime/api/impl/v200/api_impl_creator_c.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_standard_soc.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_soma.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/api_error_xpu.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error_standard_soc.cc
+    ${TOP_DIR}/src/runtime/api/impl/v200/api_impl_v200.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/api_impl_xpu_v200.cc
+    ${TOP_DIR}/src/runtime/api/impl/v100/api_impl_v100.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error_uvm.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_uvm.cc
+    ${TOP_DIR}/src/runtime/core/src/uvm/uvm_callback.cc
+    ${TOP_DIR}/src/runtime/core/src/context/context.cc
+    ${TOP_DIR}/src/runtime/core/src/context/context_standard_soc.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device.cc
+    ${TOP_DIR}/src/runtime/core/src/device/raw_device.cc
+    ${TOP_DIR}/src/runtime/core/src/device/raw_device_res.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/device_snapshot.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/snapshot_process_helper.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/snapshot_callback_manager.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/v200_base/device_snapshot_adapter.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device_sq_cq_pool.cc
+    ${TOP_DIR}/src/runtime/core/src/device/sq_addr_memory_pool.cc
+    ${TOP_DIR}/src/runtime/driver/driver.cc
+    ${TOP_DIR}/src/runtime/core/src/device/ctrl_sq.cc
+    ${TOP_DIR}/src/runtime/core/src/device/ctrl_msg.cc
+    ${TOP_DIR}/src/runtime/driver/v200/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_common.cpp
+    ${TOP_DIR}/src/runtime/feature/model/model.cc
+    ${TOP_DIR}/src/runtime/feature/model/model_rebuild.cc
+    ${TOP_DIR}/src/runtime/feature/model/v200_base/capture_adapt.cc
+    ${TOP_DIR}/src/runtime/feature/model/v200/model_c.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v200/capture_adapt_v200.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v200/capture_model_adapt_v200.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/args/args_handle_allocator.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/args/para_convertor.cc
+    ${TOP_DIR}/src/runtime/core/src/common/args_buffer_guard.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v200_base/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/binary_loader.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/elf.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/funcsymbol_table.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/module.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/program.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/symbol_table.cc
+    ${TOP_DIR}/src/runtime/feature/soma/soma.cc
+    ${TOP_DIR}/src/runtime/feature/soma/stream_mem_pool.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/label.cc
+    ${TOP_DIR}/src/runtime/core/src/device/aicpu_err_msg.cc
+    ${TOP_DIR}/src/runtime/core/src/aicpu_timeout/aicpu_timeout_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/aicpu_timeout/aicpu_timeout_control.cc
+    ${TOP_DIR}/src/runtime/core/src/notify/notify.cc
+    ${TOP_DIR}/src/runtime/core/src/event/event.cc
+    ${TOP_DIR}/src/runtime/core/src/event/ipc_event.cc
+    ${TOP_DIR}/src/runtime/core/src/event/ipc_event_starsV2.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/logger.cc
+    ${TOP_DIR}/src/runtime/core/src/runtime.cc
+    ${TOP_DIR}/src/runtime/core/src/device/ini_parse_utils.cc
+    ${TOP_DIR}/src/runtime/core/src/memory/mem_type.cc
+    ${TOP_DIR}/src/runtime/core/src/memory/common_memset_d32.cpp
+    ${TOP_DIR}/src/runtime/core/src/memory/simd_memsetd32.cpp
+    ${TOP_DIR}/src/runtime/core/src/plugin_manage/runtime_keeper.cc
+    ${TOP_DIR}/src/runtime/core/src/plugin_manage/v200/plugin_old_arch.cc
+    ${TOP_DIR}/src/runtime/core/src/utils/capability.cc
+    ${TOP_DIR}/src/runtime/core/src/task/ctrl_res_pool.cpp
+    ${TOP_DIR}/src/runtime/core/src/utils/osal.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/scheduler.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/profiler.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/atrace_log.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/fp16_t.cpp
+    ${TOP_DIR}/src/runtime/core/src/dfx/hifloat.cpp
+    ${TOP_DIR}/src/runtime/core/src/dfx/printf.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/aicpu_dfx.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/kernel_dfx_info.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/parse_kernel_dfx_info.cc
+    ${TOP_DIR}/src/runtime/core/src/utils/subscribe.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/onlineprof.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device_error_proc.cc
+    ${TOP_DIR}/src/runtime/core/src/device/v200_base/device_error_proc.cc
+    ${TOP_DIR}/src/runtime/core/src/device/v200_base/device_error_proc_arch920x.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device_error_core_proc.cc
+    ${TOP_DIR}/src/runtime/core/src/task/stars_cond_isa_helper.cc
+    ${TOP_DIR}/src/runtime/core/src/task/stars_external_event_cond_isa_helper.cc
+    ${TOP_DIR}/src/runtime/core/src/common/thread_local_container.cc
+    ${TOP_DIR}/src/runtime/core/src/common/inner_thread_local.cpp
+    ${TOP_DIR}/src/runtime/core/src/device/device_msg_handler.cc
+    ${TOP_DIR}/src/runtime/core/src/utils/aicpu_scheduler_agent.cc
+    ${TOP_DIR}/src/runtime/core/src/task/host_task.cc
+    ${TOP_DIR}/src/runtime/core/src/stream/dvpp_grp.cc
+    ${TOP_DIR}/src/runtime/api/inner.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_to_sqe.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_tiny.cpp
+    ${TOP_DIR}/src/runtime/core/src/engine/engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/package_rebuilder.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/stars/stars_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/async_hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/direct_hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/engine_factory.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/shm_cq.cc
+     ${TOP_DIR}/src/runtime/core/src/task/task_info/profiling/profiling_task.cc
+     ${TOP_DIR}/src/runtime/core/src/task/task_info/profiling/profiling_task_v200_base.cc
+     ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/core/src/runtime_v200/runtime_adapt.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/program_plat.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/program.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/symbol_table.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/program_common.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/kernel_utils.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/json_parse.cc
+    ${runtimeut_src_common_list}
+    ${runtimeut_platform_list}
+)
+
+list(REMOVE_ITEM runtimeut_david_src_list
+    ${TOP_DIR}/src/runtime/feature/jetty/stream_ub_db_stub.cc
+)
+add_library(runtime_ut_david_static_lib STATIC ${runtimeut_david_src_list})
+
+target_include_directories(
+    runtime_ut_david_static_lib PUBLIC 
+    ${RUNTIME_DIR}/src/inc/runtime
+    ${TOP_DIR}/src/inc
+    ${TOP_DIR}/src/tprt/inc/external
+    ${TOP_DIR}/src/tprt/feature/inc
+    ${TOP_DIR}/abl/slog/inc
+    ${TOP_DIR}/abl/mmpa/inc
+    ${TOP_DIR}/abl/libc_sec/include
+)
+
+target_compile_definitions(runtime_ut_david_static_lib PUBLIC
+    XPU_UT
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+target_link_libraries(runtime_ut_david_static_lib PRIVATE $<BUILD_INTERFACE:runtime_utest_intf_pub>)
+###################################################################################################
+add_library(runtimeut_src_static_lib STATIC 
+    ${runtimeut_src_list}
+    ${TOP_DIR}/src/runtime/core/src/task/v200/task_david_stub.cc
+)
+
+target_include_directories(
+    runtimeut_src_static_lib PUBLIC 
+    ${TOP_DIR}/src/tprt/inc/external
+    ${TOP_DIR}/src/tprt/feature/inc
+    ${TOP_DIR}/abl/slog/inc
+    ${TOP_DIR}/abl/mmpa/inc
+    ${TOP_DIR}/abl/libc_sec/include
+)
+
+target_compile_definitions(runtimeut_src_static_lib PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtimeut_src_static_lib PRIVATE $<BUILD_INTERFACE:runtime_utest_intf_pub>)
+###################################################################################################
+set(stub_src_list
+    stub/atrace_stub.cc
+    stub/awatch_dog_stub.cc
+    stub/error_manager_stub.cc
+    stub/log_stub.cc
+    stub/prof_stub.cc
+    stub/platform_stub.cc
+)
+add_library(runtime_ut_stub_static_lib STATIC ${stub_src_list})
+
+target_link_libraries(runtime_ut_stub_static_lib PRIVATE $<BUILD_INTERFACE:runtime_utest_intf_pub>)
+
+#########   library for camodel specific features;
+set(runtimeut_camodel_src_list ${runtimeut_src_list})
+list(REMOVE_ITEM runtimeut_camodel_src_list
+    "${TOP_DIR}/src/runtime/core/src/device/raw_device_res.cc"
+)
+add_library(runtimeut_camodel_src_static_lib STATIC
+    ${runtimeut_camodel_src_list}
+    ${TOP_DIR}/src/runtime/core/src/device/raw_device_res_camodel.cc
+)
+
+target_compile_definitions(runtimeut_camodel_src_static_lib PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtimeut_camodel_src_static_lib PRIVATE $<BUILD_INTERFACE:runtime_utest_intf_pub>)
+
+###################################################################################################
+
+set(runtimeut_camodel_src_list_v200 ${runtimeut_src_list})
+list(REMOVE_ITEM runtimeut_camodel_src_list_v200
+    "${TOP_DIR}/src/runtime/core/src/device/raw_device_res.cc"
+)
+add_library(runtimeut_camodel_src_v200_static_lib STATIC
+    ${runtimeut_camodel_src_list_v200}
+    ${TOP_DIR}/src/runtime/core/src/device/raw_device_res_camodel.cc
+)
+
+target_compile_definitions(runtimeut_camodel_src_v200_static_lib PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtimeut_camodel_src_v200_static_lib PRIVATE $<BUILD_INTERFACE:runtime_utest_intf_pub>)
+
+###################################################################################################
+add_executable(runtime_utest
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    stub/hal_stub.cc
+    test/main.cc
+    test/rt_utest_kernellaunch.cc
+    test/rt_utest_ctrl_res_pool.cc
+    test/rt_utest_stream.cc
+    test/rt_utest_osal.cc
+    test/rt_utest_module.cc
+    test/rt_utest_elf.cc
+    test/rt_utest_program.cc
+    test/rt_utest_symbol.cc
+    test/rt_utest_runtime.cc
+    test/rt_utest_kernel.cc
+    test/rt_utest_funcsymbol.cc
+    test/rt_utest_config.cc
+    test/rt_utest_driver.cc
+    test/rt_utest_device.cc
+    test/rt_utest_arg_loader.cc
+    test/rt_utest_context.cc
+    test/rt_utest_pool.cc
+    test/rt_utest_agent.cc
+    test/rt_utest_aicpu_err_msg.cc
+    test/rt_utest_aicpu_timeout.cc
+    test/rt_utest_aicpu_scheduler_agent.cc
+    test/rt_utest_enum_to_string_utils.cc
+    test/rt_utest_ttlv.cc
+    #test/rt_utest_atrace_log.cc
+    test/rt_error_code_test.cc
+    test/rt_utest_set_soc_type.cc
+    test/common/dev_info_manage_test.cc
+    test/platform/others/rt_utest_device.cc
+    #test/platform/cloudv2/rt_utest_ffts.cc
+    test/rt_utest_task_stars.cc
+    test/platform/others/rt_utest_memory_pool.cc
+    test/platform/others/rt_utest_simd_memsetd32.cc
+    test/rt_utest_binary_loader.cc
+    test/platform/others/rt_utest_cloudv2_disable_thread_test.cc
+    test/platform/others/rt_utest_stream.cc
+    test/platform/others/rt_utest_notify.cc
+    test/platform/others/rt_utest_elf.cc
+    test/platform/others/rt_utest_npu_driver.cc
+    test/platform/others/rt_utest_runtime.cc
+    test/platform/others/rt_utest_driver.cc
+    test/platform/others/rt_utest_arg_loader.cc
+    test/platform/others/rt_utest_context.cc
+    test/platform/others/rt_utest_ffts.cc
+    test/platform/others/rt_utest_task_stars.cc
+    test/platform/others/rt_utest_parma_build_sqe.cc
+    test/platform/others/rt_utest_binary_loader.cc
+)
+
+target_compile_definitions(runtime_utest PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+     runtimeut_src_static_lib
+     runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+
+##### build ut target specific for camodel;
+add_executable(runtime_utest_camodel
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v200/task_david_stub.cc
+    stub/hal_stub.cc
+    test/main.cc
+    test/rt_utest_device.cc
+)
+
+target_compile_definitions(runtime_utest_camodel PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest_camodel PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+    runtimeut_camodel_src_static_lib
+    runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+
+###################################################################################################
+add_executable(runtime_camodel_utest_v200
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v200/task_david_stub.cc
+    stub/hal_stub.cc
+    test/main.cc
+)
+
+target_compile_definitions(runtime_camodel_utest_v200 PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_camodel_utest_v200 PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+    runtimeut_camodel_src_v200_static_lib
+    runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+
+###################################################################################################
+add_executable(runtime_utest_model
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    stub/hal_stub.cc
+    test/main.cc
+    test/rt_utest_label.cc
+    test/rt_utest_model.cc
+    test/platform/others/rt_utest_model.cc
+)
+
+target_compile_definitions(runtime_utest_model PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest_model PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+     runtimeut_src_static_lib
+     runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+
+###################################################################################################
+add_executable(runtime_utest_engine
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    stub/hal_stub.cc
+    test/main.cc
+    test/rt_utest_engine.cc
+    test/platform/others/rt_utest_stars_engine.cc
+    test/rt_utest_package_rebuilder.cc
+    test/rt_utest_direct_hwts_engine.cc
+    test/platform/others/rt_utest_direct_hwts_engine.cc
+    # test/platform/others/rt_utest_async_hwts_engine.cc
+    # XPU sources needed for XpuDevice tests in rt_utest_engine.cc
+    # Note: runtime_xpu_adapt.cc excluded - conflicts with runtime_adapt.cc in static lib
+    # Note: xpu_aicpu_c.cc excluded - conflicts with xpu_aicpu_c_stub.cc already linked
+    ${TOP_DIR}/src/runtime/api/api_c_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/task_manager_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/stream_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_context.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_device.cc
+    ${TOP_DIR}/src/runtime/driver/xpu_driver.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/stream_sqcq_manage_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/task_xpu.cc
+    ${TOP_DIR}/src/tprt/c/tprt_api.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_cqhandle.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_device.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_log.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_sqhandle.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_worker.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_timer.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_res_manage/v200/task_res_da.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/task_xpu_recycle.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/arg_manage_xpu.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/h2h_copy_mgr.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/arg_loader_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/stream_xpu_c.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_kernel_task.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_profiling.cc
+)
+
+target_compile_definitions(runtime_utest_engine PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest_engine PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+     runtimeut_src_static_lib
+     runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+###################################################################################################
+add_executable(runtime_utest_api
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    stub/hal_stub.cc
+    test/main.cc
+    test/rt_utest_api_common_defination.cc
+    test/rt_utest_api_can_not_run.cc
+    #test/rt_utest_api.cc
+    test/rt_utest_api_stream.cc
+    test/rt_utest_api_context.cc
+    test/rt_utest_api_device.cc
+    test/rt_utest_api_event_route.cc
+    test/rt_utest_api_kernel.cc
+    test/rt_utest_api_impl.cc
+    test/rt_api_test.cc
+    test/rt_utest_set_device_failure_mode.cc
+    test/rt_utest_profiler.cc
+    test/rt_utest_profileapi.cc
+    test/rt_utest_api_exception.cc
+    test/platform/others/rt_utest_simd_memsetd32.cc
+)
+
+target_compile_definitions(runtime_utest_api PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest_api PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+     runtimeut_src_static_lib
+     runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+
+target_include_directories(runtime_utest_api PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
+###################################################################################################
+add_executable(runtime_utest_api_ext_others
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    stub/hal_stub.cc
+    test/main.cc
+    test/platform/others/rt_utest_api_dfx.cc
+    test/platform/others/rt_utest_api_kernel.cc
+    test/platform/others/rt_api_test.cc
+    test/platform/others/rt_utest_api_impl.cc
+    test/platform/others/rt_utest_api_test6.cc
+    test/platform/others/rt_utest_set_device_failure_mode.cc
+    test/platform/others/rt_utest_dcache_lock.cc
+    test/platform/others/rt_utest_customer_stack_size.cc
+)
+
+target_compile_definitions(runtime_utest_api_ext_others PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest_api_ext_others PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+     runtimeut_src_static_lib
+     runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+###################################################################################################
+add_executable(runtime_utest_task_normal
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    stub/hal_stub.cc
+    test/main.cc
+    test/rt_utest_task.cc
+)
+
+target_compile_definitions(runtime_utest_task_normal PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest_task_normal PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+     runtimeut_src_static_lib
+     runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+###################################################################################################
+
+add_executable(runtime_utest_dfx
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    stub/hal_stub.cc
+    test/main.cc
+    test/rt_utest_dfx_api.cc
+    test/rt_utest_printf.cc
+    test/rt_utest_parse_dfx_info.cc
+)
+
+target_compile_definitions(runtime_utest_dfx PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest_dfx PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+     runtimeut_src_static_lib
+     runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+target_include_directories(runtime_utest_dfx PRIVATE
+    ${TOP_DIR}/src/inc
+    ${TOP_DIR}/src/inc/external
+    ${TOP_DIR}/pkg_inc/runtime/runtime
+    ${TOP_DIR}/pkg_inc/runtime/runtime/rts
+    ${TOP_DIR}/pkg_inc/platform
+    ${TOP_DIR}/src/platform
+)
+##################################################################################################
+
+set(runtimeut_src_tiny_list_all
+    ${runtimeut_src_list}
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/runtime.cc
+    ${TOP_DIR}/src/runtime/core/src/memory/mem_type.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/program_plat.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v200/task_david_stub.cc
+)
+
+list(REMOVE_ITEM runtimeut_src_tiny_list_all
+    ${runtimeut_src_tiny_exclude_list}
+)
+
+add_executable(runtime_utest_tiny_stub
+    ${runtimeut_src_tiny_list_all}
+    ${runtimeut_src_tiny_include_list}
+    stub/hal_stub.cc
+    test/main.cc
+    test/rt_utest_tiny_stub.cc
+)
+
+target_compile_definitions(runtime_utest_tiny_stub PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest_tiny_stub PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+     runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+##################################################################################################
+add_library(runtime_utest_intf_pub INTERFACE)
+
+target_compile_definitions(runtime_utest_intf_pub INTERFACE
+    __RUNTIME_PRODUCT_DRV_MINI__
+    _GLIBCXX_USE_CXX11_ABI=0
+    RT_UT_TEST
+    FEATURE_NOTIFY
+    FEATURE_DEBUG
+    CFG_DEV_PLATFORM_PC
+    STATIC_RT_LIB
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+set(RUNTIME_TEST_INC_DIR_COMMON
+    ${TOP_DIR}/pkg_inc
+    ${TOP_DIR}/pkg_inc/driver
+    ${TOP_DIR}/pkg_inc/aicpu_sched
+    ${TOP_DIR}/pkg_inc/aicpu_sched/common
+    ${TOP_DIR}/src/tsd/tsdclient/inc/tsd
+    ${TOP_DIR}/src/tsd/tsdclient/inc
+    ${TOP_DIR}/inc/external
+    ${TOP_DIR}/abl/libc_sec/include
+    ${TOP_DIR}/src/runtime/core/inc
+    ${TOP_DIR}/src/runtime/core/inc_c
+    ${TOP_DIR}/src/runtime/feature/fusion
+    ${TOP_DIR}/src/runtime/feature/xpu
+    ${TOP_DIR}/src/runtime/feature/dqs
+    ${TOP_DIR}/src/runtime/core/inc/context
+    ${TOP_DIR}/src/runtime/core/inc/spec
+    ${TOP_DIR}/src/runtime/inc/common
+    ${TOP_DIR}/src/runtime/core/inc/common
+    ${TOP_DIR}/src/runtime/core/inc/cond_handle
+    ${TOP_DIR}/src/runtime/inc/device
+    ${TOP_DIR}/src/runtime/inc/sqe
+    ${TOP_DIR}/src/runtime/core/inc/sqe/v200_base
+    ${TOP_DIR}/src/runtime/core/inc/runtime
+    ${TOP_DIR}/src/runtime/core/inc/device
+    ${TOP_DIR}/src/runtime/core/inc/drv
+    ${TOP_DIR}/src/runtime/core/inc/task
+    ${TOP_DIR}/src/runtime/core/inc/utils
+    ${TOP_DIR}/src/runtime/core/inc/engine
+    ${TOP_DIR}/src/runtime/core/inc/dfx
+    ${TOP_DIR}/src/runtime/core/inc/kernel
+    ${TOP_DIR}/src/runtime/core/inc/soc
+    ${TOP_DIR}/src/runtime/core/inc/sqe/v100
+    ${TOP_DIR}/src/runtime/core/inc/stars
+    ${TOP_DIR}/src/runtime/core/inc/stream
+    ${TOP_DIR}/src/runtime/core/inc/launch
+    ${TOP_DIR}/src/runtime/core/inc/model
+    ${TOP_DIR}/src/runtime/feature/jetty
+    ${TOP_DIR}/src/runtime/core/inc/event
+    ${TOP_DIR}/src/runtime/core/inc/arg_loader
+    ${TOP_DIR}/src/runtime/core/inc/notify
+    ${TOP_DIR}/src/runtime/core/inc/profiler
+    ${TOP_DIR}/src/runtime/core/inc/engine/hwts
+    ${TOP_DIR}/src/runtime/core/inc/dqs
+    ${TOP_DIR}/src/runtime/api
+    ${TOP_DIR}/src/runtime/api/impl
+    ${TOP_DIR}/src/runtime/core/src/engine
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts
+    ${TOP_DIR}/src/runtime/core/src/engine/stars
+    ${TOP_DIR}/src/runtime/core/src/dfx
+    ${TOP_DIR}/src/runtime/core/src/stream
+    ${TOP_DIR}/src/runtime/core/src/task/inc
+    ${TOP_DIR}/src/runtime/feature/ffts
+    ${TOP_DIR}/src/runtime/feature/dqs
+    ${TOP_DIR}/src/runtime/core/src/profiler
+    ${TOP_DIR}/src/runtime/core/src/pool
+    ${TOP_DIR}/src/runtime/core/src/ttlv
+    ${TOP_DIR}/src/runtime/core/src/device
+    ${TOP_DIR}/src/runtime/core/src/aicpu_timeout
+    ${TOP_DIR}/src/runtime/driver
+    ${TOP_DIR}/src/runtime/core/src/common
+    ${TOP_DIR}/src/runtime/core/src/plugin_manage
+    ${TOP_DIR}/src/runtime/core/src/kernel
+    ${TOP_DIR}/src/runtime/core/src/kernel/arg_loader
+    ${TOP_DIR}/src/runtime/core/src/kernel/args
+    ${TOP_DIR}/src/runtime/core/src/task/
+    ${TOP_DIR}/src/runtime/core/src/memory/
+    ${TOP_DIR}/src/runtime/feature/ccu/
+    ${TOP_DIR}/src/runtime/feature/soma/
+    ${TOP_DIR}/src/runtime/feature/cntnotify/
+    ${TOP_DIR}/src/runtime/feature/snapshot/
+    ${TOP_DIR}/src/runtime/feature/xpu/
+    ${TOP_DIR}/src/runtime/core/src/uvm
+    ${TOP_DIR}/src/runtime/core/src/event
+    ${TOP_DIR}/src/tprt/inc/external
+    ${TOP_DIR}/src/tprt/feature/inc
+    ${TOP_DIR}/src
+    ${TOP_DIR}/src/runtime/raw_driver
+    ${TOP_DIR}/src/cmodel_driver
+    ${TOP_DIR}/src/runtime_compact/feature/inc
+    ${TOP_DIR}/metadef/inc
+    ${TOP_DIR}/src/dfx/adump/inc/metadef
+    ${TOP_DIR}/metadef/inc/external
+    ${TOP_DIR}/pkg_inc/aicpu_sched/common
+    ${TOP_DIR}/tests/ut/runtime/runtime/stub/
+    ${TOP_DIR}/tests/ut/runtime/runtime/test/common
+    ${TOP_DIR}/include
+    ${TOP_DIR}/pkg_inc/tsd
+    ${TOP_DIR}/pkg_inc/trace
+    ${TOP_DIR}/src/dfx/trace/inc/toolchain
+    ${TOP_DIR}/pkg_inc/watchdog
+    ${TOP_DIR}/pkg_inc/profiling
+    ${TOP_DIR}/abl/atrace/inc/awatchdog/
+    ${TOP_DIR}/src/queue_schedule/dgwclient/inc
+    ${TOP_DIR}/src/dfx/msprof/include/external/runtime/rts
+    ${TOP_DIR}/src/inc
+    ${TOP_DIR}/src/inc/external
+    ${TOP_DIR}/src/inc/runtime
+    ${TOP_DIR}/include/external/acl
+    ${TOP_DIR}/include/external/acl/error_codes
+    ${TOP_DIR}/pkg_inc/runtime/runtime
+    ${TOP_DIR}/pkg_inc/runtime/runtime/rts
+    ${TOP_DIR}/pkg_inc/platform
+    ${TOP_DIR}/src/platform
+    ${C_SEC_INCLUDE}
+    ${TOP_DIR}/src/runtime/core/inc/sqe/
+)
+
+set(RUNTIME_TEST_INC_DIR
+    ${RUNTIME_TEST_INC_DIR_COMMON}
+    ${TOP_DIR}/src/runtime/core/inc/sqe/v200
+    ${TOP_DIR}/src/runtime/core/inc/cond_isa/v100
+)
+
+target_include_directories(runtime_utest_intf_pub INTERFACE
+    ${RUNTIME_TEST_INC_DIR}
+)
+
+target_compile_options(runtime_utest_intf_pub INTERFACE
+    -Wformat
+    -Wall
+    -Wextra
+    -fno-access-control
+    -fno-devirtualize
+    -fno-inline-small-functions
+    $<$<STREQUAL: ${CMAKE_SYSTEM_PROCESSOR}, aarch64>:-falign-functions=32>
+)
+
+target_link_libraries(runtime_utest_intf_pub INTERFACE
+    mmpa
+    json
+    GTestShared::gtest
+    GTestShared::gtest_main
+    c_sec
+    -lrt
+    -ldl
+    -lpthread
+    -lgcov
+    $<BUILD_INTERFACE:intf_llt_pub>
+    $<BUILD_INTERFACE:mmpa_headers>
+    $<BUILD_INTERFACE:c_sec_headers>
+    $<BUILD_INTERFACE:msprof_headers>
+    $<BUILD_INTERFACE:slog_headers>
+    $<BUILD_INTERFACE:npu_runtime_headers>
+)
+
+target_link_options(runtime_utest_intf_pub INTERFACE
+    -Wl,--wrap=malloc,-lrt
+    -rdynamic
+)
 
 add_library(intf_llt_pub INTERFACE)
 
@@ -39,17 +1575,437 @@ target_link_directories(intf_llt_pub INTERFACE
 )
 
 target_link_libraries(intf_llt_pub INTERFACE
-    GTest::gtest
-    ${OPEN_SOURCE_DIR}/mockcpp/lib/libmockcpp.a
+    GTestShared::gtest
+    mockcpp
     -lpthread
     $<$<BOOL:${ENABLE_GCOV}>:-lgcov>
 )
 
+############################################## UT V201 ###########################################
+set(runtimeut_v201_src_stream_list
+    ${runtimeut_common_src_stream_list}
+
+    ${TOP_DIR}/src/runtime/core/src/stream/stream_david.cc
+    ${TOP_DIR}/src/runtime/feature/dqs/stream_with_dqs.cc
+    ${TOP_DIR}/src/runtime/core/src/stream/v201/stream_creator_c.cc
+)
+
+set(runtimeut_v201_src_task_list
+    ${runtimeut_david_series_common_src_task_list}
+    # v201
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/davinci/davinci_kernel_task_v201.cc
+    ${TOP_DIR}/src/runtime/feature/fusion/fusion_task_v201.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v201/task_checker.cc
+    ${TOP_DIR}/src/runtime/feature/dqs/dqs_task.cc
+    ${TOP_DIR}/src/runtime/feature/dqs/dqs_c.cc
+    ${TOP_DIR}/src/runtime/feature/dqs/model_serial_sched_task.cc
+    ${TOP_DIR}/src/runtime/api/impl/v201/api_impl_v200_adapt.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/event/notify_task_v201.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v201/memory_corruption_checker.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cmo/cmo_task_v201.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/memory/memory_task_v201.cc
+)
+
+set(runtimeut_v201_src_list
+    ${runtimeut_v201_src_task_list}
+    ${runtimeut_src_api_list}
+    ${runtimeut_src_aclgraph_list}
+    ${runtimeut_src_context_list}
+    ${runtimeut_v201_src_stream_list}
+    ${runtimeut_src_profile_list}
+    ${runtime_src_arg_loader_list}
+    ${runtimeut_src_pool_list}
+    ${runtimeut_src_ttlv_list}
+    ${runtimeut_src_callback_list}
+    ${runtimeut_src_david_c_list}
+    ${runtime_raw_device_adpt_david_list}
+    ${runtime_v201_simt_adpt_list}
+    ${runtime_xpu_src}
+    ${TOP_DIR}/src/runtime/api/api.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/api_decorator_xpu.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_decorator.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_kernel_args.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_memory.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_mbuf.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_event.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_event_common.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_esched.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_david.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v200/api_impl_david_capture_event.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_creator.cc
+    ${TOP_DIR}/src/runtime/api/impl/v100/api_impl_v100.cc
+    ${TOP_DIR}/src/runtime/api/impl/v201/api_impl_v201.cc
+    ${TOP_DIR}/src/runtime/api/impl/v201/api_impl_v200_adapt.cc
+    ${TOP_DIR}/src/runtime/api/impl/v201/api_impl_creator_c.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_standard_soc.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_soma.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/api_error_xpu.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error_standard_soc.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_error_uvm.cc
+    ${TOP_DIR}/src/runtime/api/impl/api_impl_uvm.cc
+    ${TOP_DIR}/src/runtime/core/src/uvm/uvm_callback.cc
+    ${TOP_DIR}/src/runtime/core/src/context/context.cc
+    ${TOP_DIR}/src/runtime/core/src/context/context_standard_soc.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device.cc
+    ${TOP_DIR}/src/runtime/core/src/device/raw_device.cc
+    ${TOP_DIR}/src/runtime/core/src/device/raw_device_res.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/device_snapshot.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/snapshot_process_helper.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/snapshot_callback_manager.cc
+    ${TOP_DIR}/src/runtime/feature/snapshot/v100/device_snapshot_adapter.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device_sq_cq_pool.cc
+    ${TOP_DIR}/src/runtime/core/src/device/sq_addr_memory_pool.cc
+    ${TOP_DIR}/src/runtime/driver/driver.cc
+    ${TOP_DIR}/src/runtime/core/src/device/ctrl_sq.cc
+    ${TOP_DIR}/src/runtime/core/src/device/ctrl_msg.cc
+    ${TOP_DIR}/src/runtime/driver/v201/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_common.cpp
+    ${TOP_DIR}/src/runtime/feature/model/model.cc
+    ${TOP_DIR}/src/runtime/feature/model/model_rebuild.cc
+    ${TOP_DIR}/src/runtime/feature/model/v200_base/capture_adapt.cc
+    ${TOP_DIR}/src/runtime/feature/model/v201/model_c.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v200/capture_adapt_v200.cc
+    ${TOP_DIR}/src/runtime/feature/aclgraph/v200/capture_model_adapt_v200.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/args/args_handle_allocator.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/args/para_convertor.cc
+    ${TOP_DIR}/src/runtime/core/src/common/args_buffer_guard.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v200_base/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/binary_loader.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/program_common.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/kernel_utils.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/json_parse.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/elf.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/module.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/program.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/symbol_table.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/funcsymbol_table.cc
+    ${TOP_DIR}/src/runtime/core/src/runtime_v200/runtime_adapt.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/program_plat.cc
+    ${TOP_DIR}/src/runtime/feature/soma/soma.cc
+    ${TOP_DIR}/src/runtime/feature/soma/stream_mem_pool.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/label.cc
+    ${TOP_DIR}/src/runtime/core/src/device/aicpu_err_msg.cc
+    ${TOP_DIR}/src/runtime/core/src/aicpu_timeout/aicpu_timeout_manager.cc
+    ${TOP_DIR}/src/runtime/core/src/aicpu_timeout/aicpu_timeout_control.cc
+    ${TOP_DIR}/src/runtime/core/src/notify/notify.cc
+    ${TOP_DIR}/src/runtime/core/src/event/event.cc
+    ${TOP_DIR}/src/runtime/core/src/event/ipc_event.cc
+    ${TOP_DIR}/src/runtime/core/src/event/ipc_event_starsV2.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/logger.cc
+    ${TOP_DIR}/src/runtime/core/src/runtime.cc
+    ${TOP_DIR}/src/runtime/core/src/device/ini_parse_utils.cc
+    ${TOP_DIR}/src/runtime/core/src/memory/mem_type.cc
+    ${TOP_DIR}/src/runtime/core/src/memory/common_memset_d32.cpp
+    ${TOP_DIR}/src/runtime/core/src/memory/simd_memsetd32.cpp
+    ${TOP_DIR}/src/runtime/core/src/plugin_manage/runtime_keeper.cc
+    ${TOP_DIR}/src/runtime/core/src/plugin_manage/v200/plugin_old_arch.cc
+    ${TOP_DIR}/src/runtime/core/src/utils/capability.cc
+    ${TOP_DIR}/src/runtime/core/src/task/ctrl_res_pool.cpp
+    ${TOP_DIR}/src/runtime/core/src/utils/osal.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/scheduler.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/profiler.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/atrace_log.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/fp16_t.cpp
+    ${TOP_DIR}/src/runtime/core/src/dfx/hifloat.cpp
+    ${TOP_DIR}/src/runtime/core/src/dfx/printf.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/aicpu_dfx.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/kernel_dfx_info.cc
+    ${TOP_DIR}/src/runtime/core/src/dfx/parse_kernel_dfx_info.cc
+    ${TOP_DIR}/src/runtime/core/src/utils/subscribe.cc
+    ${TOP_DIR}/src/runtime/core/src/profiler/onlineprof.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device_error_proc.cc
+    ${TOP_DIR}/src/runtime/core/src/device/v200_base/device_error_proc.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device_error_core_proc
+    ${TOP_DIR}/src/runtime/core/src/task/stars_cond_isa_helper.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_info/cond_op/stars_cond_isa_construct_common.cc
+    ${TOP_DIR}/src/runtime/feature/dqs/stars_dqs_cond_isa_helper.cc
+    ${TOP_DIR}/src/runtime/core/src/common/thread_local_container.cc
+    ${TOP_DIR}/src/runtime/core/src/common/inner_thread_local.cpp
+    ${TOP_DIR}/src/runtime/core/src/utils/aicpu_scheduler_agent.cc
+    ${TOP_DIR}/src/runtime/core/src/device/device_msg_handler.cc
+    ${TOP_DIR}/src/runtime/core/src/task/host_task.cc
+    ${TOP_DIR}/src/runtime/core/src/stream/dvpp_grp.cc
+    ${TOP_DIR}/src/runtime/api/inner.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_to_sqe.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_tiny.cpp
+    ${TOP_DIR}/src/runtime/core/src/engine/engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/package_rebuilder.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/stars/stars_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/async_hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/direct_hwts_engine.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/engine_factory.cc
+    ${TOP_DIR}/src/runtime/core/src/engine/hwts/shm_cq.cc
+    ${runtimeut_src_common_list}
+    ${runtimeut_platform_list}
+    ${TOP_DIR}/src/runtime/core/src/common/ioctl/v201/ioctl_utils.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v201/task_david_stub.cc
+)
+
+list(REMOVE_ITEM runtimeut_v201_src_list
+    ${TOP_DIR}/src/runtime/feature/jetty/stream_ub_db_stub.cc
+)
+
+add_executable(runtime_utest_task_v201
+    ${runtimeut_v201_src_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    stub/hal_stub.cc
+    test/main.cc
+    test/platform/others/rt_utest_v201_task_singlef.cc
+    test/platform/others/rt_utest_v201_task.cc
+    test/platform/others/rt_utest_v201L_task.cc
+)
+
+target_include_directories(
+    runtime_utest_task_v201 PUBLIC
+    ${RUNTIME_DIR}/src/inc/runtime 
+    ${TOP_DIR}/src/tprt/inc/external
+    ${TOP_DIR}/src/tprt/feature/inc
+    ${TOP_DIR}/abl/slog/inc
+    ${TOP_DIR}/abl/mmpa/inc
+    ${TOP_DIR}/abl/libc_sec/include
+)
+
+target_compile_options(runtime_utest_task_v201 PUBLIC
+    -fno-access-control
+)
+
+target_compile_definitions(runtime_utest_task_v201 PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest_task_v201 PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_v201_intf_pub>
+    -Wl,--whole-archive
+     runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+
+add_library(runtime_utest_v201_intf_pub INTERFACE)
+
+target_compile_definitions(runtime_utest_v201_intf_pub INTERFACE
+    __RUNTIME_PRODUCT_DRV_MINI__
+    RT_UT_TEST
+    FEATURE_NOTIFY
+    FEATURE_DEBUG
+    CFG_DEV_PLATFORM_PC
+    STATIC_RT_LIB
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+set(RUNTIME_V201_INC_DIR
+    ${RUNTIME_TEST_INC_DIR_COMMON}
+    ${TOP_DIR}/src/runtime/core/inc/sqe/v201
+    ${TOP_DIR}/src/runtime/core/inc/cond_isa/v201
+    ${TOP_DIR}/src/runtime/feature/dqs
+    ${TOP_DIR}/src/runtime/api/impl/v201
+    ${TOP_DIR}/src/runtime/feature/dqs
+    ${TOP_DIR}/src/runtime/core/src/common/ioctl/v201
+)
+
+target_include_directories(runtime_utest_v201_intf_pub INTERFACE
+    ${RUNTIME_V201_INC_DIR}
+)
+
+target_compile_options(runtime_utest_v201_intf_pub INTERFACE
+    -Wformat
+    -Wall
+    -Werror
+    -Wextra
+)
+
+target_link_libraries(runtime_utest_v201_intf_pub INTERFACE
+    mmpa
+    json
+    c_sec
+    rt
+    $<BUILD_INTERFACE:intf_llt_pub>
+    $<BUILD_INTERFACE:mmpa_headers>
+    $<BUILD_INTERFACE:c_sec_headers>
+    $<BUILD_INTERFACE:msprof_headers>
+    $<BUILD_INTERFACE:slog_headers>
+    $<BUILD_INTERFACE:npu_runtime_headers>
+)
+
+target_link_options(runtime_utest_v201_intf_pub INTERFACE
+    -Wl,--wrap=malloc,-lrt
+    -rdynamic
+)
+###################################################################################################
+add_executable(runtime_utest_api_normal
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    stub/hal_stub.cc
+    test/main.cc
+    test/rt_utest_api_common_defination.cc
+    #test/rt_utest_api.cc
+    test/rt_utest_engine.cc
+    # XPU sources needed for XpuDevice tests in rt_utest_engine.cc
+    # Note: runtime_xpu_adapt.cc excluded - conflicts with runtime_adapt.cc in static lib
+    # Note: xpu_aicpu_c.cc excluded - conflicts with xpu_aicpu_c_stub.cc already linked
+    ${TOP_DIR}/src/runtime/api/api_c_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/task_manager_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/stream_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_context.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_device.cc
+    ${TOP_DIR}/src/runtime/driver/xpu_driver.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/stream_sqcq_manage_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/task_xpu.cc
+    ${TOP_DIR}/src/tprt/c/tprt_api.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_cqhandle.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_device.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_log.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_sqhandle.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_worker.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_timer.cc
+    ${TOP_DIR}/src/runtime/core/src/task/task_res_manage/v200/task_res_da.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/task_xpu_recycle.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/arg_manage_xpu.cc
+    ${TOP_DIR}/src/runtime/core/src/pool/h2h_copy_mgr.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/arg_loader_xpu.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/stream_xpu_c.cc
+    ${TOP_DIR}/src/runtime/feature/xpu/xpu_kernel_task.cc
+    ${TOP_DIR}/src/tprt/feature/src/tprt_profiling.cc
+)
+
+target_compile_definitions(runtime_utest_api_normal PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest_api_normal PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+     runtimeut_src_static_lib
+     runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+    -lgcov
+)
+###################################################################################################
+add_executable(runtime_utest_api_others
+    ${runtime_raw_device_adpt_common_list}
+    ${TOP_DIR}/src/runtime/driver/npu_driver.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mem.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_queue.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_esched.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_mbuf.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_res.cc
+    ${TOP_DIR}/src/runtime/driver/npu_driver_dcache_lock_opb.cpp
+    ${TOP_DIR}/src/runtime/driver/npu_driver_standard_soc.cc
+    ${TOP_DIR}/src/runtime/driver/v100/npu_driver.cc
+    ${TOP_DIR}/src/runtime/core/src/kernel/v100/kernel.cc
+    ${TOP_DIR}/src/runtime/core/src/task/v100/stub_task.cc
+    ${TOP_DIR}/src/runtime/core/src/launch/xpu_aicpu_c_stub.cc
+    stub/hal_stub.cc
+    test/main.cc
+    test/rt_utest_api_common_defination.cc
+    test/platform/others/rt_utest_api.cc
+    test/platform/others/rt_api_dc_disable_thread_offline_test.cc
+    test/platform/others/rt_api_dc_disable_thread_test.cc
+    test/platform/others/rt_utest_stars_engine.cc
+    test/platform/others/rt_utest_api_cloud_disable_thread.cc
+    test/platform/others/rt_utest_api_event_notify.cc
+    test/platform/others/rt_utest_event_cloud_v2.cc
+    test/platform/others/rt_utest_api_others.cc
+)
+
+target_compile_definitions(runtime_utest_api_others PUBLIC
+    TEMP_PERFORMANCE
+    TEMP_PERFORMANCE_NOT_OUTPUT
+)
+
+target_link_libraries(runtime_utest_api_others PRIVATE
+    $<BUILD_INTERFACE:runtime_utest_intf_pub>
+    -Wl,--whole-archive
+     runtimeut_src_static_lib
+     runtime_ut_stub_static_lib
+    -Wl,--no-whole-archive
+)
+
+###################################################################################################
+
 include(CMakePackageConfigHelpers)
 
-set(RUNTIME_TARGET
+set(RUNTIME_TARGET_V201
+    runtime_utest_task_v201
+)
+
+set(RUNTIME_TARGET_DAVID
+    runtime_utest_api_david
+    runtime_utest_task_david
+    runtime_utest_xpu
+    runtime_utest_arch9201
+    runtime_utest_arch9202
+)
+
+set(RUNTIME_TARGET_910B
     runtime_utest_task_910B
     runtime_utest_api_910B
+    runtime_utest_xpu_910B
 )
+
+set(RUNTIME_TARGET
+    runtime_utest_dfx
+    runtime_utest_model
+    runtime_utest_engine
+    runtime_utest_task_v201
+    runtime_utest_api_david
+    runtime_utest_api_ext_others
+    runtime_utest_tiny_stub
+    runtime_utest
+    runtime_utest_camodel
+    runtime_camodel_utest_v200
+    runtime_utest_task_910B
+    runtime_utest_task_normal
+    runtime_utest_task_david
+    runtime_utest_xpu
+    runtime_utest_dc
+    runtime_utest_api_others
+    runtime_utest_api_normal
+    runtime_utest_api_910B
+    runtime_utest_xpu_910B
+    runtime_utest_api
+    runtime_utest_cloud
+    runtime_utest_adc
+    runtime_utest_mini_v3
+    runtime_utest_arch5162
+    runtime_utest_arch9201
+    runtime_utest_arch9202
+)
+
+set(RUNTIME_TARGET_COMMON ${RUNTIME_TARGET})
+list(REMOVE_ITEM RUNTIME_TARGET_COMMON
+    ${RUNTIME_TARGET_V201}
+    ${RUNTIME_TARGET_DAVID}
+    ${RUNTIME_TARGET_910B}
+)
+
+add_custom_target(runtime_ut_v201 DEPENDS ${RUNTIME_TARGET_V201})
+add_custom_target(runtime_ut_david DEPENDS ${RUNTIME_TARGET_DAVID})
+add_custom_target(runtime_ut_910b DEPENDS ${RUNTIME_TARGET_910B})
+add_custom_target(runtime_ut_common DEPENDS ${RUNTIME_TARGET_COMMON})
+add_custom_target(runtime_ut_all DEPENDS ${RUNTIME_TARGET})
 add_custom_target(runtime_ut DEPENDS ${RUNTIME_TARGET})
-include_directories(${OPEN_SOURCE_DIR}/mockcpp_src/include)

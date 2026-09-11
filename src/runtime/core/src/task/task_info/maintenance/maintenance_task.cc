@@ -1,0 +1,126 @@
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include "stream.hpp"
+#include "runtime.hpp"
+#include "context.hpp"
+#include "maintenance_task.h"
+
+namespace cce {
+namespace runtime {
+
+#if F_DESC("MaintenanceTask")
+rtError_t MaintenanceTaskInit(
+    TaskInfo* const taskInfo, const MtType type, const uint32_t id, bool flag, const uint32_t idType)
+{
+    MaintenanceTaskInfo* maintenanceTaskInfo = &(taskInfo->u.maintenanceTaskInfo);
+    TaskCommonInfoInit(taskInfo);
+
+    taskInfo->type = TS_TASK_TYPE_MAINTENANCE;
+    taskInfo->typeName = "MAINTENANCE";
+
+    maintenanceTaskInfo->mtType = type;
+    maintenanceTaskInfo->mtId = id;
+    maintenanceTaskInfo->mtIdType = idType;
+    maintenanceTaskInfo->flag = flag;
+    maintenanceTaskInfo->waitCqId = MAX_UINT16_NUM;
+
+    if (taskInfo->stream->Device_()->IsStarsPlatform()) {
+        taskInfo->isNeedStreamSync = true;
+        taskInfo->needPostProc = true;
+    } else {
+        if ((type == MT_STREAM_DESTROY) || (type == MT_STREAM_RECYCLE_TASK)) {
+            taskInfo->isNeedStreamSync = true;
+        }
+        if ((type == MT_STREAM_RECYCLE_TASK) && flag) {
+            taskInfo->isForceCycle = true;
+        }
+    }
+
+    return RT_ERROR_NONE;
+}
+
+void ToCommandBodyForMaintenanceTask(TaskInfo* const taskInfo, rtCommand_t* const command)
+{
+    MaintenanceTaskInfo* maintenanceTaskInfo = &(taskInfo->u.maintenanceTaskInfo);
+
+    command->u.maintenanceTask.goal = maintenanceTaskInfo->mtType;
+    command->u.maintenanceTask.targetID = static_cast<uint16_t>(maintenanceTaskInfo->mtId);
+    command->u.maintenanceTask.terminal = taskInfo->terminal;
+    command->u.maintenanceTask.waitCqId = maintenanceTaskInfo->waitCqId;
+    command->u.maintenanceTask.threadId = PidTidFetcher::GetCurrentTid();
+    if (maintenanceTaskInfo->flag && (maintenanceTaskInfo->mtType == MT_STREAM_RECYCLE_TASK)) {
+        command->u.maintenanceTask.flag = FORCE_RECYCLE_TASK_FLAG; // for force recycle
+    }
+}
+#endif
+
+#if F_DESC("GetDevMsgTask")
+rtError_t GetDevMsgTaskInit(
+    TaskInfo* taskInfo, const void* const devMemAddr, const uint32_t devMemSize, const rtGetDevMsgType_t messageType)
+{
+    GetDevMsgTaskInfo* getDevMsgTask = &(taskInfo->u.getDevMsgTask);
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_GET_DEVICE_MSG;
+    taskInfo->typeName = "GET_DEVICE_MSG";
+    getDevMsgTask->devMem = const_cast<void*>(devMemAddr);
+    getDevMsgTask->msgBufferLen = devMemSize;
+    getDevMsgTask->msgType = messageType;
+    getDevMsgTask->offset = MAX_UINT64_NUM;
+    Stream* const stm = taskInfo->stream;
+
+    if (!stm->Device_()->IsDavidPlatform()) {
+        const rtError_t error = taskInfo->stream->Device_()->Driver_()->MemAddressTranslate(
+            static_cast<int32_t>(taskInfo->stream->Device_()->Id_()), RtPtrToValue<void*>(getDevMsgTask->devMem),
+            &(getDevMsgTask->offset));
+        COND_RETURN_ERROR(
+            (error != RT_ERROR_NONE), error, "MemAddressTranslate address error=%#x, msg type=%d, msgBuffer length=%u.",
+            error, messageType, getDevMsgTask->msgBufferLen);
+    }
+
+    RT_LOG(
+        RT_LOG_DEBUG,
+        "Create GetDevMsgTask task,task_id=%hu,task_type=%d(%s),stream_id=%d, "
+        "msgBufferLen=%u,msgType=%d,offset=%" PRIu64,
+        taskInfo->id, taskInfo->type, taskInfo->typeName, taskInfo->stream->Id_(), getDevMsgTask->msgBufferLen,
+        messageType, getDevMsgTask->offset);
+    return RT_ERROR_NONE;
+}
+
+void ToCommandBodyForGetDevMsgTask(TaskInfo* taskInfo, rtCommand_t* const command)
+{
+    GetDevMsgTaskInfo* getDevMsgTask = &(taskInfo->u.getDevMsgTask);
+    command->u.getDevMsgTask.len = getDevMsgTask->msgBufferLen;
+    command->u.getDevMsgTask.devAddr = RtPtrToValue<void*>(getDevMsgTask->devMem);
+    command->u.getDevMsgTask.offset = getDevMsgTask->offset;
+    command->u.getDevMsgTask.type = static_cast<uint16_t>(getDevMsgTask->msgType);
+    RT_LOG(
+        RT_LOG_INFO, "Device message device offset=%#" PRIx64 ",msgType=%d", getDevMsgTask->offset,
+        getDevMsgTask->msgType);
+}
+#endif
+
+#if F_DESC("StarsVersionTask")
+rtError_t StarsVersionTaskInit(TaskInfo* const taskInfo)
+{
+    TaskCommonInfoInit(taskInfo);
+    taskInfo->type = TS_TASK_TYPE_GET_STARS_VERSION;
+    taskInfo->typeName = "STARS_VERSION";
+
+    if (taskInfo->stream->Device_()->IsStarsPlatform()) {
+        taskInfo->isNeedStreamSync = true;
+    }
+
+    return RT_ERROR_NONE;
+}
+#endif
+
+} // namespace runtime
+} // namespace cce

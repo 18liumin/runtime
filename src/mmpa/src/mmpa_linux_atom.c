@@ -7,10 +7,11 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
+
 #include "mmpa_api.h"
 
 #ifdef __cplusplus
-#if    __cplusplus
+#if __cplusplus
 extern "C" {
 #endif /* __cpluscplus */
 #endif /* __cpluscplus */
@@ -20,7 +21,7 @@ extern "C" {
  * 参数: ptr指针指向需要修改的值, value是需要设置的值
  * 返回值:执行成功返回设置为value后的值，入参错误返回EN_INVALID_PARAM
  */
-mmAtomicType mmSetData(mmAtomicType *ptr, mmAtomicType value)
+mmAtomicType mmSetData(mmAtomicType* ptr, mmAtomicType value)
 {
     if (ptr == NULL) {
         return EN_INVALID_PARAM;
@@ -34,7 +35,7 @@ mmAtomicType mmSetData(mmAtomicType *ptr, mmAtomicType value)
  * 参数: ptr指针指向需要修改的值, value是需要加的值
  * 返回值:执行成功返回加上value后的值，入参错误返回EN_INVALID_PARAM
  */
-mmAtomicType mmValueInc(mmAtomicType *ptr, mmAtomicType value)
+mmAtomicType mmValueInc(mmAtomicType* ptr, mmAtomicType value)
 {
     if (ptr == NULL) {
         return EN_INVALID_PARAM;
@@ -48,7 +49,7 @@ mmAtomicType mmValueInc(mmAtomicType *ptr, mmAtomicType value)
  * 参数: ptr指针指向需要修改的值, value是需要减的值
  * 返回值:执行成功返回减去value后的值，入参错误返回EN_INVALID_PARAM
  */
-mmAtomicType mmValueSub(mmAtomicType *ptr, mmAtomicType value)
+mmAtomicType mmValueSub(mmAtomicType* ptr, mmAtomicType value)
 {
     if (ptr == NULL) {
         return EN_INVALID_PARAM;
@@ -62,7 +63,7 @@ mmAtomicType mmValueSub(mmAtomicType *ptr, mmAtomicType value)
  * 参数: ptr指针指向需要修改的值, value是需要设置的值
  * 返回值:执行成功返回设置为value后的值，入参错误返回EN_INVALID_PARAM
  */
-mmAtomicType64 mmSetData64(mmAtomicType64 *ptr, mmAtomicType64 value)
+mmAtomicType64 mmSetData64(mmAtomicType64* ptr, mmAtomicType64 value)
 {
     if (ptr == NULL) {
         return EN_INVALID_PARAM;
@@ -76,7 +77,7 @@ mmAtomicType64 mmSetData64(mmAtomicType64 *ptr, mmAtomicType64 value)
  * 参数: ptr指针指向需要修改的值, value是需要加的值
  * 返回值:执行成功返回加上value后的值，入参错误返回EN_INVALID_PARAM
  */
-mmAtomicType64 mmValueInc64(mmAtomicType64 *ptr, mmAtomicType64 value)
+mmAtomicType64 mmValueInc64(mmAtomicType64* ptr, mmAtomicType64 value)
 {
     if (ptr == NULL) {
         return EN_INVALID_PARAM;
@@ -90,7 +91,7 @@ mmAtomicType64 mmValueInc64(mmAtomicType64 *ptr, mmAtomicType64 value)
  * 参数: ptr指针指向需要修改的值, value是需要减的值
  * 返回值:执行成功返回减去value后的值，入参错误返回EN_INVALID_PARAM
  */
-mmAtomicType64 mmValueSub64(mmAtomicType64 *ptr, mmAtomicType64 value)
+mmAtomicType64 mmValueSub64(mmAtomicType64* ptr, mmAtomicType64 value)
 {
     if (ptr == NULL) {
         return EN_INVALID_PARAM;
@@ -104,4 +105,3 @@ mmAtomicType64 mmValueSub64(mmAtomicType64 *ptr, mmAtomicType64 value)
 }
 #endif /* __cpluscplus */
 #endif /* __cpluscplus */
-

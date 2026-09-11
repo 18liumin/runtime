@@ -7,13 +7,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
-protobuf_generate(profhal_proto
-    CppPath
-    HeaderPath
-    ${CMAKE_CURRENT_SOURCE_DIR}/../proto/profiler.proto
-    TARGET
-)
-
 ####################### libascendprofhal.so ###########################
 
 add_library(ascendprof_fwk_share SHARED
@@ -26,18 +19,8 @@ add_library(ascendprof_fwk_share SHARED
     ../common/json/json.cpp
     ${PROF_BASIC_DIR}/osal/osal.c
     ../depend/stub/error_manager/msprof_error_manager_stub.cpp
-    ../message/codec.cpp
-    ../streamio/client/src/sender.cpp
-    ../transport/hdc/hdc_transport.cpp
-    ../transport/hdc/helper_transport.cpp
-    ../transport/hdc/hdc_sender.cpp
     halimpl/prof_hal_api.cpp
-    halimpl/prof_hdc_server.cpp
-    halimpl/prof_helper_server.cpp
     halimpl/prof_server_manager.cpp
-    adx/stub/adx_prof_api.cpp
-    adx/wrapper/hdc_api.cpp
-    adx/wrapper/memory_utils.cpp
     ${CppPath}
 )
 
@@ -46,9 +29,8 @@ target_include_directories(ascendprof_fwk_share PRIVATE
     ${RUNTIME_DIR}/src/dfx/msprof/inc/toolchain
     ${RUNTIME_DIR}/src/dfx/msprof/inc
     ${LIBC_SEC_HEADER}
-    ${RUNTIME_DIR}/include/driver
+    ${RUNTIME_DIR}/pkg_inc/driver
     ${RUNTIME_DIR}/include/external
-    ${RUNTIME_DIR}/src/dfx/error_manager
     ../
     ../msprof/
     ../msprof/common/include
@@ -75,7 +57,6 @@ target_include_directories(ascendprof_fwk_share PRIVATE
     adx/inc
     halimpl
     halinc
-    ${CMAKE_BINARY_DIR}/proto/profhal_proto
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -109,30 +90,22 @@ target_link_options(ascendprof_fwk_share PRIVATE
     -Wl,--exclude-libs=ALL
 )
 
-if (PRODUCT)
-    target_link_libraries(ascendprof_fwk_share PRIVATE
-        ascend_hal_stub
-    )
-endif()
+# msprof 通用服务器场景：ascendprof_fwk_share 源码不直接引用任何驱动符号（driver 调用
+# 均经 MsprofDrvApi 间接 dlopen/dlsym），链接期不需要 ascend_hal_stub，避免 NEEDED 表
+# 带上 libascend_hal.so（无驱动包环境下会导致本 so 加载期失败）。
 
 target_link_libraries(ascendprof_fwk_share PRIVATE
     $<BUILD_INTERFACE:intf_pub>
     $<BUILD_INTERFACE:mmpa_headers>
     $<BUILD_INTERFACE:adump_headers>
     $<BUILD_INTERFACE:slog_headers>
-    -Wl,--no-as-needed
     c_sec
     alog
     mmpa
-    ascend_hal_stub
-    ascend_protobuf_static
     error_manager
-    -Wl,--as-needed
 )
 
 install(TARGETS ascendprof_fwk_share OPTIONAL
     LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}
 )
-
-add_dependencies(ascendprof_fwk_share profhal_proto)
 ####################### libascendprofhal.so ###########################

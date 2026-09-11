@@ -1,0 +1,401 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+#include "fast_recover.hpp"
+#include "stream_c.hpp"
+#include "task_david.hpp"
+#include "stream_factory.hpp"
+#include "error_message_manage.hpp"
+#include "thread_local_container.hpp"
+#include "context_data_manage.h"
+#include "context_manage.hpp"
+#include "device/device_error_info.hpp"
+
+namespace cce {
+namespace runtime {
+
+rtError_t CtxStreamTaskClean(Context* const ctx)
+{
+    rtError_t error = RT_ERROR_NONE;
+    std::unique_lock<std::mutex> taskLock(ctx->streamLock_);
+    Device* dev = ctx->Device_();
+    error = ctx->DefaultStream_()->ResClear();
+    COND_RETURN_ERROR((error != RT_ERROR_NONE), error, "ResClear default stream fail, retCode=%#x.", error);
+    error = ctx->DefaultStream_()->SqCqUpdate();
+    COND_RETURN_ERROR((error != RT_ERROR_NONE), error, "Update default stream fail, retCode=%#x.", error);
+    for (Stream* stream : ctx->StreamList_()) {
+        if ((stream->Flags() & RT_STREAM_PERSISTENT) != 0) {
+            continue;
+        }
+        if ((stream->Flags() & RT_STREAM_CP_PROCESS_USE) == 0U) {
+            error = stream->ResClear();
+            COND_RETURN_ERROR((error != RT_ERROR_NONE), error, "ResClear fail, retCode=%#x.", error);
+            error = stream->SqCqUpdate();
+            COND_RETURN_ERROR((error != RT_ERROR_NONE), error, "Update stream fail, retCode=%#x.", error);
+        } else {
+            error = dev->Driver_()->ResetSqCq(dev->Id_(), dev->DevGetTsId(), stream->GetSqId(), stream->Flags());
+            ERROR_RETURN(error, "ResetSqCq fail, sq_id=%u, retCode=%#x.", stream->GetSqId(), error);
+            error =
+                dev->Driver_()->ResetLogicCq(dev->Id_(), dev->DevGetTsId(), stream->GetLogicalCqId(), stream->Flags());
+            ERROR_RETURN(error, "ResetLogicCq fail, logicCq_id=%u, retCode=%#x.", stream->GetLogicalCqId(), error);
+        }
+    }
+    error = ctx->GetCtrlSQStream()->ResClear();
+    COND_RETURN_ERROR((error != RT_ERROR_NONE), error, "ResClear Ctrl stream fail, retCode=%#x.", error);
+    error = ctx->GetCtrlSQStream()->SqCqUpdate();
+    COND_RETURN_ERROR((error != RT_ERROR_NONE), error, "Update Ctrl stream fail, retCode=%#x.", error);
+    return error;
+}
+
+rtError_t DeviceTaskSendStop(const int32_t devId, const uint64_t timeRemain)
+{
+    RT_LOG(RT_LOG_INFO, "DeviceStop[%u] start", devId);
+    rtError_t error = RT_ERROR_CONTEXT_NULL;
+    const uint64_t startTime = ClockGetTimeUs();
+    const ReadProtect rp(&ContextDataManage::Instance().GetSetRwLock());
+    for (Context* const ctx : ContextDataManage::Instance().GetSetObj()) {
+        COND_PROC(!ContextManage::IsContextOnDevice(ctx, devId), continue);
+        ctx->Device_()->SetDeviceStatus(RT_ERROR_DEVICE_TASK_ABORT);
+        ctx->SetFailureError(RT_ERROR_DEVICE_TASK_ABORT);
+        ctx->SetStreamsStatus(RT_ERROR_DEVICE_TASK_ABORT);
+        error = ctx->Device_()->Driver_()->StopSqSend(static_cast<uint32_t>(devId), ctx->Device_()->DevGetTsId());
+        ERROR_RETURN(error, "ctx clean fail, retCode=%#x.", error);
+        const uint64_t count = ClockGetTimeIntervalUs(startTime);
+        COND_RETURN_AND_MSG_INNER(
+            ((timeRemain != 0U) && (count >= timeRemain)), RT_ERROR_WAIT_TIMEOUT,
+            "A timeout occurred when stopping task delivery, device_id=%d, time cost=%" PRIu64 "us.", devId, count);
+    }
+    RT_LOG(RT_LOG_INFO, "DeviceStop[%u] end", devId);
+    return error;
+}
+
+rtError_t DavidDeviceKill(const int32_t devId, const uint32_t op, const uint64_t timeRemain)
+{
+    RT_LOG(RT_LOG_INFO, "DeviceKill[%u] op=%u start", devId, op);
+    rtError_t error = RT_ERROR_CONTEXT_NULL;
+    const uint64_t startTime = ClockGetTimeUs();
+    uint64_t count = 0U;
+    const ReadProtect rp(&ContextDataManage::Instance().GetSetRwLock());
+    for (Context* const ctx : ContextDataManage::Instance().GetSetObj()) {
+        COND_PROC(!ContextManage::IsContextOnDevice(ctx, devId), continue);
+
+        uint32_t result = static_cast<uint32_t>(TS_ERROR_APP_QUEUE_FULL);
+        while (result == static_cast<uint32_t>(TS_ERROR_APP_QUEUE_FULL)) {
+            if (op == OP_ABORT_APP) {
+                error = ctx->Device_()->Driver_()->TaskAbortByType(
+                    static_cast<uint32_t>(devId), ctx->Device_()->DevGetTsId(), OP_ABORT_APP, UINT32_MAX, result);
+            } else if (op == OP_RECOVER_APP) {
+                error = ctx->Device_()->Driver_()->RecoverAbortByType(
+                    static_cast<uint32_t>(devId), ctx->Device_()->DevGetTsId(), OP_RECOVER_APP, UINT32_MAX, result);
+            } else {
+                // no operation
+            }
+            ERROR_RETURN(
+                error,
+                "Failed to notice device, op=%u, device_id=%d,"
+                " retCode=%#x.",
+                op, devId, error);
+            if (result == TS_SUCCESS) {
+                break;
+            }
+            COND_RETURN_AND_MSG_INNER(
+                (result == TS_ERROR_ILLEGAL_PARAM) || (result == TS_APP_EXIT_UNFINISHED) ||
+                    (result == TS_ERROR_ABORT_UNFINISHED),
+                RT_ERROR_TSFW_ILLEGAL_PARAM, "TS termination or recovery failed, device_id=%u, op=%u, result=%u.",
+                devId, op, result);
+
+            count = ClockGetTimeIntervalUs(startTime);
+            COND_RETURN_AND_MSG_INNER(
+                ((timeRemain != 0U) && (count >= timeRemain)), RT_ERROR_WAIT_TIMEOUT,
+                "A timeout occurred when notifying the TS to terminate all tasks in the SQ"
+                " or when notifying the TS to restore the status of all SQs,"
+                " device_id=%u, op=%u, time cost=%" PRIu64 "us.",
+                devId, op, count);
+            (void)mmSleep(1U);
+        }
+
+        RT_LOG(RT_LOG_INFO, "DeviceKill[%u] op=%u, time cost=%" PRIu64 "us, end", devId, op, count);
+        return error; // one pid kill once
+    }
+    return error;
+}
+
+rtError_t DavidDeviceQuery(const int32_t devId, const uint32_t op, const uint64_t timeRemain)
+{
+    RT_LOG(RT_LOG_INFO, "DeviceQuery[%u] op=%u start.", devId, op);
+    rtError_t error = RT_ERROR_CONTEXT_NULL;
+    const uint64_t startTime = ClockGetTimeUs();
+    const ReadProtect rp(&ContextDataManage::Instance().GetSetRwLock());
+    for (Context* const ctx : ContextDataManage::Instance().GetSetObj()) {
+        COND_PROC(!ContextManage::IsContextOnDevice(ctx, devId), continue);
+        uint64_t count = 0U;
+        uint32_t status = 0U;
+        while (true) {
+            if (op == OP_QUERY_ABORT_STATUS) {
+                error = ctx->Device_()->Driver_()->QueryAbortStatusByType(
+                    static_cast<uint32_t>(devId), ctx->Device_()->DevGetTsId(), RECOVER_STS_QUERY_BY_PID, UINT32_MAX,
+                    status);
+                ERROR_RETURN(error, "Failed to query abort, device_id=%d, op=%u, retCode=%#x.", devId, op, error);
+                if ((status == DAVID_ABORT_TERMINATE_SUCC) || (status == DAVID_ABORT_STOP_FINISH)) {
+                    break;
+                }
+            } else if (op == OP_QUERY_RECOVER_STATUS) {
+                error = ctx->Device_()->Driver_()->QueryRecoverStatusByType(
+                    static_cast<uint32_t>(devId), ctx->Device_()->DevGetTsId(), RECOVER_STS_QUERY_BY_PID, UINT32_MAX,
+                    status);
+                ERROR_RETURN(error, "Failed to query recover, device_id=%d, op=%u, retCode=%#x.", devId, op, error);
+                if (status == DAVID_ABORT_TERMINATE_SUCC) {
+                    break;
+                }
+            } else {
+                // no operation
+            }
+            COND_RETURN_AND_MSG_INNER(
+                (status == DAVID_ABORT_TERMINATE_FAIL), RT_ERROR_TSFW_ILLEGAL_PARAM,
+                "TS termination failed, device_id=%u, op=%u, result=%u.", devId, op, status);
+
+            count = ClockGetTimeIntervalUs(startTime);
+            COND_RETURN_AND_MSG_INNER(
+                ((timeRemain != 0U) && (count >= timeRemain)), RT_ERROR_WAIT_TIMEOUT,
+                "A timeout occurred when confirming that all tasks in the SQs have been terminated in polling mode or"
+                " when confirming that all SQs have been restored in polling mode,"
+                " device_id=%u, op=%u, time cost=%" PRIu64 "us.",
+                devId, op, count);
+            (void)mmSleep(5U);
+        }
+
+        RT_LOG(RT_LOG_INFO, "DeviceQuery[%u] op=%u end, time cost=%" PRIu64 "us.", devId, op, count);
+        return error; // one pid kill once
+    }
+    return error;
+}
+
+rtError_t DeviceTaskSendResume(const int32_t devId, const uint64_t timeRemain)
+{
+    RT_LOG(RT_LOG_INFO, "DeviceResume[%u] start", devId);
+    rtError_t error = RT_ERROR_CONTEXT_NULL;
+    uint64_t count = 0U;
+    Device* dev = nullptr;
+    const uint64_t startTime = ClockGetTimeUs();
+    const ReadProtect rp(&ContextDataManage::Instance().GetSetRwLock());
+    for (Context* const ctx : ContextDataManage::Instance().GetSetObj()) {
+        COND_PROC(!ContextManage::IsContextOnDevice(ctx, devId), continue);
+        dev = ctx->Device_();
+        error = CtxStreamTaskClean(ctx);
+        ERROR_RETURN(error, "ctx task clean fail, retCode=%#x.", error);
+    }
+    if (dev != nullptr) {
+        error = dev->ProcCleanRingbuffer();
+        ERROR_RETURN(error, "ctx ringbuffer clean fail, retCode=%#x.", error);
+        error = dev->Driver_()->ResourceReset(static_cast<uint32_t>(devId), dev->DevGetTsId(), DRV_NOTIFY_ID);
+        ERROR_RETURN(error, "ctx reset notify fail, retCode=%#x.", error);
+        error = dev->Driver_()->ResourceReset(static_cast<uint32_t>(devId), dev->DevGetTsId(), DRV_CNT_NOTIFY_ID);
+        ERROR_RETURN(error, "ctx reset cntnotify fail, retCode=%#x.", error);
+        error = dev->Driver_()->ResumeSqSend(static_cast<uint32_t>(devId), dev->DevGetTsId());
+        ERROR_RETURN(error, "ctx resume fail, retCode=%#x.", error);
+        dev->ProcClearFastRingBuffer();
+        dev->SetDeviceStatus(RT_ERROR_NONE);
+        dev->SetHasTaskError(false);
+        dev->SetDeviceRas(false);
+        dev->SetMonitorExitFlag(false);
+        (void)Runtime::Instance()->SetWatchDogDevStatus(dev, RT_DEVICE_STATUS_NORMAL);
+    }
+    for (Context* const ctx : ContextDataManage::Instance().GetSetObj()) {
+        COND_PROC(!ContextManage::IsContextOnDevice(ctx, devId), continue);
+        ctx->SetStreamsStatus(RT_ERROR_NONE);
+        ctx->SetFailureError(RT_ERROR_NONE);
+    }
+    count = ClockGetTimeIntervalUs(startTime);
+    COND_RETURN_AND_MSG_INNER(
+        ((timeRemain != 0U) && (count >= timeRemain)), RT_ERROR_WAIT_TIMEOUT,
+        "A timeout occurred when restoring the runtime status of Runtime, device_id=%d, time cost=%" PRIu64 "us.",
+        devId, count);
+    RT_LOG(RT_LOG_INFO, "DeviceResume[%u] end, time cost=%" PRIu64 "us.", devId, count);
+    return error;
+}
+
+rtError_t DavidDeviceTaskAbort(const int32_t devId, const uint32_t time)
+{
+    Runtime* const rtInstance = Runtime::Instance();
+    const uint64_t timeout = static_cast<uint64_t>(time) * 1000ULL;
+    uint64_t timeCost[10U] = {0U}; // 10 step
+    uint8_t index = 0U;
+    const uint64_t startTime = ClockGetTimeUs();
+    std::function<void()> const abortTimeoutInfo = [&devId, &index, &timeCost]() {
+        for (int32_t i = 1U; i <= index; ++i) {
+            RT_LOG(
+                RT_LOG_EVENT, "device_id=%d, step %d: time cost=%" PRIu64 "us", devId, i,
+                (timeCost[i] - timeCost[i - 1]));
+        }
+    };
+    ScopeGuard abortInfo(abortTimeoutInfo);
+    /* 1. Stop host/device sq task send */
+    rtError_t error = DeviceTaskSendStop(devId, timeout);
+    ERROR_RETURN_MSG_INNER(error, "Failed to stop task delivery, retCode=%#x.", static_cast<uint32_t>(error));
+    timeCost[++index] = ClockGetTimeIntervalUs(startTime);
+    COND_RETURN_ERROR(
+        ((timeout != 0U) && (timeCost[index] >= timeout)), RT_ERROR_WAIT_TIMEOUT, "DeviceStop timeout, device_id=%d.",
+        devId);
+
+    /* 2. Callback HCCL to stop MC2 expand */
+    const uint64_t abortTimeout = (timeout != 0U) ? (timeout - timeCost[index]) : timeout;
+    error =
+        rtInstance->TaskAbortCallBack(devId, RT_DEVICE_ABORT_PRE, static_cast<uint32_t>(abortTimeout / RT_US_TO_MS));
+    ERROR_RETURN_MSG_INNER(
+        error, "Failed to call the HCCL callback function to complete the preparation before termination, retCode=%#x.",
+        static_cast<uint32_t>(error));
+    timeCost[++index] = ClockGetTimeIntervalUs(startTime);
+    COND_RETURN_ERROR(
+        ((timeout != 0U) && (timeCost[index] >= timeout)), RT_ERROR_WAIT_TIMEOUT, "ABORT_PRE timeout, device_id=%d.",
+        devId);
+
+    /* 3. Notice TS terminate all sq */
+    error = DavidDeviceKill(devId, OP_ABORT_APP, (timeout != 0U) ? (timeout - timeCost[index]) : timeout);
+    ERROR_RETURN_MSG_INNER(
+        error, "Failed to notify the TS to terminate all tasks in the SQ, retCode=%#x.", static_cast<uint32_t>(error));
+    timeCost[++index] = ClockGetTimeIntervalUs(startTime);
+    COND_RETURN_ERROR(
+        ((timeout != 0U) && (timeCost[index] >= timeout)), RT_ERROR_WAIT_TIMEOUT, "Abort app timeout, device_id=%d.",
+        devId);
+
+    /* 4. Query all single and model stream terminate/stop succ */
+    const uint64_t queryAbortTimeRemain = (timeout != 0U) ? (timeout - timeCost[index]) : timeout;
+    error = DavidDeviceQuery(devId, OP_QUERY_ABORT_STATUS, queryAbortTimeRemain);
+    ERROR_RETURN_MSG_INNER(
+        error, "Failed to confirm that tasks in all SQs have been terminated in polling mode, retCode=%#x.",
+        static_cast<uint32_t>(error));
+    timeCost[++index] = ClockGetTimeIntervalUs(startTime);
+    COND_RETURN_ERROR(
+        ((timeout != 0U) && (timeCost[index] >= timeout)), RT_ERROR_WAIT_TIMEOUT, "Query abort timeout, device_id=%d.",
+        devId);
+
+    /* 5. Callback HCCL to clean all communication domain */
+    error = rtInstance->TaskAbortCallBack(
+        devId, RT_DEVICE_ABORT_POST, ((timeout != 0U) ? (timeout - timeCost[index]) : timeout) / RT_US_TO_MS);
+    ERROR_RETURN_MSG_INNER(
+        error, "Failed to call the HCCL callback function to complete the post-termination processing, retCode=%#x.",
+        static_cast<uint32_t>(error));
+    timeCost[++index] = ClockGetTimeIntervalUs(startTime);
+    COND_RETURN_ERROR(
+        ((timeout != 0U) && (timeCost[index] >= timeout)), RT_ERROR_WAIT_TIMEOUT, "ABORT_POST timeout, device_id=%d.",
+        devId);
+
+    /* 6. Notice TS recover all stop sq */
+    error = DavidDeviceKill(devId, OP_RECOVER_APP, (timeout != 0U) ? (timeout - timeCost[index]) : timeout);
+    ERROR_RETURN_MSG_INNER(
+        error, "Failed to notify the TS to restore the status of all SQs, retCode=%#x.", static_cast<uint32_t>(error));
+    timeCost[++index] = ClockGetTimeIntervalUs(startTime);
+    COND_RETURN_ERROR(
+        ((timeout != 0U) && (timeCost[index] >= timeout)), RT_ERROR_WAIT_TIMEOUT, "Recover app timeout, device_id=%d.",
+        devId);
+
+    /* 7. Query all sq terminate succ */
+    error = DavidDeviceQuery(devId, OP_QUERY_RECOVER_STATUS, (timeout != 0U) ? (timeout - timeCost[index]) : timeout);
+    ERROR_RETURN_MSG_INNER(
+        error, "Failed to confirm that all SQs have been restored in polling mode, retCode=%#x.",
+        static_cast<uint32_t>(error));
+    timeCost[++index] = ClockGetTimeIntervalUs(startTime);
+    COND_RETURN_ERROR(
+        ((timeout != 0U) && (timeCost[index] >= timeout)), RT_ERROR_WAIT_TIMEOUT,
+        "Query recover timeout, device_id=%d.", devId);
+
+    /* 8. Resume device send */
+    error = DeviceTaskSendResume(devId, (timeout != 0U) ? (timeout - timeCost[index]) : timeout);
+    ERROR_RETURN_MSG_INNER(
+        error, "Failed to restore the running status of Runtime, retCode=%#x.", static_cast<uint32_t>(error));
+    timeCost[++index] = ClockGetTimeIntervalUs(startTime);
+    COND_RETURN_ERROR(
+        ((timeout != 0U) && (timeCost[index] > timeout)), RT_ERROR_WAIT_TIMEOUT, "DeviceResume timeout, device_id=%d.",
+        devId);
+    return error;
+}
+
+rtError_t GetMemUceInfoProc(const uint32_t deviceId, rtErrorInfo* const errorInfo)
+{
+    rtError_t error = RT_ERROR_NONE;
+    rtMemUceInfo memUceInfo = {};
+    GlobalContainer::UceMutexLock();
+    if (GlobalContainer::FindMemUceInfo(deviceId)) {
+        const errno_t ret =
+            memcpy_s(&memUceInfo, sizeof(rtMemUceInfo), GlobalContainer::GetMemUceInfo(deviceId), sizeof(rtMemUceInfo));
+        if (ret != EOK) {
+            error = RT_ERROR_SEC_HANDLE;
+            RT_LOG_INNER_MSG(
+                RT_LOG_ERROR,
+                "Failed to call memcpy_s to copy MemUceInfo,"
+                " src=%p, dest=%p, dest_max=%zu, count=%zu, retCode=%#x.",
+                GlobalContainer::GetMemUceInfo(deviceId), &memUceInfo, sizeof(rtMemUceInfo), sizeof(rtMemUceInfo), ret);
+        }
+    } else {
+        error = NpuDriver::GetMemUceInfo(deviceId, &memUceInfo);
+        if (error == RT_ERROR_NONE && memUceInfo.count != 0) {
+            GlobalContainer::InsertMemUceInfo(deviceId, &memUceInfo);
+        }
+    }
+    GlobalContainer::UceMutexUnlock();
+    COND_RETURN_WARN(
+        error == RT_ERROR_FEATURE_NOT_SUPPORT, RT_ERROR_FEATURE_NOT_SUPPORT,
+        "Getting memory UCE info is not supported.");
+    if (error != RT_ERROR_NONE) {
+        RT_LOG(RT_LOG_ERROR, "GetMemUceInfo failed, drv devId=%u, error=%d.", deviceId, error);
+        return error;
+    }
+    RT_LOG(RT_LOG_INFO, "drv devId=%u, count=%u.", memUceInfo.devid, memUceInfo.count);
+
+    rtMemUceArray* memUceArray = &(errorInfo->detail.uceInfo);
+    memUceArray->arraySize = memUceInfo.count;
+    const errno_t ret = memcpy_s(
+        memUceArray->repairAddrArray, sizeof(memUceArray->repairAddrArray), memUceInfo.repairAddr,
+        sizeof(memUceInfo.repairAddr));
+    COND_RETURN_AND_MSG_INNER(
+        ret != EOK, RT_ERROR_INVALID_VALUE,
+        "Failed to call memcpy_s to copy memUceInfo.repairAddr, src=%p, dest=%p, dest_max=%zu, count=%zu, retCode=%#x.",
+        memUceArray->repairAddrArray, memUceInfo.repairAddr, sizeof(memUceArray->repairAddrArray),
+        sizeof(memUceInfo.repairAddr), ret);
+
+    errorInfo->tryRepair = 1U;
+    errorInfo->hasDetail = 1U;
+
+    return RT_ERROR_NONE;
+}
+
+rtError_t MemUceErrorResume(Device* const dev, const uint32_t deviceId, const rtErrorInfo* const errorInfo)
+{
+    rtMemUceInfo memUceInfo = {};
+    memUceInfo.devid = deviceId;
+    memUceInfo.count = errorInfo->detail.uceInfo.arraySize;
+    const errno_t ret = memcpy_s(
+        memUceInfo.repairAddr, sizeof(memUceInfo.repairAddr), errorInfo->detail.uceInfo.repairAddrArray,
+        sizeof(errorInfo->detail.uceInfo.repairAddrArray));
+    COND_RETURN_AND_MSG_INNER(
+        ret != EOK, RT_ERROR_INVALID_VALUE,
+        "Failed to call memcpy_s to copy errorInfo->detail.uceInfo.repairAddrArray,"
+        " src=%p, dest=%p, dest_max=%zu, count=%zu, retCode=%#x.",
+        errorInfo->detail.uceInfo.repairAddrArray, memUceInfo.repairAddr, sizeof(memUceInfo.repairAddr),
+        sizeof(errorInfo->detail.uceInfo.repairAddrArray), ret);
+
+    const rtError_t error = NpuDriver::MemUceRepair(deviceId, &memUceInfo);
+    if (error == RT_ERROR_NONE) {
+        GlobalContainer::UceMutexLock();
+        GlobalContainer::DeleteMemUceInfo(deviceId);
+        GlobalContainer::UceMutexUnlock();
+    }
+    COND_RETURN_WARN(
+        error == RT_ERROR_FEATURE_NOT_SUPPORT, RT_ERROR_FEATURE_NOT_SUPPORT,
+        "Memory UCE error repair is not supported.");
+    COND_RETURN_ERROR(
+        (error != RT_ERROR_NONE), error, "Mem uce error repair failed, drv devId=%u, retCode=%#x.", deviceId,
+        static_cast<uint32_t>(error));
+
+    dev->SetDeviceFaultType(DeviceFaultType::NO_ERROR);
+    return RT_ERROR_NONE;
+}
+
+} // namespace runtime
+} // namespace cce

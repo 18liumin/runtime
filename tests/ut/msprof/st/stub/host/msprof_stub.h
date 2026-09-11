@@ -14,9 +14,9 @@
 #include <unistd.h>
 #include <string>
 #include <map>
-#include "slog.h"
+#include "dlog_pub.h"
 #ifndef MSPROF_C
-#include "config/config_manager.h"
+#include "config_manager.h"
 #else
 #ifndef MSPROF_C_CPP
 #define MSPROF_MODULE_NAME PROFILING
@@ -47,16 +47,22 @@
 enum class StPlatformType {
     MINI_TYPE = 0,
     CLOUD_TYPE,
+#ifndef BUILD_PROFILING_OPEN_PROJECT
     MDC_TYPE,
+#endif
     DC_TYPE = 4,
     CHIP_V4_1_0,
     MINI_V3_TYPE = 7,
+#ifndef BUILD_PROFILING_OPEN_PROJECT
     CHIP_TINY_V1 = 8,
     CHIP_NANO_V1 = 9,
     CHIP_MDC_MINI_V3 = 11,
     CHIP_MDC_LITE = 12,
     CHIP_CLOUD_V3 = 15,
     CHIP_CLOUD_V4 = 16,
+    CHIP_MDC_LITE_V2 = 18,
+    CHIP_5162A = 21,
+#endif
     END_TYPE
 };
 
@@ -74,16 +80,22 @@ enum class StProfConfigType {
 const std::map<uint32_t, std::string> CLI_CHECK_OUTPUT = {
     {0, "cliMinistest_workspace/output"},
     {1, "cliCloudstest_workspace/output"},
+#ifndef BUILD_PROFILING_OPEN_PROJECT
     {2, "cliMdcstest_workspace/output"},
+#endif
     {4, "cliDcstest_workspace/output"},
     {5, "cliMilanstest_workspace/output"},
     {7, "cliMiniV3stest_workspace/output"},
+#ifndef BUILD_PROFILING_OPEN_PROJECT
     {8, "cliTinystest_workspace/output"},
     {9, "cliNanostest_workspace/output"},
     {11, "cliMdcMiniV3stest_workspace/output"},
     {12, "cliMdcLitestest_workspace/output"},
     {15, "cliDavidstest_workspace/output"},
     {16, "cliDavidV121stest_workspace/output"},
+    {18, "cliMdcLiteV2stest_workspace/output"},
+    {21, "cliModenastest_workspace/output"},
+#endif
 };
 
 void ClearSingleton();

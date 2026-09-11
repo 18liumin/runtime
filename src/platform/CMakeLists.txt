@@ -1,9 +1,9 @@
 project(platform)
 
 add_library(platform_headers INTERFACE)
-message(STATUS "PRODUCT  ${PRODUCT}")
 
 set(STATICPLATFORMFILE
+    ${CMAKE_CURRENT_LIST_DIR}/acl_platform.cpp
     ${CMAKE_CURRENT_LIST_DIR}/platform_info.cpp
     ${CMAKE_CURRENT_LIST_DIR}/platform_infos_def.cpp
     ${CMAKE_CURRENT_LIST_DIR}/platform_infos_impl.cpp
@@ -21,9 +21,11 @@ protobuf_generate(platform_infos_proto PROTO_SRCS PROTO_HDRS ${PROTO_LIST} TARGE
 if((DEFINED PRODUCT) AND (PRODUCT STREQUAL "ascend031"))
         set(PLATFORMFILE
         "stub/platform_info_stub.cpp"
-        "stub/platform_infos_def_stub.cpp")
+        "stub/platform_infos_def_stub.cpp"
+        "stub/platform_manager_v2_stub.cpp")
 else()
         set(PLATFORMFILE
+        "acl_platform.cpp"
         "platform_info.cpp"
         "platform_infos_def.cpp"
         "platform_infos_impl.cpp"
@@ -36,10 +38,6 @@ endif()
 target_include_directories(platform_headers INTERFACE
     $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc>
     $<BUILD_INTERFACE:${RUNTIME_DIR}/pkg_inc/platform>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/../runtime>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/proto/google>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/proto/google/protobuf/stubs>
-    $<BUILD_INTERFACE:${RUNTIME_DIR}/src/dfx/error_manager>
     $<BUILD_INTERFACE:${RUNTIME_DIR}/include/dfx/base>
     $<INSTALL_INTERFACE:include>
     $<INSTALL_INTERFACE:include/platform>
@@ -55,18 +53,17 @@ file(GLOB FE_SRC_CPP_1 RELATIVE ${CMAKE_CURRENT_LIST_DIR}
 
 add_library(platform SHARED
         ${FE_SRC_CPP_1}
-        ${PROTO_SRCS}
-        ${RUNTIME_DIR}/src/dfx/error_manager
-        ${RUNTIME_DIR}/include/dfx/base)
+        ${PROTO_SRCS})
 
 
 add_dependencies(platform platform_infos_proto)
 target_include_directories(platform PRIVATE
-        # ${CMAKE_CURRENT_LIST_DIR}/../dfx/include/log/toolchain
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_CURRENT_LIST_DIR}/proto/google
         ${RUNTIME_DIR}/pkg_inc
+        ${RUNTIME_DIR}/include/external
         ${RUNTIME_DIR}/src/dfx/error_manager
+        ${RUNTIME_DIR}/src/dfx/log/inc/toolchain
         ${RUNTIME_DIR}/include/dfx/base
         $<INSTALL_INTERFACE:include>
         $<INSTALL_INTERFACE:include/platform>
@@ -86,16 +83,16 @@ target_compile_definitions(platform PRIVATE
 
 ADD_LIBRARY(platform_static STATIC
         ${STATICPLATFORMFILE}
-        ${PROTO_SRCS}
-        ${RUNTIME_DIR}/src/dfx/error_manager
-        ${RUNTIME_DIR}/include/dfx/base)
+        ${PROTO_SRCS})
 add_dependencies(platform_static platform_infos_proto)
 target_include_directories(platform_static PRIVATE
         # ${CMAKE_CURRENT_LIST_DIR}/../dfx/include/log/toolchain
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_CURRENT_LIST_DIR}/inc
         ${RUNTIME_DIR}/src/dfx/error_manager
+        ${RUNTIME_DIR}/src/dfx/log/inc/toolchain
         ${RUNTIME_DIR}/include/dfx/base
+        ${RUNTIME_DIR}/include/external
         $<INSTALL_INTERFACE:include>
         $<INSTALL_INTERFACE:include/platform>
         $<INSTALL_INTERFACE:include/platform/platform>
@@ -141,16 +138,22 @@ target_link_libraries(platform
                 platform_headers
         )
 
-install_package(
-    PACKAGE platform
-    TARGETS platform platform_headers platform_static
-    FILES   ${RUNTIME_DIR}/pkg_inc/platform/platform_info.h
-            ${RUNTIME_DIR}/pkg_inc/platform/platform_info_def.h
-            ${RUNTIME_DIR}/pkg_inc/platform/platform_infos_def.h
-            ${RUNTIME_DIR}/pkg_inc/platform/soc_spec.h
-    DESTINATION ${INSTALL_INCLUDE_DIR}/platform/platform
-)
+if(PRODUCT_SIDE STREQUAL "host" OR NOT ENABLE_OPEN_SRC)
+    install_package(
+        PACKAGE platform
+        TARGETS platform platform_headers platform_static
+        FILES   ${RUNTIME_DIR}/pkg_inc/platform/platform_info.h
+                ${RUNTIME_DIR}/pkg_inc/platform/platform_info_def.h
+                ${RUNTIME_DIR}/pkg_inc/platform/platform_infos_def.h
+                ${RUNTIME_DIR}/pkg_inc/platform/soc_spec.h
+        DESTINATION ${INSTALL_INCLUDE_DIR}/platform/platform
+    )
 
-install(TARGETS platform OPTIONAL
-    LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}/${CMAKE_SYSTEM_PROCESSOR}/stub
-)
+    install(TARGETS platform OPTIONAL
+        LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}/${CMAKE_SYSTEM_PROCESSOR}/stub
+    )
+else()
+    install(TARGETS platform_static
+        DESTINATION ${DEVICE_LIBRARY_PATH} COMPONENT npu-runtime
+    )
+endif()

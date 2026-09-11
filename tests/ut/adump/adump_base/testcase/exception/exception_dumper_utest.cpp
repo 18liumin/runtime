@@ -19,15 +19,17 @@
 #include "exception_dumper.h"
 #include "dump_manager.h"
 #include "file.h"
+#include "adump_platform_manager.h"
 #include "dump_exception_stub.h"
 
 using namespace Adx;
 
 class ExceptionDumperUtest : public testing::Test {
 protected:
-    virtual void SetUp() {}
+    virtual void SetUp() { ResetAllPlatformManagers(); }
     virtual void TearDown()
     {
+        ResetAllPlatformManagers();
         DumpManager::Instance().Reset();
         FreeExceptionRegInfo();
         GlobalMockObject::verify();
@@ -707,7 +709,6 @@ TEST_F(ExceptionDumperUtest, Test_DumpException_ResidentOp_Coredump)
 
     uint32_t type = 5;  // CHIP_CLOUD_V2
     MOCKER_CPP(&Adx::AdumpDsmi::DrvGetPlatformType).stubs().with(outBound(type)).will(returnValue(true));
-    MOCKER(&Adx::KernelInfoCollector::ParseKernelSymbols).stubs().will(invoke(Adx::ParseKernelSymbolsStub));
 
     auto input = gert::TensorBuilder().Placement(gert::kOnDeviceHbm).DataType(ge::DT_INT32).Shape({4, 2}).Build();
     auto output = gert::TensorBuilder().Placement(gert::kOnDeviceHbm).DataType(ge::DT_INT32).Shape({4, 2}).Build();

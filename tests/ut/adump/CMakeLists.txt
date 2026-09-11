@@ -11,8 +11,6 @@
 set(SRC_CODE_ROOT_PATH ${TOP_DIR}/src/dfx/adump)
 set(LLT_CODE_ROOT_PATH ${TOP_DIR}/tests/ut/adump/ut)
 
-include_directories(${OPEN_SOURCE_DIR}/boost)
-include_directories(${OPEN_SOURCE_DIR}/mockcpp_src/include)
 
 ############# intf_llt_pub ####################
 add_library(adump_intf_llt_pub INTERFACE)
@@ -29,6 +27,7 @@ target_compile_options(adump_intf_llt_pub INTERFACE
     -w
     $<$<BOOL:${ENABLE_GCOV}>:-fprofile-arcs -ftest-coverage>
     $<$<BOOL:${ENABLE_ASAN}>:-fsanitize=address -fno-omit-frame-pointer -static-libasan -fsanitize=undefined -static-libubsan -fsanitize=leak -static-libtsan>
+    $<$<STREQUAL: ${CMAKE_SYSTEM_PROCESSOR}, aarch64>:-falign-functions=32>
     -fPIC
     -pipe
 )
@@ -42,11 +41,11 @@ target_link_directories(adump_intf_llt_pub INTERFACE
 )
 
 target_link_libraries(adump_intf_llt_pub INTERFACE
-    GTest::gtest
-    ${OPEN_SOURCE_DIR}/mockcpp/lib/libmockcpp.a
+    GTestShared::gtest
+    mockcpp
     -lpthread
     $<$<BOOL:${ENABLE_GCOV}>:-lgcov>
-    c_sec_static
+    c_sec
     ascend_protobuf_static
 )
 
@@ -60,6 +59,8 @@ target_link_libraries(adx_utestonetrack_pub INTERFACE
     $<BUILD_INTERFACE:slog_headers>
     $<BUILD_INTERFACE:msprof_headers>
     $<BUILD_INTERFACE:npu_runtime_headers>
+    $<BUILD_INTERFACE:npu_runtime_inner_headers>
+    $<BUILD_INTERFACE:error_manager_headers>
     -Wl,--as-needed
     -lpthread
 )
@@ -68,11 +69,13 @@ target_link_libraries(adx_utestonetrack_pub INTERFACE
 add_subdirectory(adx_hdc_dump)
 add_subdirectory(adx_soc_dump)
 add_subdirectory(adump_base)
+add_subdirectory(adump_tiny)
 
 set(ADUMP_UT_SUB_TARGETS
     adx_hdc_dump_utest
     adx_soc_dump_utest
     adump_base_utest
+    adump_tiny_utest
 )
 
 add_custom_target(adump_ut DEPENDS ${ADUMP_UT_SUB_TARGETS})

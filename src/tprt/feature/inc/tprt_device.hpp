@@ -1,0 +1,54 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+#ifndef __CCE_TPRT_DEVICE_HPP__
+#define __CCE_TPRT_DEVICE_HPP__
+
+#include "tprt_worker.hpp"
+#include "tprt_timer.hpp"
+#include <map>
+
+namespace cce {
+namespace tprt {
+typedef enum TimeoutStatus { WAIT_TASK_IS_FINISHED, WAIT_TASK_IS_WORKING, WAIT_TASK_IS_TIMEOUT } TimeoutStatus_t;
+
+class TprtDevice {
+public:
+    TprtDevice(uint32_t devId, uint32_t timeoutMonitorUint = 0);
+    ~TprtDevice();
+    uint32_t TprtDeviceStop();
+    uint32_t TprtSqCqAlloc(const uint32_t sqId, const uint32_t cqId);
+    uint32_t TprtSqCqDeAlloc(const uint32_t sqId, const uint32_t cqId);
+    TprtSqHandle* TprtGetSqHandleBySqId(uint32_t sqId);
+    TprtCqHandle* TprtGetCqHandleByCqId(uint32_t cqId);
+    std::shared_ptr<TprtWorker> TprtGetWorkHandleBySqHandle(TprtSqHandle* handle);
+
+    uint32_t TprtDeleteDevice();
+    uint32_t TprtDevOpSqCqInfo(TprtSqCqOpInfo_t* opInfo);
+    uint32_t TprtDevGetDevId_() const { return devId_; }
+    void RunCheckTaskTimeout();
+    uint32_t TprtGetSqHandleSharedPtrById(const uint32_t sqId, std::shared_ptr<TprtSqHandle>& sharedSqHandle);
+    void GetAllSqHandleId(std::vector<uint32_t>& SqHandleIdList);
+
+private:
+    uint32_t devId_;
+    std::mutex sqCqWorkerMapLock_;
+    std::unordered_map<uint32_t, TprtSqHandle*> sqHandleMap_; // key is sqId, value is Stream
+    std::unordered_map<uint32_t, TprtCqHandle*> cqHandleMap_;
+    std::unordered_map<TprtSqHandle*, std::shared_ptr<TprtWorker>> workerMap_;
+    TprtTimer* timer_;
+    std::mutex sqHandleMapLock_;
+
+    void ProcessWaitingTask(uint32_t sqId, TprtSqHandle* sqHandle);
+    uint32_t CheckDuplicateSqCqId(uint32_t sqId, uint32_t cqId);
+};
+} // namespace tprt
+} // namespace cce
+
+#endif

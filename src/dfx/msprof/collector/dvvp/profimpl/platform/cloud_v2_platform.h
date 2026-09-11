@@ -19,9 +19,13 @@ class CloudV2Platform : public PlatformInterface {
 public:
     CloudV2Platform();
     ~CloudV2Platform() override {}
+    uint32_t GetSmmuDFXOffset() const override;
+    uint32_t GetSmmuDFXRegMask() const override;
 
 protected:
     int32_t InitOnlineAnalyzer() override;
 };
-}}}
+} // namespace Platform
+} // namespace Collect
+} // namespace Dvvp
 #endif

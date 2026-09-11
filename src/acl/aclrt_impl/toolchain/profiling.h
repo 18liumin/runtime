@@ -12,26 +12,23 @@
 #define ACL_PROFILING_H_
 
 #include "acl/acl_base.h"
-#include "aprof_pub.h"
 #include <string>
 #include "common/log_inner.h"
 
 namespace acl {
-    class AclProfiling {
-    public:
-        static aclError HandleProfilingConfig(const char_t *const configPath);
+class AclProfiling {
+public:
+    static aclError HandleProfilingConfig(const char_t* const configPath);
 
-    private:
-        static aclError HandleProfilingCommand(const std::string &config, const bool configFileFlag,
-            const bool noValidConfig);
+private:
+    static aclError HandleProfilingCommand(
+        const std::string& config, const bool configFileFlag, const bool noValidConfig);
 
-        static bool GetProfilingConfigFile(std::string &fileName);
-    };
-
+    static bool GetProfilingConfigFile(std::string& fileName);
+};
 
 aclError AclProfCtrlHandle(uint32_t dataType, void* data, uint32_t dataLen);
 
-}
+} // namespace acl
 
 #endif // ACL_PROFILING_H_
-

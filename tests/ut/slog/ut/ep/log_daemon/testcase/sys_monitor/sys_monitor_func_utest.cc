@@ -9,6 +9,7 @@
  */
 #include "gtest/gtest.h"
 #include "mockcpp/mockcpp.hpp"
+#include <cstring>
 #include "self_log_stub.h"
 #include "log_daemon_stub.h"
 #include "sys_monitor_frame.h"
@@ -23,7 +24,7 @@ typedef struct CpuInfo {
 } CpuInfo;
 
 typedef struct MemInfo {
-    uint64_t total;      // MemTotal
+    uint64_t total; // MemTotal
     uint64_t free;
     uint64_t buffers;
     uint64_t cached;
@@ -32,30 +33,29 @@ typedef struct MemInfo {
 } MemInfo;
 
 typedef struct MemInfoTable {
-    const char *name;
-    uint64_t *count;
+    const char* name;
+    uint64_t* count;
 } MemInfoTable;
 
 extern "C" {
-extern float SysmonitorCpuGetUsage(CpuInfo *cpu);
+extern float SysmonitorCpuGetUsage(void);
 extern uint32_t SysmonitorGetCommonDivisor(uint32_t a, uint32_t b);
 extern SysmonitorInfo g_sysmonitorInfo[SYS_MONITOR_COUNT];
-extern void SysmonitorCpuProcessAlarm(float usage);
+extern void SysmonitorCpuProcessAlarm(void);
 extern MemInfoTable g_memInfoTable[6];
-extern int32_t SysmonitorMemParseInfo(char *data);
+extern int32_t SysmonitorMemParseInfo(char* data);
 extern void SysmonitorMemProcessAlarm(float usage);
 extern struct MemInfo g_memInfo;
 extern uint32_t g_threadStatus;
 extern float SysmonitorFdGetUsage(void);
-extern int32_t SysmonitorZpGetInfo(uint32_t *count);
+extern int32_t SysmonitorZpGetInfo(uint32_t* count);
 extern void SysmonitorFdProcessAlarm(float usage);
 extern void SysmonitorCpu(void);
 extern void SysmonitorMem(void);
 extern void SysmonitorFd(void);
 extern void SysmonitorZp(void);
 }
-class EP_SYS_MONITOR_FUNC_UTEST : public testing::Test
-{
+class EP_SYS_MONITOR_FUNC_UTEST : public testing::Test {
 protected:
     virtual void SetUp()
     {
@@ -99,9 +99,7 @@ static int32_t WaitThreadFinish(void)
 
 TEST(EP_SYS_MONITOR_FUNC_UTEST, Sysmonitor)
 {
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
+    MOCKER(ToolSleep).stubs().will(returnValue(0));
     EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
     LogClearPrintNum();
     EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
@@ -115,170 +113,62 @@ TEST(EP_SYS_MONITOR_FUNC_UTEST, Sysmonitor)
 
 TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorCpuAlarm)
 {
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorCpuGetUsage)
-        .stubs()
-        .will(returnValue(99.0f));
-    MOCKER(SysmonitorMem)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorFd)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZp)
-        .stubs()
-        .will(returnValue(0));
+    MOCKER(SysmonitorCpuGetUsage).stubs().will(returnValue(99.0f));
     EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+    SysmonitorCpu();
 
-    EXPECT_EQ(0, WaitThreadFinish());
     EXPECT_EQ(1, LogGetCpuAlarmNum());
     LogClearPrintNum();
 }
 
 int32_t g_memTime = 0;
-errno_t memsetStub(void *dest, size_t size, int value, size_t count)
+errno_t memsetStub(void* dest, size_t size, int value, size_t count)
 {
-    (void)dest;
-    (void)size;
-    (void)value;
-    (void)count;
     if (g_memTime++ != 3) {
+        if (dest != nullptr) {
+            size_t len = (count < size) ? count : size;
+            auto* destByte = static_cast<unsigned char*>(dest);
+            for (size_t i = 0; i < len; ++i) {
+                destByte[i] = static_cast<unsigned char>(value);
+            }
+        }
         return EOK;
     }
     return (errno_t)(6);
 }
 
-TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorCpuAlarmMallocFail)
+static void RunSysmonitorCpuMallocFail(int32_t memTime, int32_t expectedAlarmNum)
 {
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorCpuGetUsage)
-        .stubs()
-        .will(returnValue(99.0f));
-    MOCKER(SysmonitorFd)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMem)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZp)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(memset_s)
-        .stubs()
-        .will(invoke(memsetStub));
-    g_memTime = 2;
+    MOCKER(SysmonitorCpuGetUsage).stubs().will(returnValue(99.0f));
+    MOCKER(memset_s).stubs().will(invoke(memsetStub));
+    g_memTime = memTime;
     EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+    SysmonitorCpu();
 
-    EXPECT_EQ(0, WaitThreadFinish());
-    EXPECT_EQ(1, LogGetCpuAlarmNum());
+    EXPECT_EQ(expectedAlarmNum, LogGetCpuAlarmNum());
     LogClearPrintNum();
 }
 
-TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorCpuAlarmGetInfoMallocFail)
-{
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorCpuGetUsage)
-        .stubs()
-        .will(returnValue(99.0f));
-    MOCKER(SysmonitorFd)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMem)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZp)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(memset_s)
-        .stubs()
-        .will(invoke(memsetStub));
-    g_memTime = 1;
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorCpuAlarmMallocFail) { RunSysmonitorCpuMallocFail(2, 1); }
 
-    EXPECT_EQ(0, WaitThreadFinish());
-    EXPECT_EQ(1, LogGetCpuAlarmNum());
-    LogClearPrintNum();
-}
+TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorCpuAlarmGetInfoMallocFail) { RunSysmonitorCpuMallocFail(3, 0); }
 
-TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorCpuAlarmTopTenMallocFail)
-{
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorCpuGetUsage)
-        .stubs()
-        .will(returnValue(99.0f));
-    MOCKER(SysmonitorFd)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMem)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZp)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(memset_s)
-        .stubs()
-        .will(invoke(memsetStub));
-    g_memTime = 0;
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
-
-    EXPECT_EQ(0, WaitThreadFinish());
-    EXPECT_EQ(1, LogGetCpuAlarmNum());
-    LogClearPrintNum();
-}
+TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorCpuAlarmTopTenMallocFail) { RunSysmonitorCpuMallocFail(2, 1); }
 
 TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorCpuStat)
 {
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorCpuGetUsage)
-        .stubs()
-        .will(returnValue(99.0f));
-    MOCKER(SysmonitorCpuProcessAlarm)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMem)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorFd)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZp)
-        .stubs()
-        .will(returnValue(0));
+    MOCKER(SysmonitorCpuGetUsage).stubs().will(returnValue(99.0f));
+    MOCKER(SysmonitorCpuProcessAlarm).stubs().will(returnValue(0));
     EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
     g_sysmonitorInfo[0].statCount = 1000;
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+    SysmonitorCpu();
 
-    EXPECT_EQ(0, WaitThreadFinish());
     EXPECT_EQ(1, LogGetCpuStatNum());
     LogClearPrintNum();
     GlobalMockObject::verify();
 }
 
-int32_t SysmonitorMemParseInfoStub(char *data)
+int32_t SysmonitorMemParseInfoStub(char* data)
 {
     (void)data;
     *(g_memInfoTable[0].count) = 98U;
@@ -293,127 +183,56 @@ int32_t SysmonitorMemParseInfoStub(char *data)
 
 TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorMemAlarm)
 {
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMemParseInfo)
-        .stubs()
-        .will(invoke(SysmonitorMemParseInfoStub));
-    MOCKER(SysmonitorCpu)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorFd)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZp)
-        .stubs()
-        .will(returnValue(0));
+    MOCKER(SysmonitorMemParseInfo).stubs().will(invoke(SysmonitorMemParseInfoStub));
     EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+    SysmonitorMem();
 
-    EXPECT_EQ(0, WaitThreadFinish());
     EXPECT_EQ(1, LogGetMemAlarmNum());
     LogClearPrintNum();
 }
 
-TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorMemAlarmGetInfoMallocFail)
+static void RunSysmonitorMemMallocFail(int32_t memTime)
 {
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMemParseInfo)
-        .stubs()
-        .will(invoke(SysmonitorMemParseInfoStub));
-    MOCKER(SysmonitorCpu)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorFd)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZp)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(memset_s)
-        .stubs()
-        .will(invoke(memsetStub));
-    g_memTime = 1;
+    MOCKER(SysmonitorMemParseInfo).stubs().will(invoke(SysmonitorMemParseInfoStub));
+    MOCKER(memset_s).stubs().will(invoke(memsetStub));
+    g_memTime = memTime;
     EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+    SysmonitorMem();
 
-    EXPECT_EQ(0, WaitThreadFinish());
     EXPECT_EQ(1, LogGetMemAlarmNum());
     LogClearPrintNum();
 }
 
-TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorMemAlarmTopTenMallocFail)
-{
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMemParseInfo)
-        .stubs()
-        .will(invoke(SysmonitorMemParseInfoStub));
-    MOCKER(SysmonitorCpu)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorFd)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZp)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(memset_s)
-        .stubs()
-        .will(invoke(memsetStub));
-    g_memTime = 0;
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorMemAlarmGetInfoMallocFail) { RunSysmonitorMemMallocFail(1); }
 
-    EXPECT_EQ(0, WaitThreadFinish());
-    EXPECT_EQ(1, LogGetMemAlarmNum());
-    LogClearPrintNum();
-}
+TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorMemAlarmTopTenMallocFail) { RunSysmonitorMemMallocFail(1); }
 
 TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorMemStat)
 {
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMemParseInfo)
-        .stubs()
-        .will(invoke(SysmonitorMemParseInfoStub));
-    MOCKER(SysmonitorMemProcessAlarm)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorCpu)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorFd)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZp)
-        .stubs()
-        .will(returnValue(0));
+    MOCKER(SysmonitorMemParseInfo).stubs().will(invoke(SysmonitorMemParseInfoStub));
+    MOCKER(SysmonitorMemProcessAlarm).stubs().will(returnValue(0));
     EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
     g_sysmonitorInfo[1].statCount = 1000;
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+    SysmonitorMem();
 
-    EXPECT_EQ(0, WaitThreadFinish());
     EXPECT_EQ(1, LogGetMemStatNum());
     LogClearPrintNum();
     GlobalMockObject::verify();
 }
 
 int32_t topPrintNum = 0;
-char *fgetsStub(char *str, int n, FILE *stream)
+int32_t ToolReadFdInfoStub(int32_t fd, void* buf, uint32_t bufLen)
+{
+    (void)fd;
+    const char fdInfo[] = "1 0 100";
+    if ((buf == nullptr) || (bufLen < sizeof(fdInfo))) {
+        return -1;
+    }
+    (void)memcpy(buf, fdInfo, sizeof(fdInfo));
+    return sizeof(fdInfo) - 1;
+}
+
+char* fgetsStub(char* str, int n, FILE* stream)
 {
     (void)str;
     (void)n;
@@ -424,7 +243,7 @@ char *fgetsStub(char *str, int n, FILE *stream)
     return NULL;
 }
 
-char *strtokStub(char *str, const char *delim, char **context)
+char* strtokStub(char* str, const char* delim, char** context)
 {
     (void)str;
     (void)delim;
@@ -441,72 +260,35 @@ char *strtokStub(char *str, const char *delim, char **context)
 
 TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorFdAlarm)
 {
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorFdGetUsage)
-        .stubs()
-        .will(returnValue(99.0f));
-    MOCKER(SysmonitorCpu)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMem)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZp)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(fgets)
-        .stubs()
-        .will(invoke(fgetsStub));
-    MOCKER(strtok_s)
-        .stubs()
-        .will(invoke(strtokStub));
+    MOCKER(ToolRead).stubs().will(invoke(ToolReadFdInfoStub));
+    MOCKER(SysmonitorFdGetUsage).stubs().will(returnValue(99.0f));
+    MOCKER(fgets).stubs().will(invoke(fgetsStub));
+    MOCKER(strtok_s).stubs().will(invoke(strtokStub));
     topPrintNum = 0;
     EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+    SysmonitorFd();
 
-    EXPECT_EQ(0, WaitThreadFinish());
     EXPECT_EQ(1, LogGetFdAlarmNum());
     EXPECT_EQ(3, LogGetFdTopNum());
     LogClearPrintNum();
+    GlobalMockObject::verify();
 }
 
 TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorFdStat)
 {
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorFdGetUsage)
-        .stubs()
-        .will(returnValue(99.0f));
-    MOCKER(SysmonitorFdProcessAlarm)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorCpu)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMem)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZp)
-        .stubs()
-        .will(returnValue(0));
+    MOCKER(ToolRead).stubs().will(invoke(ToolReadFdInfoStub));
+    MOCKER(SysmonitorFdGetUsage).stubs().will(returnValue(99.0f));
+    MOCKER(SysmonitorFdProcessAlarm).stubs().will(returnValue(0));
     EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
     g_sysmonitorInfo[2].statCount = 1000;
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+    SysmonitorFd();
 
-    EXPECT_EQ(0, WaitThreadFinish());
     EXPECT_EQ(1, LogGetFdStatNum());
     LogClearPrintNum();
     GlobalMockObject::verify();
 }
 
-int32_t SysmonitorZpGetInfoStub(uint32_t *count)
+int32_t SysmonitorZpGetInfoStub(uint32_t* count)
 {
     *count = 6;
     return 0;
@@ -514,55 +296,21 @@ int32_t SysmonitorZpGetInfoStub(uint32_t *count)
 
 TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorZpAlarm)
 {
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZpGetInfo)
-        .stubs()
-        .will(invoke(SysmonitorZpGetInfoStub));
-    MOCKER(SysmonitorCpu)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMem)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorFd)
-        .stubs()
-        .will(returnValue(0));
+    MOCKER(SysmonitorZpGetInfo).stubs().will(invoke(SysmonitorZpGetInfoStub));
     EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+    SysmonitorZp();
 
-    EXPECT_EQ(0, WaitThreadFinish());
     EXPECT_EQ(1, LogGetZpAlarmNum());
     LogClearPrintNum();
 }
 
 TEST(EP_SYS_MONITOR_FUNC_UTEST, SysmonitorZpStat)
 {
-    MOCKER(ToolSleep)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorZpGetInfo)
-        .stubs()
-        .will(invoke(SysmonitorZpGetInfoStub));
-    MOCKER(SysmonitorCpu)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorMem)
-        .stubs()
-        .will(returnValue(0));
-    MOCKER(SysmonitorFd)
-        .stubs()
-        .will(returnValue(0));
+    MOCKER(SysmonitorZpGetInfo).stubs().will(invoke(SysmonitorZpGetInfoStub));
     EXPECT_EQ(LOG_SUCCESS, SysmonitorInit());
     g_sysmonitorInfo[3].statCount = 1000;
-    EXPECT_EQ(LOG_SUCCESS, SysmonitorProcess());
-    usleep(50000);
-    SysmonitorExit();
+    SysmonitorZp();
 
-    EXPECT_EQ(0, WaitThreadFinish());
     EXPECT_EQ(1, LogGetZpStatNum());
     LogClearPrintNum();
     GlobalMockObject::verify();

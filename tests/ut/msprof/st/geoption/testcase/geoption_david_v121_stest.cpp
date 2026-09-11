@@ -28,7 +28,7 @@ static const char DAVID_V121_RM_RF[] = "rm -rf ./geoptionDavidV121stest_workspac
 static const char DAVID_V121_MKDIR[] = "mkdir ./geoptionDavidV121stest_workspace";
 static const char DAVID_V121_OUTPUT_DIR[] = "./geoptionDavidV121stest_workspace/output";
 
-class GeOptionDavidV121Stest: public testing::Test {
+class GeOptionDavidV121Stest : public testing::Test {
 protected:
     virtual void SetUp()
     {
@@ -44,7 +44,7 @@ protected:
     virtual void TearDown()
     {
         GlobalMockObject::verify();
-        DevprofDrvAicpu::instance()->isRegister_ = false;   // 重置aicpu注册状态，使单进程内能多次注册
+        DevprofDrvAicpu::instance()->isRegister_ = false; // 重置aicpu注册状态，使单进程内能多次注册
         EXPECT_EQ(2, SimulatorMgr().DelDeviceSimulator(2, StPlatformType::CHIP_CLOUD_V4));
         system(DAVID_V121_RM_RF);
         system("rm -rf ./geoption.json");
@@ -68,8 +68,8 @@ TEST_F(GeOptionDavidV121Stest, GeOptionDefault)
     std::vector<std::string> deviceDataList = {"ts_track.data", "ccu0.instr", "ccu1.instr"};
     MsprofMgr().SetDeviceCheckList(deviceDataList);
     std::vector<std::string> hostDataList = {
-        "unaging.api_event.data", "unaging.compact.node_basic_info", "unaging.compact.task_track", "unaging.additional.context_id_info"
-    };
+        "unaging.api_event.data", "unaging.compact.node_basic_info", "unaging.compact.task_track",
+        "unaging.additional.context_id_info"};
     MsprofMgr().SetHostCheckList(hostDataList);
     std::vector<uint64_t> bitList = {PROF_ACL_API, PROF_TASK_TIME_L1, PROF_AICORE_METRICS};
     MsprofMgr().SetBitSwitchCheckList(bitList);
@@ -89,27 +89,26 @@ TEST_F(GeOptionDavidV121Stest, GeOptionScale)
     // david: scale
     nlohmann::json data;
     data["output"] = DAVID_V121_OUTPUT_DIR;
-    data["scale"] = "opType:MatMulV3,Index;opName:aclnnMatmul_MatMulV3Common_MatMulV3,aclnnIndex_IndexAiCore_Index";
+    data["optype"] = "MatMulV3,Index";
     EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().GeOptionStart(1, data));
 }
 
-TEST_F(GeOptionDavidV121Stest, GeOptionScaleEmpty)
+TEST_F(GeOptionDavidV121Stest, GeOptionScaleEmptyItem)
 {
-    // david: scale empty
+    // david: scale empty item
     nlohmann::json data;
     data["output"] = DAVID_V121_OUTPUT_DIR;
-    data["scale"] = "opType:MatMulV3,Index;opName:aclnnMatmul_MatMulV3Common_MatMulV3,,,,,,";
-    EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().GeOptionStart(1, data));
+    data["optype"] = "MatMulV3,,Index";
+    EXPECT_EQ(PROFILING_FAILED, MsprofMgr().GeOptionStart(1, data));
 }
 
 TEST_F(GeOptionDavidV121Stest, GeOptionScaleOverflow)
 {
     // david: scale overflow
     nlohmann::json data;
-    std::string opName(512, 't');
-    std::string scaleCmd = "opType:MatMulV3;opName:" + opName;
+    std::string opType(257, 't');
     data["output"] = DAVID_V121_OUTPUT_DIR;
-    data["scale"] = scaleCmd;
+    data["optype"] = opType;
     EXPECT_EQ(PROFILING_FAILED, MsprofMgr().GeOptionStart(1, data));
 }
 
@@ -117,25 +116,33 @@ TEST_F(GeOptionDavidV121Stest, GeOptionScaleCritical)
 {
     // david: scale critical
     nlohmann::json data;
-    std::string opName(511, 't');
-    std::string scaleCmd = "opType:MatMulV3;opName:" + opName;
+    std::string opType(256, 't');
     data["output"] = DAVID_V121_OUTPUT_DIR;
-    data["scale"] = scaleCmd;
+    data["optype"] = opType;
     EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().GeOptionStart(1, data));
 }
 
 TEST_F(GeOptionDavidV121Stest, GeOptionScaleDuplicate)
 {
-    // david: scale dumplicate
+    // david: scale duplicate
     nlohmann::json data;
-    std::string opName = "aclnnIndex_IndexAiCore_Index";
-    std::string scaleCmd = "opType:MatMulV3;opName:";
+    std::string opType = "MatMulV3";
+    std::string scaleCmd = "";
     for (auto i = 0; i < 20; ++i) {
-        scaleCmd += opName;
+        scaleCmd += opType;
         scaleCmd += ",";
     }
     scaleCmd.pop_back();
     data["output"] = DAVID_V121_OUTPUT_DIR;
-    data["scale"] = scaleCmd;
+    data["optype"] = scaleCmd;
     EXPECT_EQ(PROFILING_SUCCESS, MsprofMgr().GeOptionStart(1, data));
+}
+
+TEST_F(GeOptionDavidV121Stest, GeOptionInstrProfilingFreqUnsupported)
+{
+    nlohmann::json data;
+    data["output"] = DAVID_V121_OUTPUT_DIR;
+    data["instr_profiling"] = "on";
+    data["instr_profiling_freq"] = 10000;
+    EXPECT_EQ(PROFILING_FAILED, MsprofMgr().GeOptionStart(1, data));
 }

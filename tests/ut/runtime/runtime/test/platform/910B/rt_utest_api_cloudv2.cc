@@ -1,0 +1,1687 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+#include "gtest/gtest.h"
+#include "mockcpp/mockcpp.hpp"
+#include "driver/ascend_hal.h"
+#include "securec.h"
+#include "runtime/rt.h"
+#include "runtime/rts/rts.h"
+#include "runtime/event.h"
+#include "runtime/rt_inner_event.h"
+#include "runtime/rt_inner_stream.h"
+#define private public
+#define protected public
+#include "runtime.hpp"
+#include "api.hpp"
+#include "capture_model_utils.hpp"
+#include "rt_unwrap.h"
+#include "api_impl.hpp"
+#include "api_error.hpp"
+#include "program.hpp"
+#include "context.hpp"
+#include "raw_device.hpp"
+#include "logger.hpp"
+#include "engine.hpp"
+#include "async_hwts_engine.hpp"
+#include "task_res.hpp"
+#include "rdma_task.h"
+#include "stars.hpp"
+#include "npu_driver.hpp"
+#include "api_error.hpp"
+#include "event.hpp"
+#include "stream.hpp"
+#include "stream_sqcq_manage.hpp"
+#include "notify.hpp"
+#include "count_notify.hpp"
+#include "profiler.hpp"
+#include "api_profile_decorator.hpp"
+#include "api_profile_log_decorator.hpp"
+#include "api_handle_guard.h"
+#include "device_state_callback_manager.hpp"
+#include "task_fail_callback_manager.hpp"
+#include "model.hpp"
+#include "capture_model.hpp"
+#include "capture_model_utils.hpp"
+#include "subscribe.hpp"
+#include <fstream>
+#include <stdio.h>
+#include <stdlib.h>
+#include <cstring>
+#include "thread_local_container.hpp"
+#include "heterogenous.h"
+#include "task_execute_time.h"
+#include "runtime/rts/rts_device.h"
+#include "runtime/rts/rts_stream.h"
+#include "api_c.h"
+#include "../../rt_utest_api.hpp"
+#include "cond_c.hpp"
+#include "../../data/elf.h"
+#undef protected
+#undef private
+
+using namespace testing;
+using namespace cce::runtime;
+
+namespace {
+void ExpectDestroy(rtStream_t stream, rtEvent_t event)
+{
+    EXPECT_EQ(rtEventDestroy(event), RT_ERROR_NONE);
+    EXPECT_EQ(rtStreamDestroy(stream), RT_ERROR_NONE);
+}
+
+void ExpectCreateStreamEvent(rtStream_t& stream, rtEvent_t& event, uint32_t eventFlag = RT_EVENT_DEFAULT)
+{
+    EXPECT_EQ(rtStreamCreate(&stream, 0), RT_ERROR_NONE);
+    if (eventFlag == RT_EVENT_DEFAULT) {
+        EXPECT_EQ(rtEventCreate(&event), RT_ERROR_NONE);
+    } else {
+        EXPECT_EQ(rtEventCreateExWithFlag(&event, eventFlag), RT_ERROR_NONE);
+    }
+}
+
+CaptureModel* GetCaptureModel(rtModel_t captureMdlHandle)
+{
+    Model* modelBase = nullptr;
+    EXPECT_EQ(ValidateModelHandleForApi(captureMdlHandle, modelBase, __func__), RT_ERROR_NONE);
+    CaptureModel* model = dynamic_cast<CaptureModel*>(modelBase);
+    EXPECT_NE(model, nullptr);
+    return model;
+}
+} // namespace
+
+class RtApiTest : public testing::Test {
+protected:
+    static void SetUpTestCase()
+    {
+        Runtime* rtInstance = (Runtime*)Runtime::Instance();
+        (void)rtSetDevice(0);
+        (void)rtSetTSDevice(0);
+        rtError_t error2 = rtEventCreate(&event_);
+
+        for (uint32_t i = 0; i < sizeof(binary_) / sizeof(uint32_t); i++) {
+            binary_[i] = i;
+        }
+
+        rtDevBinary_t devBin;
+        devBin.magic = RT_DEV_BINARY_MAGIC_ELF;
+        devBin.version = 2;
+        devBin.data = (void*)elf_o;
+        devBin.length = elf_o_len;
+        rtError_t error3 = rtDevBinaryRegister(&devBin, &binHandle_);
+
+        rtError_t error4 = rtFunctionRegister(binHandle_, &function_, "foo", NULL, 0);
+
+        std::cout << "api test start:" << error2 << ", " << error3 << ", " << error4 << std::endl;
+    }
+
+    static void TearDownTestCase()
+    {
+        rtError_t error2 = rtEventDestroy(event_);
+        rtError_t error3 = rtDevBinaryUnRegister(binHandle_);
+        std::cout << "api test start end : "
+                  << ", " << error2 << ", " << error3 << std::endl;
+        GlobalMockObject::verify();
+        rtDeviceReset(0);
+    }
+
+    virtual void SetUp() { GlobalMockObject::verify(); }
+
+    virtual void TearDown() { GlobalMockObject::verify(); }
+
+public:
+    static rtStream_t stream_;
+    static rtEvent_t event_;
+    static void* binHandle_;
+    static char function_;
+    static uint32_t binary_[32];
+    static Driver* driver_;
+};
+rtStream_t RtApiTest::stream_ = NULL;
+rtEvent_t RtApiTest::event_ = NULL;
+void* RtApiTest::binHandle_ = nullptr;
+char RtApiTest::function_ = 'a';
+uint32_t RtApiTest::binary_[32] = {};
+Driver* RtApiTest::driver_ = NULL;
+
+TEST_F(RtApiTest, api_rtsSetCmoDesc)
+{
+    rtError_t error;
+
+    rtCmoAddrInfo cmoAddrInfo;
+    void* srcAddr = nullptr;
+    error = rtMalloc(&srcAddr, 64, RT_MEMORY_DEFAULT, DEFAULT_MODULEID);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    error = rtsSetCmoDesc(&cmoAddrInfo, srcAddr, 64);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    error = rtFree(srcAddr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_02)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtStreamCaptureStatus status;
+    rtModel_t captureMdl;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, &status, &captureMdl);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(status, RT_STREAM_CAPTURE_STATUS_ACTIVE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, &status, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(status, RT_STREAM_CAPTURE_STATUS_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, rtEventRecordWithFlagApiValidation)
+{
+    rtStream_t stream = nullptr;
+    rtEvent_t event = nullptr;
+    ExpectCreateStreamEvent(stream, event, RT_EVENT_DDSYNC_NS);
+
+    EXPECT_EQ(rtEventRecordWithFlag(event, stream, RT_EVENT_RECORD_DEFAULT), RT_ERROR_NONE);
+    EXPECT_NE(rtEventRecordWithFlag(event, stream, RT_EVENT_RECORD_EXTERNAL + 1U), RT_ERROR_NONE);
+
+    const uint32_t originalEnvFlags = ThreadLocalContainer::GetEnvFlags();
+    ThreadLocalContainer::SetEnvFlags(0xA5A50000U);
+    EXPECT_NE(rtEventRecordWithFlag(event, stream, RT_EVENT_RECORD_EXTERNAL), RT_ERROR_NONE);
+    EXPECT_EQ(ThreadLocalContainer::GetEnvFlags(), API_ENV_FLAGS_DEFAULT);
+    ThreadLocalContainer::SetEnvFlags(originalEnvFlags);
+
+    ExpectDestroy(stream, event);
+}
+
+TEST_F(RtApiTest, rtEventRecordWithFlagDefaultGoesThroughWithFlagImpl)
+{
+    ApiImpl apiImpl;
+    MOCKER(Api::Instance).stubs().will(returnValue(static_cast<Api*>(&apiImpl)));
+    MOCKER(rtEventRecord).expects(never());
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::EventRecord)
+        .expects(once())
+        .with(mockcpp::any(), mockcpp::any(), RT_EVENT_RECORD_DEFAULT)
+        .will(returnValue(RT_ERROR_NONE));
+
+    Event event;
+    Stream stream(static_cast<Device*>(nullptr), 0U);
+    rtEvent_t eventHandle = rt_ut::InitAndExportHandle<rtEvent_t>(&event);
+    rtStream_t streamHandle = rt_ut::InitAndExportHandle<rtStream_t>(&stream);
+
+    EXPECT_EQ(rtEventRecordWithFlag(eventHandle, streamHandle, RT_EVENT_RECORD_DEFAULT), RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, eventRecordFlagIsSetByApiErrorDecorator)
+{
+    ApiImpl apiImpl;
+    ApiErrorDecorator apiError(&apiImpl);
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::EventRecord).expects(once()).will(returnValue(RT_ERROR_FEATURE_NOT_SUPPORT));
+    Event event(nullptr, RT_EVENT_DEFAULT, nullptr, false, false);
+
+    EXPECT_EQ(apiError.EventRecord(&event, nullptr, RT_EVENT_RECORD_DEFAULT), RT_ERROR_FEATURE_NOT_SUPPORT);
+    EXPECT_EQ(event.GetRecordFlag(), RT_EVENT_RECORD_DEFAULT);
+
+    event.SetRecordFlag(RT_EVENT_RECORD_EXTERNAL);
+    EXPECT_EQ(apiError.EventRecord(&event, nullptr, RT_EVENT_RECORD_DEFAULT), RT_ERROR_INVALID_VALUE);
+    EXPECT_EQ(event.GetRecordFlag(), RT_EVENT_RECORD_EXTERNAL);
+}
+
+TEST_F(RtApiTest, streamWaitFlagIsSetByApiErrorDecorator)
+{
+    ApiImpl apiImpl;
+    ApiErrorDecorator apiError(&apiImpl);
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::StreamWaitEvent)
+        .expects(once())
+        .will(returnValue(RT_ERROR_FEATURE_NOT_SUPPORT));
+    Event event(nullptr, RT_EVENT_DEFAULT, nullptr, false, false);
+
+    EXPECT_EQ(apiError.StreamWaitEvent(nullptr, &event, 0U, RT_EVENT_WAIT_DEFAULT), RT_ERROR_FEATURE_NOT_SUPPORT);
+    EXPECT_EQ(event.GetWaitFlag(), RT_EVENT_WAIT_DEFAULT);
+
+    event.SetWaitFlag(RT_EVENT_WAIT_EXTERNAL);
+    EXPECT_EQ(apiError.StreamWaitEvent(nullptr, &event, 0U, RT_EVENT_WAIT_DEFAULT), RT_ERROR_INVALID_VALUE);
+    EXPECT_EQ(event.GetWaitFlag(), RT_EVENT_WAIT_EXTERNAL);
+}
+
+TEST_F(RtApiTest, eventOperationFlagSetterOnlySetsValue)
+{
+    Event event;
+
+    event.SetRecordFlag(RT_EVENT_RECORD_EXTERNAL);
+    event.SetRecordFlag(RT_EVENT_RECORD_DEFAULT);
+    event.SetWaitFlag(RT_EVENT_WAIT_EXTERNAL);
+    event.SetWaitFlag(RT_EVENT_WAIT_DEFAULT);
+
+    EXPECT_EQ(event.GetRecordFlag(), RT_EVENT_RECORD_DEFAULT);
+    EXPECT_EQ(event.GetWaitFlag(), RT_EVENT_WAIT_DEFAULT);
+}
+
+TEST_F(RtApiTest, rtStreamWaitEventWithFlagApiValidation)
+{
+    MOCKER(CheckCaptureModelSupportSoftwareSq).stubs().will(returnValue(RT_ERROR_NONE));
+    rtStream_t stream = nullptr;
+    rtEvent_t event = nullptr;
+    ExpectCreateStreamEvent(stream, event, RT_EVENT_DDSYNC_NS);
+
+    EXPECT_EQ(rtStreamWaitEventWithFlag(stream, event, 0U, RT_EVENT_WAIT_DEFAULT), RT_ERROR_NONE);
+    EXPECT_NE(rtStreamWaitEventWithFlag(stream, event, 0U, RT_EVENT_WAIT_EXTERNAL + 1U), RT_ERROR_NONE);
+    EXPECT_NE(rtStreamWaitEventWithFlag(stream, event, 1U, RT_EVENT_WAIT_EXTERNAL), RT_ERROR_NONE);
+
+    const uint32_t originalEnvFlags = ThreadLocalContainer::GetEnvFlags();
+    ThreadLocalContainer::SetEnvFlags(0xA5A50000U);
+    EXPECT_NE(rtStreamWaitEventWithFlag(stream, event, 0U, RT_EVENT_WAIT_EXTERNAL), RT_ERROR_NONE);
+    EXPECT_EQ(ThreadLocalContainer::GetEnvFlags(), API_ENV_FLAGS_DEFAULT);
+    ThreadLocalContainer::SetEnvFlags(originalEnvFlags);
+
+    ExpectDestroy(stream, event);
+}
+
+TEST_F(RtApiTest, rtStreamWaitEventWithTimeoutCaptureIsolation)
+{
+    ApiImpl apiImpl;
+    MOCKER(Api::Instance).stubs().will(returnValue(static_cast<Api*>(&apiImpl)));
+    MOCKER_CPP_VIRTUAL(apiImpl, &ApiImpl::StreamWaitEvent)
+        .expects(once())
+        .will(returnValue(RT_ERROR_STREAM_CAPTURE_ISOLATION));
+
+    Event event;
+    Stream stream(static_cast<Device*>(nullptr), 0U);
+    rtEvent_t eventHandle = rt_ut::InitAndExportHandle<rtEvent_t>(&event);
+    rtStream_t streamHandle = rt_ut::InitAndExportHandle<rtStream_t>(&stream);
+
+    EXPECT_EQ(rtStreamWaitEventWithTimeout(streamHandle, eventHandle, 0U), ACL_ERROR_RT_CAPTURE_DEPENDENCY);
+}
+
+TEST_F(RtApiTest, rtEventWithFlagExternalRejectsUnsupportedEventModes)
+{
+    MOCKER(CheckCaptureModelSupportSoftwareSq).stubs().will(returnValue(RT_ERROR_NONE));
+    rtStream_t stream = nullptr;
+    rtEvent_t event = nullptr;
+    ExpectCreateStreamEvent(stream, event);
+    EXPECT_NE(rtEventRecordWithFlag(event, stream, RT_EVENT_RECORD_EXTERNAL), RT_ERROR_NONE);
+    EXPECT_NE(rtStreamWaitEventWithFlag(stream, event, 0U, RT_EVENT_WAIT_EXTERNAL), RT_ERROR_NONE);
+    ExpectDestroy(stream, event);
+
+    ExpectCreateStreamEvent(stream, event, RT_EVENT_TIME_LINE);
+    EXPECT_NE(rtEventRecordWithFlag(event, stream, RT_EVENT_RECORD_EXTERNAL), RT_ERROR_NONE);
+    EXPECT_NE(rtStreamWaitEventWithFlag(stream, event, 0U, RT_EVENT_WAIT_EXTERNAL), RT_ERROR_NONE);
+    ExpectDestroy(stream, event);
+}
+
+TEST_F(RtApiTest, capture_external_refresh_table_mixed_layout)
+{
+    MOCKER(CheckCaptureModelSupportSoftwareSq).stubs().will(returnValue(RT_ERROR_NONE));
+    rtStream_t stream = nullptr;
+    rtEvent_t event1 = nullptr;
+    rtEvent_t event2 = nullptr;
+    rtEvent_t event3 = nullptr, event4 = nullptr;
+    rtModel_t captureMdlHandle = nullptr;
+    EXPECT_EQ(rtStreamCreate(&stream, 0), RT_ERROR_NONE);
+    EXPECT_EQ(rtEventCreateExWithFlag(&event1, RT_EVENT_DDSYNC_NS), RT_ERROR_NONE);
+    EXPECT_EQ(rtEventCreateExWithFlag(&event2, RT_EVENT_DDSYNC_NS), RT_ERROR_NONE);
+    EXPECT_EQ(rtEventCreateExWithFlag(&event3, RT_EVENT_DDSYNC_NS), RT_ERROR_NONE);
+    EXPECT_EQ(rtEventCreateExWithFlag(&event4, RT_EVENT_DDSYNC_NS), RT_ERROR_NONE);
+    ASSERT_EQ(rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL), RT_ERROR_NONE);
+    ASSERT_EQ(rtStreamGetCaptureInfo(stream, nullptr, &captureMdlHandle), RT_ERROR_NONE);
+
+    CaptureModel* model = GetCaptureModel(captureMdlHandle);
+    ASSERT_NE(model, nullptr);
+
+    ASSERT_EQ(rtEventRecordWithFlag(event1, stream, RT_EVENT_RECORD_EXTERNAL), RT_ERROR_NONE);
+    ASSERT_EQ(rtEventRecordWithFlag(event2, stream, RT_EVENT_RECORD_EXTERNAL), RT_ERROR_NONE);
+    ASSERT_EQ(rtStreamWaitEventWithFlag(stream, event3, 0U, RT_EVENT_WAIT_EXTERNAL), RT_ERROR_NONE);
+    ASSERT_EQ(rtEventRecordWithFlag(event4, stream, RT_EVENT_RECORD_DEFAULT), RT_ERROR_NONE);
+    ASSERT_EQ(rtStreamWaitEventWithFlag(stream, event4, 0U, RT_EVENT_WAIT_DEFAULT), RT_ERROR_NONE);
+    Event* recordEvent = rt_ut::UnwrapOrNull<Event>(event1);
+    Event* waitEvent = rt_ut::UnwrapOrNull<Event>(event3);
+    ASSERT_NE(recordEvent, nullptr);
+    ASSERT_NE(waitEvent, nullptr);
+    EXPECT_EQ(model->CheckExternalEventConstraints(recordEvent, true), RT_ERROR_INVALID_VALUE);
+    EXPECT_EQ(model->CheckExternalEventConstraints(waitEvent, false), RT_ERROR_INVALID_VALUE);
+    EXPECT_EQ(recordEvent->GetRecordFlag(), RT_EVENT_RECORD_EXTERNAL);
+    EXPECT_EQ(waitEvent->GetWaitFlag(), RT_EVENT_WAIT_EXTERNAL);
+
+    rtModel_t modelHandle = nullptr;
+    EXPECT_EQ(rtStreamEndCapture(stream, &modelHandle), RT_ERROR_NONE);
+    const uint64_t recordEntrySize = GetExternalRecordRefreshEntrySize();
+    EXPECT_EQ(model->externalEventRefreshLayout_.recordOffset, 0U);
+    EXPECT_EQ(model->externalEventRefreshLayout_.waitOffset, 2U * recordEntrySize);
+    EXPECT_EQ(model->externalEventRefreshLayout_.totalSize, 2U * recordEntrySize + EXTERNAL_WAIT_REFRESH_ENTRY_SIZE);
+    EXPECT_NE(model->externalEventRefreshHostTemplate_, nullptr);
+    EXPECT_EQ(rtModelDestroy(modelHandle), RT_ERROR_NONE);
+    EXPECT_EQ(rtEventDestroy(event4), RT_ERROR_NONE);
+    EXPECT_EQ(rtEventDestroy(event3), RT_ERROR_NONE);
+    EXPECT_EQ(rtEventDestroy(event2), RT_ERROR_NONE);
+    EXPECT_EQ(rtEventDestroy(event1), RT_ERROR_NONE);
+    EXPECT_EQ(rtStreamDestroy(stream), RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_03)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    uint32_t num;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelGetNodes(model, &num);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDebugDotPrint(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_06)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtModel_t newModel;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &newModel);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_08)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    void* args[] = {&error, NULL};
+    void* stubFunc;
+
+    MOCKER(memcpy_s).stubs().will(returnValue(NULL));
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtKernelLaunch(&function_, 1, (void*)args, sizeof(args), NULL, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_09)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    void* args[] = {&error, NULL};
+    void* stubFunc;
+
+    MOCKER(memcpy_s).stubs().will(returnValue(NULL));
+    MOCKER_CPP(&CondStreamActive).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtKernelLaunch(&function_, 1, (void*)args, sizeof(args), NULL, stream);
+
+    error = rtStreamEndCapture(stream, &model);
+
+    error = rtModelDestroy(model);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_15)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtStream_t exeStream;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreate(&exeStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelExecutorSet(model, 0x1);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(exeStream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_18)
+{
+    rtError_t error;
+    rtStream_t stream;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Device* device = new RawDevice(0);
+    Context* context = new Context(device, true);
+    MOCKER_CPP_VIRTUAL(context, &Context::StreamCreate).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    DELETE_O(context);
+    DELETE_O(device);
+}
+
+TEST_F(RtApiTest, capture_api_19)
+{
+    rtError_t error;
+    rtStream_t stream;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP(&Context::ModelBindStream).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+
+    error = rtStreamDestroy(stream);
+}
+
+TEST_F(RtApiTest, capture_api_20)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelCreate(&model, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtContext_t current = NULL;
+    error = rtCtxGetCurrent(&current);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Model* modelEx = rt_ut::UnwrapOrNull<Model>(model);
+    Stream* streamEx = rt_ut::UnwrapOrNull<Stream>(stream);
+    Context* ctx = static_cast<Context*>(current);
+    error = ctx->StreamAddToCaptureModelProc(streamEx, modelEx);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+
+    error = ctx->StreamAddToCaptureModelProc(streamEx, NULL);
+    EXPECT_EQ(error, RT_ERROR_MODEL_NULL);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_21)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtContext_t current = NULL;
+    error = rtCtxGetCurrent(&current);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Model* modelEx = rt_ut::UnwrapOrNull<Model>(model);
+    Stream* streamEx = rt_ut::UnwrapOrNull<Stream>(stream);
+    Context* ctx = static_cast<Context*>(current);
+    error = ctx->StreamAddToCaptureModelProc(streamEx, modelEx);
+    EXPECT_EQ(error, RT_ERROR_MODEL_CAPTURE_STATUS);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_22)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtStreamCaptureStatus status;
+    rtModel_t captureMdl;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, &status, &captureMdl);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(status, RT_STREAM_CAPTURE_STATUS_ACTIVE);
+
+    rtContext_t current = NULL;
+    error = rtCtxGetCurrent(&current);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Model* modelEx = rt_ut::UnwrapOrNull<Model>(captureMdl);
+    Stream* streamEx = rt_ut::UnwrapOrNull<Stream>(stream);
+    Context* ctx = static_cast<Context*>(current);
+    error = ctx->StreamAddToCaptureModelProc(streamEx, modelEx);
+    EXPECT_EQ(error, RT_ERROR_STREAM_CAPTURED);
+
+    ctx->FreeCascadeCaptureStream(NULL);
+    Stream* streamNew = NULL;
+    error = ctx->AllocCascadeCaptureStream(streamEx, NULL, &streamNew);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_23)
+{
+    rtError_t error;
+    rtStream_t stream;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_NE(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_24)
+{
+    rtError_t error;
+    rtStream_t stream;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP(&Context::ModelCreate).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_25)
+{
+    rtError_t error;
+    rtStream_t stream;
+
+    rtContext_t current = NULL;
+    error = rtCtxGetCurrent(&current);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Context* ctx = static_cast<Context*>(current);
+    Model* model;
+    error = ctx->ModelCreate(&model, RT_MODEL_CAPTURE_MODEL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = ctx->ModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Model* model2;
+    error = ctx->ModelCreate(&model2, RT_MODEL_NORMAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = ctx->ModelDestroy(model2);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_28)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    // 校验拦截接口
+    error = rtModelSetExtId(model, 0);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtModelBindStream(model, stream, 0);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtModelUnbindStream(model, stream);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtModelLoadComplete(model);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtEndGraph(model, stream);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtModelExecutorSet(model, 0);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtModelBindQueue(model, 0, RT_MODEL_INPUT_QUEUE);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtLabelCreateV2(&model, model);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtLabelCreateExV2(&model, model, stream);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_29)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, nullptr, nullptr);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_30)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtStreamCaptureStatus status;
+    rtModel_t captureMdl;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, &status, &captureMdl);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(status, RT_STREAM_CAPTURE_STATUS_ACTIVE);
+
+    error = rtModelDebugDotPrint(captureMdl);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_31)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtStreamCaptureStatus status;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStream_t addStream;
+    error = rtStreamCreate(&addStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, &status, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamAddToModel(addStream, model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP(&Context::AddNotifyToAddedCaptureStream).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_32)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtStreamCaptureStatus status;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStream_t addStream;
+    error = rtStreamCreate(&addStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, &status, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP(&Context::StreamAddToCaptureModelProc).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+    error = rtStreamAddToModel(addStream, model);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, ACL_ERROR_RT_STREAM_CAPTURE_INVALIDATED);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_33)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtStreamCaptureStatus status;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStream_t addStream;
+    error = rtStreamCreate(&addStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, &status, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamAddToModel(addStream, model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP(&Context::SetNotifyForExeModel).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_34)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtStreamCaptureStatus status;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStream_t addStream;
+    error = rtStreamCreate(&addStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, &status, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamAddToModel(addStream, model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP(&Context::CreateNotify).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+
+    error = rtStreamEndCapture(stream, &model);
+
+    error = rtModelDestroy(model);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_37)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtModel_t captureMdl;
+    rtCallback_t stub_func = (rtCallback_t)0x12345;
+
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtSubscribeReport(1, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP_VIRTUAL(rtInstance, &Runtime::SubscribeReport).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+
+    error = rtsCallbackLaunch(stub_func, nullptr, stream, true);
+    EXPECT_NE(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtUnSubscribeReport(1, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_38)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtModel_t captureMdl;
+    rtCallback_t stub_func = (rtCallback_t)0x12345;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtSubscribeReport(1, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsCallbackLaunch(stub_func, nullptr, stream, true);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsCallbackLaunch(stub_func, nullptr, stream, true);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtUnSubscribeReport(1, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_39)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtModel_t captureMdl;
+    rtCallback_t stub_func = (rtCallback_t)0x12345;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtSubscribeReport(1, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsCallbackLaunch(stub_func, nullptr, stream, false);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsCallbackLaunch(stub_func, nullptr, stream, false);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtUnSubscribeReport(1, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_40)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtModel_t captureMdl;
+    rtCallback_t stub_func = (rtCallback_t)0x12345;
+
+    MOCKER_CPP(&Model::LoadCompleteByStreamPostp).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsLaunchHostFunc(stream, stub_func, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_mutil_thread)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtStreamCaptureStatus status;
+    rtModel_t captureMdl;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_GLOBAL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, &status, &captureMdl);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(status, RT_STREAM_CAPTURE_STATUS_ACTIVE);
+
+    Stream* s = rt_ut::UnwrapOrNull<Stream>(stream);
+    s->SetBeginCaptureThreadId(0);
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, ACL_ERROR_RT_STREAM_CAPTURE_WRONG_THREAD);
+
+    error = rtModelDestroy(captureMdl);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, capture_api_mutil_thread_2)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtStreamCaptureStatus status;
+    rtModel_t captureMdl;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamBeginCapture(stream, RT_STREAM_CAPTURE_MODE_RELAXED);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, &status, &captureMdl);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(status, RT_STREAM_CAPTURE_STATUS_ACTIVE);
+
+    Stream* s = rt_ut::UnwrapOrNull<Stream>(stream);
+    s->SetBeginCaptureThreadId(0);
+    error = rtStreamEndCapture(stream, &model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamGetCaptureInfo(stream, &status, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(status, RT_STREAM_CAPTURE_STATUS_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+drvError_t halMemHostGetDevPointer_not_support_stub(void* srcPtr, uint32_t devid, void** dstPtr)
+{
+    UNUSED(srcPtr);
+    UNUSED(devid);
+    UNUSED(dstPtr);
+    return DRV_ERROR_NOT_SUPPORT;
+}
+
+void MockHostGetDevPointerFeatureNotSupport()
+{
+    Driver* driver = Runtime::Instance()->CurrentContext()->Device_()->Driver_();
+    MOCKER_CPP_VIRTUAL(driver, &Driver::HostGetDevPointer).stubs().will(returnValue(RT_ERROR_FEATURE_NOT_SUPPORT));
+}
+
+static void MockDriverIsSupportPinRegister(bool value)
+{
+    Device* device = Runtime::Instance()->CurrentContext()->Device_();
+    MOCKER_CPP_VIRTUAL(device, &Device::IsSupportPinRegister).stubs().will(returnValue(value));
+}
+
+TEST_F(RtApiTest, host_register_pinned)
+{
+    rtError_t error;
+    auto ptr = std::make_unique<uint32_t>();
+    uintptr_t value = 0x123U;
+    void** devPtr = (void**)&value;
+
+    MockHostGetDevPointerFeatureNotSupport();
+    MockDriverIsSupportPinRegister(false);
+
+    error = rtHostRegisterV2(ptr.get(), sizeof(uint32_t), RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    error = rtHostGetDevicePointer(ptr.get(), devPtr, 0U);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+    EXPECT_EQ(*devPtr, nullptr);
+
+    error = rtHostRegisterV2(
+        RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 1U), sizeof(uint32_t), RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_ERROR_HOST_MEMORY_ALREADY_REGISTERED);
+
+    error = rtHostRegisterV2(
+        RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 2U), sizeof(uint32_t), RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_ERROR_HOST_MEMORY_ALREADY_REGISTERED);
+
+    error = rtHostRegisterV2(
+        RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 3U), sizeof(uint32_t), RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_ERROR_HOST_MEMORY_ALREADY_REGISTERED);
+
+    error = rtHostRegisterV2(
+        RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 4U), sizeof(uint32_t), RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_EQ(*devPtr, nullptr);
+
+    error = rtsHostUnregister(ptr.get());
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    error = rtsHostUnregister(RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 4U));
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+}
+
+drvError_t halHostRegister_stub(void* hostPtr, UINT64 size, UINT32 flag, UINT32 devid, void** devPtr)
+{
+    *devPtr = hostPtr;
+    return DRV_ERROR_NONE;
+}
+
+static UINT32 g_halHostRegisterFlag = 0U;
+drvError_t halHostRegister_flag_stub(void* hostPtr, UINT64 size, UINT32 flag, UINT32 devid, void** devPtr)
+{
+    g_halHostRegisterFlag = flag;
+    *devPtr = hostPtr;
+    return DRV_ERROR_NONE;
+}
+
+TEST_F(RtApiTest, host_register_pinned_mapped)
+{
+    rtError_t error;
+    auto ptr = std::make_unique<uint32_t>();
+    uintptr_t value = 0x123U;
+    void** devPtr = (void**)&value;
+
+    MOCKER(&halHostRegister).stubs().will(invoke(halHostRegister_stub));
+    MockHostGetDevPointerFeatureNotSupport();
+    MockDriverIsSupportPinRegister(false);
+
+    error = rtHostRegisterV2(ptr.get(), sizeof(uint32_t), RT_MEM_HOST_REGISTER_MAPPED | RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    error = rtHostGetDevicePointer(ptr.get(), devPtr, 0U);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_EQ(*devPtr, ptr.get());
+
+    error = rtHostRegisterV2(
+        RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 1U), sizeof(uint32_t), RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_ERROR_HOST_MEMORY_ALREADY_REGISTERED);
+
+    error = rtHostRegisterV2(
+        RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 2U), sizeof(uint32_t), RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_ERROR_HOST_MEMORY_ALREADY_REGISTERED);
+
+    error = rtHostRegisterV2(
+        RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 3U), sizeof(uint32_t), RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_ERROR_HOST_MEMORY_ALREADY_REGISTERED);
+
+    error = rtHostRegisterV2(
+        RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 4U), sizeof(uint32_t), RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    error = rtHostGetDevicePointer(RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 4U), devPtr, 0U);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+    EXPECT_EQ(*devPtr, nullptr);
+
+    error = rtHostGetDevicePointer(RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 5U), devPtr, 1U);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+    EXPECT_EQ(*devPtr, nullptr);
+
+    error = rtsHostUnregister(ptr.get());
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    error = rtsHostUnregister(RtValueToPtr<void*>(RtPtrToValue(ptr.get()) + 4U));
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    auto ptr2 = std::make_unique<uint32_t>();
+    uintptr_t value2 = 0x123U;
+    void** devPtr2 = (void**)&value2;
+
+    error = rtsHostRegister(ptr2.get(), sizeof(uint32_t), RT_HOST_REGISTER_MAPPED, devPtr2);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    error = rtsHostUnregister(ptr2.get());
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+}
+
+TEST_F(RtApiTest, host_get_device_pointer_hal_not_support)
+{
+    rtError_t error;
+    auto ptr = std::make_unique<uint32_t>();
+    uintptr_t value = 0x123U;
+    void** devPtr = (void**)&value;
+
+    MockDriverIsSupportPinRegister(false);
+    MOCKER(&halHostRegister).stubs().will(invoke(halHostRegister_stub));
+    MOCKER(&halMemHostGetDevPointer).stubs().will(invoke(halMemHostGetDevPointer_not_support_stub));
+
+    error = rtHostRegisterV2(ptr.get(), sizeof(uint32_t), RT_MEM_HOST_REGISTER_MAPPED);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    error = rtHostGetDevicePointer(ptr.get(), devPtr, 0U);
+    EXPECT_EQ(error, ACL_ERROR_RT_FEATURE_NOT_SUPPORT);
+
+    error = rtsHostUnregister(ptr.get());
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+}
+
+TEST_F(RtApiTest, host_register_atomic)
+{
+    rtError_t error;
+    auto ptr = std::make_unique<uint32_t>();
+    uintptr_t value = 0x123U;
+    void** devPtr = (void**)&value;
+
+    MockDriverIsSupportPinRegister(false);
+    MOCKER(&halHostRegister).stubs().will(invoke(halHostRegister_stub));
+    MockHostGetDevPointerFeatureNotSupport();
+
+    error = rtHostRegisterV2(ptr.get(), sizeof(uint32_t), RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    error = rtHostRegisterV2(ptr.get(), sizeof(uint32_t), RT_MEM_HOST_REGISTER_MAPPED | RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_ERROR_HOST_MEMORY_ALREADY_REGISTERED);
+    error = rtHostGetDevicePointer(ptr.get(), devPtr, 0U);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+    EXPECT_EQ(*devPtr, nullptr);
+    error = rtsHostUnregister(ptr.get());
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+}
+
+TEST_F(RtApiTest, host_register_iomemory_readonly)
+{
+    rtError_t error;
+    uintptr_t value = 0x123U;
+
+    MockDriverIsSupportPinRegister(false);
+    MOCKER(&halHostRegister).stubs().will(invoke(halHostRegister_flag_stub));
+    MockHostGetDevPointerFeatureNotSupport();
+
+    auto readOnlyPtr = std::make_unique<uint32_t>();
+    void** readOnlyDevPtr = reinterpret_cast<void**>(&value);
+    g_halHostRegisterFlag = 0U;
+    error = rtHostRegisterV2(readOnlyPtr.get(), sizeof(uint32_t), RT_MEM_HOST_REGISTER_READONLY);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_NE((g_halHostRegisterFlag & MEM_REGISTER_READ_ONLY), 0U);
+    error = rtHostGetDevicePointer(readOnlyPtr.get(), readOnlyDevPtr, 0U);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_EQ(*readOnlyDevPtr, readOnlyPtr.get());
+    error = rtsHostUnregister(readOnlyPtr.get());
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    auto ioPtr = std::make_unique<uint32_t>();
+    void** ioDevPtr = reinterpret_cast<void**>(&value);
+    g_halHostRegisterFlag = 0U;
+    error = rtHostRegisterV2(ioPtr.get(), sizeof(uint32_t), RT_MEM_HOST_REGISTER_IOMEMORY);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_EQ(g_halHostRegisterFlag, static_cast<UINT32>(HOST_IO_MAP_DEV));
+    error = rtHostGetDevicePointer(ioPtr.get(), ioDevPtr, 0U);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_EQ(*ioDevPtr, ioPtr.get());
+    error = rtsHostUnregister(ioPtr.get());
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    auto ioReadOnlyPtr = std::make_unique<uint32_t>();
+    void** ioReadOnlyDevPtr = reinterpret_cast<void**>(&value);
+    g_halHostRegisterFlag = 0U;
+    error = rtHostRegisterV2(
+        ioReadOnlyPtr.get(), sizeof(uint32_t), RT_MEM_HOST_REGISTER_IOMEMORY | RT_MEM_HOST_REGISTER_READONLY);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_EQ(g_halHostRegisterFlag, static_cast<UINT32>(HOST_IO_MAP_DEV) | MEM_REGISTER_READ_ONLY);
+    error = rtHostGetDevicePointer(ioReadOnlyPtr.get(), ioReadOnlyDevPtr, 0U);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+    EXPECT_EQ(*ioReadOnlyDevPtr, ioReadOnlyPtr.get());
+    error = rtsHostUnregister(ioReadOnlyPtr.get());
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+}
+
+TEST_F(RtApiTest, pin_memory_attribute)
+{
+    rtError_t error;
+    auto ptr = std::make_unique<uint32_t>();
+    rtPointerAttributes_t attributes;
+
+    MockDriverIsSupportPinRegister(false);
+    error = rtHostRegisterV2(ptr.get(), sizeof(uint32_t), RT_MEM_HOST_REGISTER_PINNED);
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+
+    MOCKER(drvMemGetAttribute).stubs().will(invoke(drvMemGetAttribute_7));
+    error = rtPointerGetAttributes(&attributes, ptr.get());
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(attributes.locationType, RT_MEMORY_LOC_HOST);
+
+    error = rtsHostUnregister(ptr.get());
+    EXPECT_EQ(error, ACL_RT_SUCCESS);
+}
+
+bool g_modelDestroyCallBack = false;
+static void rtModelDestroyCallBackUt(void* args)
+{
+    std::cout << "model destroy call back" << std::endl;
+    g_modelDestroyCallBack = true;
+}
+
+TEST_F(RtApiTest, ModelDestroyRegisterCallback_test)
+{
+    rtModel_t model;
+    rtModelCreate(&model, 0);
+    char args[] = "0x100";
+    rtError_t ret = rtModelDestroyRegisterCallback(model, rtModelDestroyCallBackUt, args);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    ret = rtModelDestroyUnregisterCallback(model, rtModelDestroyCallBackUt);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    ret = rtModelDestroyRegisterCallback(model, nullptr, nullptr);
+    EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
+
+    ret = rtModelDestroyRegisterCallback(model, rtModelDestroyCallBackUt, args);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    ret = rtModelDestroyRegisterCallback(model, rtModelDestroyCallBackUt, args);
+    EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
+
+    ret = rtModelDestroy(model);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    EXPECT_EQ(g_modelDestroyCallBack, true);
+    g_modelDestroyCallBack = false;
+
+    rtModelCreate(&model, 0);
+    ret = rtModelDestroyUnregisterCallback(model, rtModelDestroyCallBackUt);
+    EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
+
+    ret = rtModelDestroyUnregisterCallback(model, nullptr);
+    EXPECT_EQ(ret, ACL_ERROR_RT_PARAM_INVALID);
+
+    ret = rtModelDestroy(model);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    EXPECT_EQ(g_modelDestroyCallBack, false);
+}
+
+TEST_F(RtApiTest, model_json_print_record_wait)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtModel_t model;
+    rtStream_t syncStream;
+    rtEvent_t event;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreateWithFlags(&syncStream, 0, RT_STREAM_FORBIDDEN_DEFAULT);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelCreate(&model, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelBindStream(model, stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtEventCreateWithFlag(&event, RT_EVENT_WITH_FLAG);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtEventRecord(event, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtsEventWait(stream, event, 1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtEndGraph(model, stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelLoadComplete(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    Stream* stream_var = rt_ut::UnwrapOrNull<Stream>(stream);
+
+    error = rtModelDebugJsonPrint(model, "test.json", 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    // synchronize execute
+    error = rtModelExecute(model, syncStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rt_ut::UnwrapOrNull<Model>(model)->UnbindStream(stream_var, false);
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtEventDestroy(event);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(syncStream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, model_json_print_stream_active)
+{
+    rtError_t error;
+    rtStream_t dstStream;
+    rtStream_t activeStream;
+    rtModel_t model;
+
+    error = rtModelCreate(&model, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreateWithFlags(&dstStream, 0, 0x1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreateWithFlags(&activeStream, 0, 0x1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelBindStream(model, dstStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelBindStream(model, activeStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamActive(activeStream, dstStream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDebugJsonPrint(model, "test.json", 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDebugJsonPrint(model, "test.json", 1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtModelDestroy(model);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(dstStream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamDestroy(activeStream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(RtApiTest, rtGetSocVersion_SocNameEmpty_MemcpyFail)
+{
+    rtError_t error;
+    char ver[64] = {0};
+
+    GlobalContainer::SetSocVersion("");
+    ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
+
+    MOCKER(memcpy_s).stubs().will(returnValue(1));
+    error = rtGetSocVersion(ver, sizeof(ver));
+    EXPECT_EQ(error, ACL_ERROR_RT_INTERNAL_ERROR);
+
+    GlobalContainer::SetSocVersion("Ascend910B1");
+    GlobalMockObject::verify();
+}
+
+TEST_F(RtApiTest, rtGetSocVersion_SocNameNotEmpty_MemcpyFail)
+{
+    rtError_t error;
+    char ver[64] = {0};
+
+    MOCKER(memcpy_s).stubs().will(returnValue(1));
+    error = rtGetSocVersion(ver, sizeof(ver));
+    EXPECT_EQ(error, ACL_ERROR_RT_INTERNAL_ERROR);
+
+    GlobalMockObject::verify();
+}
+
+TEST_F(RtApiTest, rtGetSocSpec_MemcpyFail)
+{
+    rtError_t error;
+    char val[64] = {0};
+
+    char socVersion[SOC_VERSION_LEN] = "Ascend910B1";
+    MOCKER_CPP(&rtGetSocVersion)
+        .stubs()
+        .with(outBoundP(socVersion, SOC_VERSION_LEN), mockcpp::any())
+        .will(returnValue(ACL_RT_SUCCESS));
+
+    MOCKER(memcpy_s).stubs().will(returnValue(1));
+    error = rtGetSocSpec("version", "NpuArch", val, sizeof(val));
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    GlobalMockObject::verify();
+}
+
+TEST_F(RtApiTest, rtsKernelArgsParaUpdate_MemcpyFail)
+{
+    rtError_t error;
+
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICPU);
+    Program* program = &stubProg;
+    Kernel* k1 = new Kernel("f1", 0ULL, program, RT_KERNEL_ATTR_TYPE_AICPU, 10);
+    k1->userParaNum_ = 2;
+    k1->systemParaNum_ = 2;
+    k1->isSupportOverFlow_ = true;
+    k1->isNeedSetFftsAddrInArg_ = true;
+
+    rtFuncHandle funcHandle = rt_ut::InitAndExportHandle<rtFuncHandle>(k1);
+    void* argsHandle;
+    error = rtsKernelArgsInit(funcHandle, &argsHandle);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_NE(argsHandle, nullptr);
+
+    RtArgsHandle* handle = rt_ut::UnwrapOrNull<RtArgsHandle>(argsHandle);
+    ASSERT_NE(handle, nullptr);
+    EXPECT_NE(handle->buffer, nullptr);
+
+    uint32_t param1 = 1002;
+    void* paramHandle = nullptr;
+    error = rtsKernelArgsAppend(argsHandle, &param1, sizeof(uint32_t), &paramHandle);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_NE(paramHandle, nullptr);
+
+    ParaDetail* pHandle = rt_ut::UnwrapOrNull<ParaDetail>(paramHandle);
+    ASSERT_NE(pHandle, nullptr);
+    EXPECT_EQ(pHandle->type, 0);
+    EXPECT_EQ(pHandle->paraSize, sizeof(uint32_t));
+
+    error = rtsKernelArgsFinalize(argsHandle);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    uint32_t updateData = 2001;
+    size_t updateSize = sizeof(uint32_t);
+
+    MOCKER(memcpy_s).stubs().will(returnValue(1));
+    error = rtsKernelArgsParaUpdate(argsHandle, paramHandle, &updateData, updateSize);
+    EXPECT_EQ(error, ACL_ERROR_RT_PARAM_INVALID);
+
+    rt_ut::ResetEmbeddedHandle(k1);
+    delete k1;
+}
+
+TEST_F(RtApiTest, rtConfigureCall_MemcpyFail)
+{
+    rtSmDesc_t desc;
+    rtError_t error;
+    rtStream_t stream = NULL;
+    desc.size = 128;
+
+    MOCKER(memcpy_s).stubs().will(returnValue(1));
+    error = rtConfigureCall(1, &desc, stream);
+    EXPECT_EQ(error, ACL_ERROR_RT_INTERNAL_ERROR);
+
+    GlobalMockObject::verify();
+}

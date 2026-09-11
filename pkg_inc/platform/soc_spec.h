@@ -12,9 +12,8 @@
 #define __SOC_SPEC_H__
 
 #include <cstdint>
-#include <string>
 
-
+// This file will be deprecated and should no longer be used.
 enum class NpuArch : uint32_t {
     DAV_1001 = 1001,
     DAV_1002 = 1002,

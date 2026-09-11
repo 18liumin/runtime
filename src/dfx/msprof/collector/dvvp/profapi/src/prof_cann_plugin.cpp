@@ -1,12 +1,12 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
- * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
 #include "prof_cann_plugin.h"
 #include <dlfcn.h>
 #include "prof_acl_plugin.h"
@@ -28,15 +28,22 @@ const std::string MSPROFILER_LIB_PATH = "libprofimpl.so";
 #endif
 const std::string PROFILER_SAMPLE_CONFIG_ENV = "PROFILER_SAMPLECONFIG";
 
-#define LOAD_MSPROF_API(api, hanle, func, name)             \
-    do {                                                    \
+struct ProfSetDevPara {
+    uint32_t chipId;
+    uint32_t deviceId;
+    bool isOpen;
+};
+
+#define LOAD_MSPROF_API(api, hanle, func, name)           \
+    do {                                                  \
         api = reinterpret_cast<func>(dlsym(hanle, name)); \
     } while (0)
 
 ProfCannPlugin::~ProfCannPlugin()
 {
-    if (msProfLibHandle_ != nullptr) {
-        dlclose(msProfLibHandle_);
+    void* handle = msProfLibHandle_.load(std::memory_order_acquire);
+    if (handle != nullptr) {
+        dlclose(handle);
     }
     ProfUnInitReportBuf();
 }
@@ -51,10 +58,19 @@ ProfCannPlugin::~ProfCannPlugin()
  */
 void ProfCannPlugin::ProfApiInit()
 {
-    if (msProfLibHandle_ == nullptr) {
-        msProfLibHandle_ = dlopen(MSPROFILER_LIB_PATH.c_str(), RTLD_LAZY | RTLD_NODELETE);
+    void* handle = msProfLibHandle_.load(std::memory_order_acquire);
+    if (handle == nullptr) {
+        void* loadedHandle = dlopen(MSPROFILER_LIB_PATH.c_str(), RTLD_LAZY | RTLD_NODELETE);
+        if (loadedHandle != nullptr) {
+            if (msProfLibHandle_.compare_exchange_strong(
+                    handle, loadedHandle, std::memory_order_acq_rel, std::memory_order_acquire)) {
+                handle = loadedHandle;
+            } else {
+                dlclose(loadedHandle);
+            }
+        }
     }
-    if (msProfLibHandle_ != nullptr) {
+    if (handle != nullptr) {
         PthreadOnce(&profApiLoadFlag_, []() -> void { ProfCannPlugin::instance()->LoadProfApi(); });
     } else {
         MSPROF_LOGW("Unable to open MSPROF API from %s, return code: %s\n", MSPROFILER_LIB_PATH.c_str(), dlerror());
@@ -64,64 +80,196 @@ void ProfCannPlugin::ProfApiInit()
 
 void ProfCannPlugin::LoadProfApi()
 {
+    LoadProfCoreApi();
+    LoadProfReportApi();
+    LoadProfBufferApi();
+    LoadProfRawDataApi();
+    LoadProfExtendedApi();
+    LoadProfInfo();
+    LoadProftxApiInit(msProfLibHandle_);
+    ProfAclPlugin::instance()->ProfAclApiInit(msProfLibHandle_);
+}
+
+void ProfCannPlugin::LoadProfCoreApi()
+{
     LOAD_MSPROF_API(profInit_, msProfLibHandle_, ProfInitFunc, "MsprofInit");
     LOAD_MSPROF_API(profStart_, msProfLibHandle_, ProfStartFunc, "MsprofStart");
     LOAD_MSPROF_API(profStop_, msProfLibHandle_, ProfStopFunc, "MsprofStop");
     LOAD_MSPROF_API(profSetConfig_, msProfLibHandle_, ProfSetConfigFunc, "MsprofSetConfig");
     LOAD_MSPROF_API(profRegisterCallback_, msProfLibHandle_, ProfRegisterCallbackFunc, "MsprofRegisterCallback");
     LOAD_MSPROF_API(profReportData_, msProfLibHandle_, ProfReportDataFunc, "MsprofReportData");
-    LOAD_MSPROF_API(profReportRegTypeInfo_, msProfLibHandle_, ProfReportRegTypeInfoFunc, "ProfImplReportRegTypeInfo");
-    LOAD_MSPROF_API(profReportRegDataFormat_, msProfLibHandle_, ProfReportRegDataFormatFunc, "ProfImplReportDataFormat");
-    LOAD_MSPROF_API(profReportGetHashId_, msProfLibHandle_, ProfReportGetHashIdFunc, "ProfImplReportGetHashId");
+    LOAD_MSPROF_API(profGetPath_, msProfLibHandle_, ProfGetPathFunc, "ProfImplGetOutputPath");
     LOAD_MSPROF_API(profSetDeviceId_, msProfLibHandle_, ProfSetDeviceIdFunc, "MsprofSetDeviceIdByGeModelIdx");
     LOAD_MSPROF_API(profNotifySetDevice_, msProfLibHandle_, ProfNotifySetDeviceFunc, "MsprofNotifySetDevice");
     LOAD_MSPROF_API(profFinalize_, msProfLibHandle_, ProfFinalizeFunc, "MsprofFinalize");
     LOAD_MSPROF_API(profUnSetDeviceId_, msProfLibHandle_, ProfSetDeviceIdFunc, "MsprofUnsetDeviceIdByGeModelIdx");
     LOAD_MSPROF_API(profHostFreqIsEnable_, msProfLibHandle_, ProfHostFreqIsEnableFunc, "ProfImplHostFreqIsEnable");
     LOAD_MSPROF_API(profGetImplInfo_, msProfLibHandle_, ProfGetImplInfoFunc, "ProfImplGetImplInfo");
+}
+
+void ProfCannPlugin::LoadProfReportApi()
+{
+    LOAD_MSPROF_API(profReportRegTypeInfo_, msProfLibHandle_, ProfReportRegTypeInfoFunc, "ProfImplReportRegTypeInfo");
+    LOAD_MSPROF_API(
+        profReportRegDataFormat_, msProfLibHandle_, ProfReportRegDataFormatFunc, "ProfImplReportDataFormat");
+    LOAD_MSPROF_API(profReportGetHashId_, msProfLibHandle_, ProfReportGetHashIdFunc, "ProfImplReportGetHashId");
+    LOAD_MSPROF_API(profReportGetHashInfo_, msProfLibHandle_, ProfReportGetHashInfoFunc, "ProfImplReportGetHashInfo");
+}
+
+void ProfCannPlugin::LoadProfBufferApi()
+{
     LOAD_MSPROF_API(profApiBufPop_, msProfLibHandle_, ProfApiBufPopFunc, "ProfImplSetApiBufPop");
     LOAD_MSPROF_API(profCompactBufPop_, msProfLibHandle_, ProfCompactBufPopFunc, "ProfImplSetCompactBufPop");
     LOAD_MSPROF_API(profAdditionalBufPop_, msProfLibHandle_, ProfAdditionalBufPopFunc, "ProfImplSetAdditionalBufPop");
     LOAD_MSPROF_API(profReportBufEmpty_, msProfLibHandle_, ProfReportBufEmptyFunc, "ProfImplIfReportBufEmpty");
-    LOAD_MSPROF_API(profAdditionalBufPush_, msProfLibHandle_, ProfAdditionalBufPushFunc, "ProfImplSetAdditionalBufPush");
+    LOAD_MSPROF_API(
+        profAdditionalBufPush_, msProfLibHandle_, ProfAdditionalBufPushFunc, "ProfImplSetAdditionalBufPush");
     LOAD_MSPROF_API(profMarkEx_, msProfLibHandle_, ProfMarkExFunc, "ProfImplSetMarkEx");
     LOAD_MSPROF_API(profBatchAddBufPop_, msProfLibHandle_, ProfBatchAddBufPopFunc, "ProfImplSetBatchAddBufPop");
-    LOAD_MSPROF_API(profBatchAddBufIndexShift_, msProfLibHandle_, ProfBatchAddBufIndexShiftFunc,
+    LOAD_MSPROF_API(
+        profBatchAddBufIndexShift_, msProfLibHandle_, ProfBatchAddBufIndexShiftFunc,
         "ProfImplSetBatchAddBufIndexShift");
     LOAD_MSPROF_API(profGetFeatureIsOn_, msProfLibHandle_, ProfGetFeatureIsOnFunc, "ProfImplGetFeatureIsOn");
-    LOAD_MSPROF_API(profImplInitMstxInjection_, msProfLibHandle_, ProfImplInitMstxInjectionFunc,
-        "ProfImplInitMstxInjection");
-    LOAD_MSPROF_API(profSubscribeRawData_, msProfLibHandle_, ProfSubscribeRawDataFunc, "ProfImplSubscribeRawData");
-    LOAD_MSPROF_API(profUnSubscribeRawData_, msProfLibHandle_, ProfUnSubscribeRawDataFunc, "ProfImplUnSubscribeRawData");
+}
 
-    LOAD_MSPROF_API(profVarAddBlockBufPop_, msProfLibHandle_, ProfVarAddBlockBufPopFunc, "ProfImplSetVarAddBlockBufBatchPop");
-    LOAD_MSPROF_API(profVarAddBlockBufIndexShift_, msProfLibHandle_, ProfVarAddBufIndexShiftFunc, "ProfImplSetVarAddBlockBufIndexShift");
-    LoadProfInfo();
-    LoadProftxApiInit(msProfLibHandle_);
-    ProfAclPlugin::instance()->ProfAclApiInit(msProfLibHandle_);
+void ProfCannPlugin::LoadProfRawDataApi()
+{
+    LOAD_MSPROF_API(
+        profImplInitMstxInjection_, msProfLibHandle_, ProfImplInitMstxInjectionFunc, "ProfImplInitMstxInjection");
+    LOAD_MSPROF_API(profSubscribeRawData_, msProfLibHandle_, ProfSubscribeRawDataFunc, "ProfImplSubscribeRawData");
+    LOAD_MSPROF_API(
+        profUnSubscribeRawData_, msProfLibHandle_, ProfUnSubscribeRawDataFunc, "ProfImplUnSubscribeRawData");
+    LOAD_MSPROF_API(profSetInjectionFunc_, msProfLibHandle_, ProfSetInjectionFuncFunc, "MsprofSetInjectionFunc");
+    LOAD_MSPROF_API(
+        profInjectionInitialize_, msProfLibHandle_, ProfInjectionInitializeFunc, "MsprofInjectionInitialize");
+    LOAD_MSPROF_API(profGetInjectionFunc_, msProfLibHandle_, ProfGetInjectionFuncFunc, "MsprofGetInjectionFunc");
+    LOAD_MSPROF_API(
+        profRegisterDataCallback_, msProfLibHandle_, ProfRegisterDataCallbackFunc, "MsprofRegisterDataCallback");
+}
+
+void ProfCannPlugin::LoadProfExtendedApi()
+{
+    LOAD_MSPROF_API(
+        profVarAddBlockBufPop_, msProfLibHandle_, ProfVarAddBlockBufPopFunc, "ProfImplSetVarAddBlockBufBatchPop");
+    LOAD_MSPROF_API(
+        profVarAddBlockBufIndexShift_, msProfLibHandle_, ProfVarAddBufIndexShiftFunc,
+        "ProfImplSetVarAddBlockBufIndexShift");
+    LOAD_MSPROF_API(profSetProfCommand_, msProfLibHandle_, ProfSetCommandFunc, "ProfImplSetProfCommand");
+    LOAD_MSPROF_API(profCheckOpSwitch_, msProfLibHandle_, ProfCheckOpSwitchFunc, "ProfCheckOpSwitch");
 }
 
 void ProfCannPlugin::LoadProfInfo()
 {
     if (profRegisterCallback_ != nullptr) {
-        for (const auto &model : ProfPlugin::moduleCallbacks_) {
-            for (const auto &handle : model.second) {
+        for (const auto& model : ProfPlugin::moduleCallbacks_) {
+            for (const auto& handle : model.second) {
                 profRegisterCallback_(model.first, handle);
             }
         }
     }
 
     if (profSetDeviceId_ != nullptr) {
-        for (const auto &corres : deviceIdMaps_) {
+        for (const auto& corres : deviceIdMaps_) {
             profSetDeviceId_(corres.first, corres.second);
         }
     }
 
     if (profNotifySetDevice_ != nullptr) {
-        for (const auto &device : deviceStates_) {
+        for (const auto& device : deviceStates_) {
             profNotifySetDevice_(device.first & 0xFFFFFFFFULL, device.first >> 32ULL, device.second);
         }
     }
+}
+
+int32_t ProfCannPlugin::ProfSetProfCommand(VOID_PTR command, uint32_t len)
+{
+    ProfApiInit();
+    if (profSetProfCommand_ != nullptr) {
+        return profSetProfCommand_(command, len);
+    } else {
+        MSPROF_LOGW("MSPROF API Has Not Been Loaded!");
+    }
+    return PROFILING_FAILED;
+}
+
+void ProfCannPlugin::ProfNotifyCachedDevice()
+{
+    if (atlsSetDevice_ == nullptr) {
+        return;
+    }
+    std::map<uint64_t, bool> deviceStatesCopy;
+    {
+        const std::lock_guard<std::mutex> lock(cachedDeviceStateMutex_);
+        deviceStatesCopy = cachedDeviceStates_;
+    }
+    for (const auto& device : deviceStatesCopy) {
+        ProfSetDevPara para;
+        para.chipId = static_cast<uint32_t>(device.first & 0xFFFFFFFFU);
+        para.deviceId = static_cast<uint32_t>(device.first >> 32);
+        para.isOpen = device.second;
+        atlsSetDevice_(reinterpret_cast<VOID_PTR>(&para), sizeof(ProfSetDevPara));
+    }
+}
+
+int32_t ProfCannPlugin::RegisterProfileCallbackForAtls(int32_t callbackType, VOID_PTR callback)
+{
+    auto ret = PROFILING_SUCCESS;
+    switch (callbackType) {
+        case PROFILE_REPORT_API_C_CALLBACK:
+            atlsReportApi_ = reinterpret_cast<decltype(atlsReportApi_)>(callback);
+            break;
+        case PROFILE_REPORT_EVENT_C_CALLBACK:
+            atlsReportEvent_ = reinterpret_cast<decltype(atlsReportEvent_)>(callback);
+            break;
+        case PROFILE_REPORT_REG_TYPE_INFO_C_CALLBACK:
+            atlsReportRegTypeInfo_ = reinterpret_cast<decltype(atlsReportRegTypeInfo_)>(callback);
+            break;
+        case PROFILE_REPORT_REG_DATA_FORMAT_C_CALLBACK:
+            break;
+        case PROFILE_REPORT_GET_HASH_ID_C_CALLBACK:
+            atlsReportGetHashId_ = reinterpret_cast<decltype(atlsReportGetHashId_)>(callback);
+            break;
+        case PROFILE_HOST_FREQ_IS_ENABLE_C_CALLBACK:
+            atlsHostFreqIsEnable_ = reinterpret_cast<decltype(atlsHostFreqIsEnable_)>(callback);
+            break;
+        case PROFILE_DEVICE_STATE_C_CALLBACK:
+            atlsSetDevice_ = reinterpret_cast<decltype(atlsSetDevice_)>(callback);
+            ProfNotifyCachedDevice();
+            break;
+        default:
+            ret = PROFILING_FAILED;
+            break;
+    }
+    return ret;
+}
+
+int32_t ProfCannPlugin::RegisterProfileCallback(int32_t callbackType, VOID_PTR callback, uint32_t /* len */)
+{
+    MSPROF_EVENT("RegisterProfileCallback, callback type is %d", callbackType);
+    auto ret = PROFILING_SUCCESS;
+    switch (callbackType) {
+        case PROFILE_CTRL_CALLBACK:
+        case PROFILE_DEVICE_STATE_CALLBACK:
+        case PROFILE_REPORT_API_CALLBACK:
+        case PROFILE_REPORT_EVENT_CALLBACK:
+        case PROFILE_REPORT_REG_TYPE_INFO_CALLBACK:
+        case PROFILE_REPORT_REG_DATA_FORMAT_CALLBACK:
+        case PROFILE_REPORT_GET_HASH_ID_CALLBACK:
+        case PROFILE_HOST_FREQ_IS_ENABLE_CALLBACK:
+            MSPROF_LOGI("Register type %d for atls msprof just returns success", callbackType);
+            break;
+        case PROFILE_REPORT_COMPACT_CALLBACK:
+            atlsReportCompactInfo_ = reinterpret_cast<decltype(atlsReportCompactInfo_)>(callback);
+            break;
+        case PROFILE_REPORT_ADDITIONAL_CALLBACK:
+            atlsReportAdditionalInfo_ = reinterpret_cast<decltype(atlsReportAdditionalInfo_)>(callback);
+            break;
+        default:
+            ret = RegisterProfileCallbackForAtls(callbackType, callback);
+            break;
+    }
+
+    return ret;
 }
 
 /**
@@ -166,16 +314,13 @@ void ProfCannPlugin::ProfInitReportBuf(uint32_t type)
     // Compute suitable ring buffer
     size_t expectBuffer = ProfInitReportBufSize(type);
     if (expectBuffer == 0) {
-        MSPROF_LOGI("Report buffer do not need to be initialized.");
+        MSPROF_LOGI("Report buffer does not need to be initialized.");
         return;
     }
     // Init report buffer by dynamic expectBuffer
-    const size_t apiBufferSize =
-        (expectBuffer < API_RING_BUFF_CAPACITY) ? expectBuffer : API_RING_BUFF_CAPACITY;
-    const size_t compactBufferSize =
-        (expectBuffer < COM_RING_BUFF_CAPACITY) ? expectBuffer : COM_RING_BUFF_CAPACITY;
-    const size_t additionalBufferSize =
-        (expectBuffer < ADD_RING_BUFF_CAPACITY) ? expectBuffer : ADD_RING_BUFF_CAPACITY;
+    const size_t apiBufferSize = (expectBuffer < API_RING_BUFF_CAPACITY) ? expectBuffer : API_RING_BUFF_CAPACITY;
+    const size_t compactBufferSize = (expectBuffer < COM_RING_BUFF_CAPACITY) ? expectBuffer : COM_RING_BUFF_CAPACITY;
+    const size_t additionalBufferSize = (expectBuffer < ADD_RING_BUFF_CAPACITY) ? expectBuffer : ADD_RING_BUFF_CAPACITY;
     apiBuffer_.Init(apiBufferSize, "api_event");
     compactBuffer_.Init(compactBufferSize, "compact");
     additionalBuffer_.Init(additionalBufferSize, "additional");
@@ -223,10 +368,9 @@ void ProfCannPlugin::ProfTxInit()
     if (profImplInitMstxInjection_ != nullptr) {
         profImplInitMstxInjection_(ProfRegisterMstxFunc);
     }
-    ProfEnableMstxFunc(PROF_MODULE_MSPROF);
 }
 
-int32_t ProfCannPlugin::ProfInit(uint32_t type, void *data, uint32_t dataLen)
+int32_t ProfCannPlugin::ProfInit(uint32_t type, void* data, uint32_t dataLen)
 {
     std::unique_lock<std::mutex> envLock(envMutex_);
     ProfApiInit();
@@ -239,12 +383,12 @@ int32_t ProfCannPlugin::ProfInit(uint32_t type, void *data, uint32_t dataLen)
     if (profInit_ != nullptr) {
         return profInit_(type, data, dataLen);
     } else {
-        MSPROF_LOGW("MSPROF API Has Not Been Load!");
+        MSPROF_LOGW("MSPROF API Has Not Been Loaded!");
     }
     return 0;
 }
 
-int32_t ProfCannPlugin::ProfStart(uint32_t dataType, const void *data, uint32_t length)
+int32_t ProfCannPlugin::ProfStart(uint32_t dataType, const void* data, uint32_t length)
 {
     std::unique_lock<std::mutex> envLock(envMutex_);
     ProfApiInit();
@@ -253,12 +397,12 @@ int32_t ProfCannPlugin::ProfStart(uint32_t dataType, const void *data, uint32_t 
     if (profStart_ != nullptr) {
         return profStart_(dataType, data, length);
     } else {
-        MSPROF_LOGW("MSPROF API Has Not Been Load!");
+        MSPROF_LOGW("MSPROF API Has Not Been Loaded!");
     }
     return 0;
 }
- 
-int32_t ProfCannPlugin::ProfStop(uint32_t dataType, const void *data, uint32_t length)
+
+int32_t ProfCannPlugin::ProfStop(uint32_t dataType, const void* data, uint32_t length)
 {
     if (profStop_ != nullptr) {
         int32_t ret = profStop_(dataType, data, length);
@@ -268,7 +412,7 @@ int32_t ProfCannPlugin::ProfStop(uint32_t dataType, const void *data, uint32_t l
     return 0;
 }
 
-int32_t ProfCannPlugin::ProfSetConfig(uint32_t configType, const char *config, size_t configLength)
+int32_t ProfCannPlugin::ProfSetConfig(uint32_t configType, const char* config, size_t configLength)
 {
     if (profSetConfig_ != nullptr) {
         return profSetConfig_(configType, config, configLength);
@@ -283,10 +427,10 @@ int32_t ProfCannPlugin::ProfRegisterCallback(uint32_t moduleId, ProfCommandHandl
         return -1;
     }
     if (profRegisterCallback_ != nullptr) {
-        MSPROF_LOGI("Register module[%u] callback with handle.", moduleId);
+        MSPROF_LOGI("Register module[%s(%u)] callback with handle.", ProfGetModuleName(moduleId), moduleId);
         profRegisterCallback_(moduleId, handle);
     } else {
-        MSPROF_LOGI("Register module[%u] callback.", moduleId);
+        MSPROF_LOGI("Register module[%s(%u)] callback.", ProfGetModuleName(moduleId), moduleId);
         const std::unique_lock<std::mutex> lock(ProfPlugin::callbackMutex_);
         auto it = ProfPlugin::moduleCallbacks_.find(moduleId);
         if (it != ProfPlugin::moduleCallbacks_.cend()) {
@@ -298,7 +442,7 @@ int32_t ProfCannPlugin::ProfRegisterCallback(uint32_t moduleId, ProfCommandHandl
     return 0;
 }
 
-int32_t ProfCannPlugin::ProfReportData(uint32_t moduleId, uint32_t type, void *data, uint32_t len)
+int32_t ProfCannPlugin::ProfReportData(uint32_t moduleId, uint32_t type, void* data, uint32_t len)
 {
     if (profReportData_ != nullptr) {
         return profReportData_(moduleId, type, data, len);
@@ -316,6 +460,9 @@ int32_t ProfCannPlugin::ProfReportData(uint32_t moduleId, uint32_t type, void *d
  */
 int32_t ProfCannPlugin::ProfReportApi(uint32_t agingFlag, const MsprofApi* api)
 {
+    if (atlsReportApi_ != nullptr) {
+        return atlsReportApi_(agingFlag, api);
+    }
     return apiBuffer_.TryPush(agingFlag, *api);
 }
 
@@ -329,7 +476,10 @@ int32_t ProfCannPlugin::ProfReportApi(uint32_t agingFlag, const MsprofApi* api)
  */
 int32_t ProfCannPlugin::ProfReportEvent(uint32_t agingFlag, const MsprofEvent* event)
 {
-    return apiBuffer_.TryPush(agingFlag, *reinterpret_cast<const MsprofApi *>(event));
+    if (atlsReportEvent_ != nullptr) {
+        return atlsReportEvent_(agingFlag, event);
+    }
+    return apiBuffer_.TryPush(agingFlag, *reinterpret_cast<const MsprofApi*>(event));
 }
 
 /**
@@ -340,9 +490,12 @@ int32_t ProfCannPlugin::ProfReportEvent(uint32_t agingFlag, const MsprofEvent* e
  * @return MSPROF_ERROR_UNINITIALIZE
            MSPROF_ERROR_NONE
  */
-int32_t ProfCannPlugin::ProfReportCompactInfo(uint32_t agingFlag, const VOID_PTR data, uint32_t /* len */)
+int32_t ProfCannPlugin::ProfReportCompactInfo(uint32_t agingFlag, const VOID_PTR data, uint32_t len)
 {
-    return compactBuffer_.TryPush(agingFlag, *reinterpret_cast<const MsprofCompactInfo *>(data));
+    if (atlsReportCompactInfo_ != nullptr) {
+        return atlsReportCompactInfo_(agingFlag, data, len);
+    }
+    return compactBuffer_.TryPush(agingFlag, *reinterpret_cast<const MsprofCompactInfo*>(data));
 }
 
 /**
@@ -355,19 +508,28 @@ int32_t ProfCannPlugin::ProfReportCompactInfo(uint32_t agingFlag, const VOID_PTR
  */
 int32_t ProfCannPlugin::ProfReportAdditionalInfo(uint32_t agingFlag, const VOID_PTR data, uint32_t length)
 {
+    if (atlsReportAdditionalInfo_ != nullptr) {
+        return atlsReportAdditionalInfo_(agingFlag, data, length);
+    }
     if (length > MAX_VARIABLE_DATA_LENGTH) {
         MSPROF_LOGE("Additional info length exceeds the maximum");
         return PROFILING_FAILED;
     }
     if (length > STANDARD_ADDITIONAL_INFO_LENGTH) {
-        char* info = reinterpret_cast<char *>(data);
+        char* info = reinterpret_cast<char*>(data);
         return variableAdditionalBuffer_.BatchPush(info, length);
     } else {
-        MsprofAdditionalInfo *info = static_cast<MsprofAdditionalInfo *>(data);
+        MsprofAdditionalInfo* info = static_cast<MsprofAdditionalInfo*>(data);
         if (info->level == MSPROF_REPORT_AICPU_LEVEL) {
             return batchAdditionalBuffer_.BatchPush(info, length);
         } else {
-            return additionalBuffer_.TryPush(agingFlag, *info);
+            MsprofAdditionalInfo tempInfo = {};
+            errno_t err = memcpy_s(&tempInfo, length, data, length);
+            if (err != EOK) {
+                MSPROF_LOGE("Memcpy failed in ProfReportAdditionalInfo, err=%d.", err);
+                return PROFILING_FAILED;
+            }
+            return additionalBuffer_.TryPush(agingFlag, tempInfo);
         }
     }
 }
@@ -380,11 +542,17 @@ int32_t ProfCannPlugin::ProfReportAdditionalInfo(uint32_t agingFlag, const VOID_
  */
 bool ProfCannPlugin::ProfIfReportBufEmpty()
 {
-    if (apiBuffer_.GetUsedSize() == 0 &&
-        compactBuffer_.GetUsedSize() == 0 &&
-        additionalBuffer_.GetUsedSize() == 0 &&
-        batchAdditionalBuffer_.GetUsedSize() == 0 &&
-        variableAdditionalBuffer_.GetUsedSize() == 0) {
+    static uint32_t cnt = 0;
+    int printFreq = 10;
+    if ((cnt++) % printFreq == 0) {
+        MSPROF_LOGD(
+            "apiBuffer_:%zu compactBuffer_:%zu additionalBuffer_:%zu batchAdditionalBuffer_:%zu \
+            variableAdditionalBuffer_:%zu",
+            apiBuffer_.GetUsedSize(), compactBuffer_.GetUsedSize(), additionalBuffer_.GetUsedSize(),
+            batchAdditionalBuffer_.GetUsedSize(), variableAdditionalBuffer_.GetUsedSize());
+    }
+    if (apiBuffer_.GetUsedSize() == 0 && compactBuffer_.GetUsedSize() == 0 && additionalBuffer_.GetUsedSize() == 0 &&
+        batchAdditionalBuffer_.GetUsedSize() == 0 && variableAdditionalBuffer_.GetUsedSize() == 0) {
         return true;
     }
 
@@ -395,16 +563,13 @@ bool ProfCannPlugin::ProfIfReportBufEmpty()
  * @name  ProfReportBufPop
  * @brief pop from apiBuffer_
  */
-bool ProfCannPlugin::ProfReportBufPop(uint32_t &aging, MsprofApi& data)
-{
-    return apiBuffer_.TryPop(aging, data);
-}
+bool ProfCannPlugin::ProfReportBufPop(uint32_t& aging, MsprofApi& data) { return apiBuffer_.TryPop(aging, data); }
 
 /**
  * @name  ProfReportBufPop
  * @brief pop from compactBuffer_
  */
-bool ProfCannPlugin::ProfReportBufPop(uint32_t &aging, MsprofCompactInfo& data)
+bool ProfCannPlugin::ProfReportBufPop(uint32_t& aging, MsprofCompactInfo& data)
 {
     return compactBuffer_.TryPop(aging, data);
 }
@@ -413,7 +578,7 @@ bool ProfCannPlugin::ProfReportBufPop(uint32_t &aging, MsprofCompactInfo& data)
  * @name  ProfReportBufPop
  * @brief pop from additionalBuffer_
  */
-bool ProfCannPlugin::ProfReportBufPop(uint32_t &aging, MsprofAdditionalInfo& data)
+bool ProfCannPlugin::ProfReportBufPop(uint32_t& aging, MsprofAdditionalInfo& data)
 {
     return additionalBuffer_.TryPop(aging, data);
 }
@@ -422,16 +587,13 @@ bool ProfCannPlugin::ProfReportBufPop(uint32_t &aging, MsprofAdditionalInfo& dat
  * @name  ProfVarBlockBufBatchPop
  * @brief pop from variableAdditionalBuffer_
  */
-void *ProfCannPlugin::ProfVarBlockBufBatchPop(size_t &popSize)
-{
-    return variableAdditionalBuffer_.BatchPop(popSize);
-}
+void* ProfCannPlugin::ProfVarBlockBufBatchPop(size_t& popSize) { return variableAdditionalBuffer_.BatchPop(popSize); }
 
 /**
  * @name  ProfVarAddBufIndexShift
  * @brief pop from variableAdditionalBuffer_
  */
-void ProfCannPlugin::ProfVarAddBufIndexShift(void *popPtr, const size_t popSize)
+void ProfCannPlugin::ProfVarAddBufIndexShift(void* popPtr, const size_t popSize)
 {
     return variableAdditionalBuffer_.BatchPopBufferIndexShift(popPtr, popSize);
 }
@@ -501,8 +663,11 @@ void ProfCannPlugin::ProfRegisterFunc(uint32_t type, VOID_PTR func)
 
 int32_t ProfCannPlugin::ProfReportRegTypeInfo(uint16_t level, uint32_t typeId, const char* typeName, size_t len)
 {
+    if (atlsReportRegTypeInfo_ != nullptr) {
+        (void)atlsReportRegTypeInfo_(level, typeId, typeName, len);
+    }
     if (profReportRegTypeInfo_ != nullptr) {
-        return profReportRegTypeInfo_(level, typeId, std::string(typeName, len));
+        (void)profReportRegTypeInfo_(level, typeId, std::string(typeName, len));
     }
     return 0;
 }
@@ -517,10 +682,32 @@ int32_t ProfCannPlugin::ProfReportRegDataFormat(uint16_t level, uint32_t typeId,
 
 uint64_t ProfCannPlugin::ProfReportGetHashId(const char* info, size_t len)
 {
-    if (profReportGetHashId_ != nullptr) {
-        return profReportGetHashId_(std::string(info, len));
+    uint64_t hashId = 0;
+    if (atlsReportGetHashId_ != nullptr) {
+        hashId = atlsReportGetHashId_(info, len);
     }
-    return 0;
+    if (profReportGetHashId_ != nullptr) {
+        hashId = profReportGetHashId_(std::string(info, len));
+    }
+    return hashId;
+}
+
+char* ProfCannPlugin::ProfReportGetHashInfo(const uint64_t hashId)
+{
+    static std::string hashInfo = "";
+    if (profReportGetHashInfo_ != nullptr) {
+        hashInfo = profReportGetHashInfo_(hashId);
+    }
+    return const_cast<char*>(hashInfo.c_str());
+}
+
+char* ProfCannPlugin::profGetPath()
+{
+    static std::string path = "";
+    if (profGetPath_ != nullptr) {
+        path = profGetPath_();
+    }
+    return const_cast<char*>(path.c_str());
 }
 
 int32_t ProfCannPlugin::ProfSetDeviceIdByGeModelIdx(const uint32_t geModelIdx, const uint32_t deviceId)
@@ -570,6 +757,20 @@ bool ProfCannPlugin::ProfCheckCommandLine()
 
 int32_t ProfCannPlugin::ProfNotifySetDevice(uint32_t chipId, uint32_t deviceId, bool isOpen)
 {
+    {
+        const std::unique_lock<std::mutex> lock(cachedDeviceStateMutex_);
+        uint64_t id = chipId;
+        id |= (static_cast<uint64_t>(deviceId) << 32ULL);
+        cachedDeviceStates_[id] = isOpen;
+    }
+    if (atlsSetDevice_ != nullptr) {
+        ProfSetDevPara para;
+        para.chipId = chipId;
+        para.deviceId = deviceId;
+        para.isOpen = isOpen;
+        atlsSetDevice_(reinterpret_cast<VOID_PTR>(&para), sizeof(ProfSetDevPara));
+    }
+
     if (profNotifySetDevice_ != nullptr) {
         return profNotifySetDevice_(chipId, deviceId, isOpen);
     } else if (isOpen && ProfCheckCommandLine()) {
@@ -577,35 +778,56 @@ int32_t ProfCannPlugin::ProfNotifySetDevice(uint32_t chipId, uint32_t deviceId, 
             return profNotifySetDevice_(chipId, deviceId, isOpen);
         }
     } else {
-        uint64_t id = deviceId;
-        id = (id << 32ULL) | chipId;
+        uint64_t id = chipId;
+        id |= (static_cast<uint64_t>(deviceId) << 32ULL);
         const std::unique_lock<std::mutex> lock(deviceStateMutex_);
         deviceStates_[id] = isOpen;
     }
-
     return 0;
 }
 
-int32_t ProfCannPlugin::ProfSetStepInfo(const uint64_t indexId, const uint16_t tagId, void *const stream)
+int32_t ProfCannPlugin::ProfSetStepInfo(const uint64_t indexId, const uint16_t tagId, void* const stream)
 {
-    for (auto it = ProfPlugin::moduleCallbacks_.begin(); it != ProfPlugin::moduleCallbacks_.end(); ++it) {
-        if (it->first == GE) {
-            ProfStepInfoCmd_t stepinfo;
-            stepinfo.index_id = indexId;
-            stepinfo.tag_id = tagId;
-            stepinfo.stream = stream;
-            int32_t flag = PROFILING_SUCCESS;
-            for (auto& handle : it->second) {
-                if (handle(static_cast<uint32_t>(PROF_CTRL_STEPINFO),
-                    Utils::ReinterpretCast<VOID, ProfStepInfoCmd_t>(&stepinfo),
-                    sizeof(ProfStepInfoCmd_t)) == PROFILING_FAILED) {
-                    flag = PROFILING_FAILED;
-                }
-            }
-            return flag;
-        }
+    if (ProfAPI::ProfRuntimePlugin::instance()->RuntimeApiInit() != PROFILING_SUCCESS) {
+        MSPROF_LOGE("Failed to execute RuntimeApiInit.");
+        return PROFILING_FAILED;
     }
-    return PROFILING_FAILED;
+    const uint64_t modelId = 0xFFFFFFFFU;
+    const uint32_t apiType = 11;
+    const auto beginTime = MsprofSysCycleTime();
+    rtError_t ret = ProfAPI::ProfRuntimePlugin::instance()->ProfMarkEx(indexId, modelId, tagId, stream);
+    if (ret != RT_ERROR_NONE) {
+        return ret;
+    }
+    const auto endTime = MsprofSysCycleTime();
+    return ReportApiInfo(beginTime, endTime, static_cast<uint64_t>(tagId), apiType);
+}
+
+int32_t ProfCannPlugin::ReportApiInfo(
+    const uint64_t beginTime, const uint64_t endTime, const uint64_t itemId, const uint32_t apiType)
+{
+    MsprofApi apiInfo{};
+    BuildApiInfo({beginTime, endTime}, apiType, itemId, apiInfo);
+    const int32_t ret = MsprofReportApi(true, &apiInfo);
+    if (ret == PROFILING_FAILED) {
+        MSPROF_LOGE(
+            "MsprofReportApi interface handle Failed, beginTime is %u, endTime is %u, itemId is %u, apiType is %u",
+            beginTime, endTime, itemId, apiType);
+        return PROFILING_FAILED;
+    }
+    return PROFILING_SUCCESS;
+}
+
+void ProfCannPlugin::BuildApiInfo(
+    const std::pair<uint64_t, uint64_t>& profTime, const uint32_t apiType, const uint64_t itemId, MsprofApi& api)
+{
+    api.itemId = itemId;
+    api.beginTime = profTime.first;
+    api.endTime = profTime.second;
+    api.type = apiType;
+    api.level = MSPROF_REPORT_NODE_LEVEL;
+    thread_local const auto tid = mmGetTid();
+    api.threadId = static_cast<uint32_t>(tid);
 }
 
 int32_t ProfCannPlugin::ProfFinalize()
@@ -620,6 +842,9 @@ int32_t ProfCannPlugin::ProfFinalize()
 
 bool ProfCannPlugin::ProfHostFreqIsEnable()
 {
+    if (atlsHostFreqIsEnable_ != nullptr) {
+        return atlsHostFreqIsEnable_() != 0;
+    }
     if (profHostFreqIsEnable_ != nullptr) {
         return profHostFreqIsEnable_();
     }
@@ -637,7 +862,7 @@ void ProfCannPlugin::ProfGetImplInfo(ProfImplInfo& info)
  * @name  TryPopApiBuf
  * @brief Static function to try pop from apiBuffer_
  */
-bool TryPopApiBuf(uint32_t &aging, MsprofApi& data)
+bool TryPopApiBuf(uint32_t& aging, MsprofApi& data)
 {
     return ProfAPI::ProfCannPlugin::instance()->ProfReportBufPop(aging, data);
 }
@@ -646,7 +871,7 @@ bool TryPopApiBuf(uint32_t &aging, MsprofApi& data)
  * @name  TryPopCompactBuf
  * @brief Static function to try pop from compactBuffer_
  */
-bool TryPopCompactBuf(uint32_t &aging, MsprofCompactInfo& data)
+bool TryPopCompactBuf(uint32_t& aging, MsprofCompactInfo& data)
 {
     return ProfAPI::ProfCannPlugin::instance()->ProfReportBufPop(aging, data);
 }
@@ -655,7 +880,7 @@ bool TryPopCompactBuf(uint32_t &aging, MsprofCompactInfo& data)
  * @name  TryPopAdditionalBuf
  * @brief Static function to try pop from additionalBuffer_
  */
-bool TryPopAdditionalBuf(uint32_t &aging, MsprofAdditionalInfo& data)
+bool TryPopAdditionalBuf(uint32_t& aging, MsprofAdditionalInfo& data)
 {
     return ProfAPI::ProfCannPlugin::instance()->ProfReportBufPop(aging, data);
 }
@@ -664,10 +889,7 @@ bool TryPopAdditionalBuf(uint32_t &aging, MsprofAdditionalInfo& data)
  * @name  IsReportBufEmpty
  * @brief Static function check if report buffer empty
  */
-bool IsReportBufEmpty()
-{
-    return ProfAPI::ProfCannPlugin::instance()->ProfIfReportBufEmpty();
-}
+bool IsReportBufEmpty() { return ProfAPI::ProfCannPlugin::instance()->ProfIfReportBufEmpty(); }
 
 int32_t TryPushAdditionalBuf(uint32_t aging, const VOID_PTR data, uint32_t len)
 {
@@ -683,12 +905,12 @@ int32_t TryMarkEx(uint64_t indexId, uint64_t modelId, uint16_t tagId, VOID_PTR s
  * @name  TryPopVariableAdditionalBuf
  * @brief Static function to try pop from variableAdditionalBuffer_
  */
-void *TryPopVariableAdditionalBuf(size_t &popSize)
+void* TryPopVariableAdditionalBuf(size_t& popSize)
 {
     return ProfAPI::ProfCannPlugin::instance()->ProfVarBlockBufBatchPop(popSize);
 }
 
-void TryIndexShiftVariableAddBuf(void *popPtr, const size_t popSize)
+void TryIndexShiftVariableAddBuf(void* popPtr, const size_t popSize)
 {
     ProfAPI::ProfCannPlugin::instance()->ProfVarAddBufIndexShift(popPtr, popSize);
 }
@@ -704,7 +926,7 @@ void ProfCannPlugin::ProfInitDevReportBuf()
 int32_t ProfCannPlugin::ProfReportBatchAdditionalInfo(uint32_t agingFlag, const VOID_PTR data, uint32_t len)
 {
     UNUSED(agingFlag);
-    return batchAdditionalBuffer_.BatchPush(static_cast<const MsprofAdditionalInfo *>(data), len);
+    return batchAdditionalBuffer_.BatchPush(static_cast<const MsprofAdditionalInfo*>(data), len);
 }
 
 size_t ProfCannPlugin::ProfGetBatchReportMaxSize(uint32_t type)
@@ -718,12 +940,12 @@ size_t ProfCannPlugin::ProfGetBatchReportMaxSize(uint32_t type)
     return 0;
 }
 
-void *ProfCannPlugin::ProfBatchAddBufPop(size_t &popSize, bool popForce)
+void* ProfCannPlugin::ProfBatchAddBufPop(size_t& popSize, bool popForce)
 {
     return batchAdditionalBuffer_.BatchPop(popSize, popForce);
 }
 
-void ProfCannPlugin::ProfBatchAddBufIndexShift(void *popPtr, const size_t popSize)
+void ProfCannPlugin::ProfBatchAddBufIndexShift(void* popPtr, const size_t popSize)
 {
     return batchAdditionalBuffer_.BatchPopBufferIndexShift(popPtr, popSize);
 }
@@ -754,13 +976,61 @@ int32_t ProfCannPlugin::ProfUnSubscribeRawData() const
     return 0;
 }
 
-void *TryPopAdprofBuf(size_t &popSize, bool popForce)
+int32_t ProfCannPlugin::ProfSetInjectionFunc(uint32_t type, void* func)
+{
+    ProfApiInit();
+    if (profSetInjectionFunc_ != nullptr) {
+        return profSetInjectionFunc_(type, func);
+    }
+    MSPROF_LOGW("profSetInjectionFunc_ is null");
+    return PROFILING_FAILED;
+}
+
+int32_t ProfCannPlugin::ProfInjectionInitialize()
+{
+    ProfApiInit();
+    if (profInjectionInitialize_ != nullptr) {
+        return profInjectionInitialize_();
+    }
+    MSPROF_LOGW("profInjectionInitialize_ is null");
+    return PROFILING_FAILED;
+}
+
+void* ProfCannPlugin::ProfGetInjectionFunc(uint32_t type)
+{
+    ProfApiInit();
+    if (profGetInjectionFunc_ != nullptr) {
+        return profGetInjectionFunc_(type);
+    }
+    MSPROF_LOGW("profGetInjectionFunc_ is null");
+    return nullptr;
+}
+
+int32_t ProfCannPlugin::ProfRegisterDataCallback(uint32_t type, void* callback)
+{
+    ProfApiInit();
+    if (profRegisterDataCallback_ != nullptr) {
+        return profRegisterDataCallback_(type, callback);
+    }
+    MSPROF_LOGW("profRegisterDataCallback_ is null");
+    return PROFILING_FAILED;
+}
+
+bool ProfCannPlugin::ProfCheckOpSwitch(uint32_t type, const char* op, size_t len)
+{
+    if (profCheckOpSwitch_ != nullptr) {
+        return profCheckOpSwitch_(type, op, len);
+    }
+    return false;
+}
+
+void* TryPopAdprofBuf(size_t& popSize, bool popForce)
 {
     return ProfAPI::ProfCannPlugin::instance()->ProfBatchAddBufPop(popSize, popForce);
 }
 
-void TryIndexShiftAdprofBuf(void *popPtr, const size_t popSize)
+void TryIndexShiftAdprofBuf(void* popPtr, const size_t popSize)
 {
     ProfAPI::ProfCannPlugin::instance()->ProfBatchAddBufIndexShift(popPtr, popSize);
 }
-}  // namespace ProfAPI
+} // namespace ProfAPI

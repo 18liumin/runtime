@@ -1,0 +1,92 @@
+# 异常处理
+
+## 获取Runtime错误码
+
+通常Runtime接口会返回一个错误码。根据接口类型不同，返回码的含义和错误获取方式也不同：
+
+- **异步接口**（参见[异步任务执行](03_asynchronous_task_execution.md)）：在Device任务完成前就返回，返回码仅表示Host侧下发是否成功，无法反映Device上的实际执行错误。
+- **同步接口**：返回码直接反映本次执行结果。典型场景：传递了无效的参数（如空指针、越界大小）、请求了不支持的硬件功能、内存分配失败。
+
+### 异步接口错误处理
+
+若要在某个异步函数调用后立即检查异步错误，**唯一的方式**是显式调用[同步接口](03-02_stream_management.md#显式同步)（例如aclrtSynchronizeDevice接口）阻塞主机线程，并检查同步接口返回的错误码。
+
+此外，Runtime会为每个Host线程维护一个错误变量，该变量初始化为ACL\_RT\_SUCCESS，并在每次发生错误（无论是参数校验错误还是异步错误）时被错误码覆盖。`aclrtPeekAtLastError`接口仅返回该变量的值，`aclrtGetLastError`接口同样返回该变量的值，但同时会将其重置为ACL\_RT\_SUCCESS。
+
+```
+// 指定Device
+aclError error = aclrtSetDevice(0);
+
+// 创建Stream
+aclrtStream stream;
+error = aclrtCreateStream(&stream);
+
+// 设置遇错即停模式
+error = aclrtSetStreamFailureMode(stream, ACL_STOP_ON_FAILURE);
+
+// 在Stream上下发任务，返回码仅表示下发是否成功，通常是Host上参数校验错误，无法表示Device上的实际执行错误
+error = aclrtMemcpyAsync(devPtr, devSize, hostPtr, hostSize, ACL_MEMCPY_HOST_TO_DEVICE, stream);
+
+// <<<>>>内核调用方式无返回值，若只需感知Host侧错误，可通过aclrtPeekAtLastError/aclrtGetLastError获取
+myKernel<<<8, nullptr, stream>>>();
+
+// 获取当前线程最近发生的错误
+error = aclrtPeekAtLastError(ACL_RT_THREAD_LEVEL);
+......
+
+// 获取当前线程最近的错误并将状态重置为ACL_RT_SUCCESS
+error = aclrtGetLastError(ACL_RT_THREAD_LEVEL);
+......
+
+error = aclrtMemcpyAsync(hostPtr, hostSize, devPtr, devSize, ACL_MEMCPY_DEVICE_TO_HOST, stream);
+
+// 【关键差异】异步接口必须调用同步接口，才能获取Device上的异步错误
+error = aclrtSynchronizeDevice();
+if (error != ACL_RT_SUCCESS) {
+    // 获取ErrorMsg
+    char *errMsg = aclGetRecentErrMsg();
+    // 输出到日志
+    printf("Error: %s\n", errMsg);
+    ......
+}
+
+// 资源销毁
+error = aclrtDestroyStream(stream);
+error = aclrtResetDevice(0);
+```
+
+**注意：**在遇错继续模式下，如果一条Stream上的任务执行出现异常，该Stream上的其他未执行任务仍可继续执行，同时也不会阻止向该Stream或同一Context下的其他Stream下发新任务。此时，aclrtPeekAtLastError和aclrtGetLastError返回的可能不是首次错误的信息。
+
+### 同步接口错误处理
+
+**无需调用流同步接口**，直接校验返回值即可。
+
+```
+// 指定Device
+aclError error = aclrtSetDevice(0);
+
+// 【关键差异】无需调用流同步等接口，直接校验返回值
+error = aclrtMemcpy(devPtr, devSize, hostPtr, hostSize, ACL_MEMCPY_HOST_TO_DEVICE);
+if (error != ACL_RT_SUCCESS) {
+    // 获取ErrorMsg
+    char *errMsg = aclGetRecentErrMsg();
+    // 输出到日志
+    printf("Error: %s\n", errMsg);
+    ......
+}
+
+// 资源销毁
+error = aclrtResetDevice(0);
+```
+
+### 异步与同步错误处理差别
+
+| 对比项 | 异步接口 | 同步接口 |
+|--------|----------|----------|
+| 返回码含义 | 仅表示Host侧下发是否成功 | 直接反映本次执行结果 |
+| 是否需要流同步 | **需要**，通过`aclrtSynchronizeDevice`等同步接口捕获异步错误 | **不需要**，返回码已包含执行结果 |
+| 错误获取时机 | 流同步之后 | 接口返回时 |
+
+### 使用建议
+
+对于任何Runtime接口调用，都应该**检查其返回值**，这样可以尽早发现同步错误。对于异步操作，则必须在关键同步点（如`aclrtSynchronizeDevice`）再次检查错误，以确保能捕获到执行时的错误。

@@ -27,19 +27,36 @@
 #include "dump_tensor_plugin.h"
 #include "thread_manager.h"
 #include "hccl_mc2_define.h"
+#include "adump_platform_manager.h"
 #include "ascend_hal.h"
 #include "dump_exception_stub.h"
+#include "kernel_info_collector.h"
+#include "exception_info_common.h"
+#include "path.h"
 
 using namespace Adx;
+
+namespace {
+const std::string g_idemHostBinContent = "host kernel bin content for idempotent test";
+int32_t StubGetBinDataForIdem(rtBinHandle binHandle, std::string &binData, uint32_t &binSize)
+{
+    (void)binHandle;
+    binData = g_idemHostBinContent;
+    binSize = static_cast<uint32_t>(g_idemHostBinContent.size());
+    return ADUMP_SUCCESS;
+}
+}  // namespace
 
 #define ASCEND_CACHE_PATH ADUMP_BASE_DIR
 #define ASCEND_CUSTOM_OPP_PATH "/src/dfx/adump:/tests/ut/adump:"
 
 class DumpArgsUtest : public testing::Test {
 protected:
-    virtual void SetUp() {}
+    virtual void SetUp() { ResetAllPlatformManagers(); }
     virtual void TearDown()
     {
+        ResetAllPlatformManagers();
+        ThreadManager::Instance().WaitAll();
         DumpManager::Instance().Reset();
         FreeExceptionRegInfo();
         GlobalMockObject::verify();
@@ -482,7 +499,7 @@ TEST_F(DumpArgsUtest, Test_Dump_Args)
                            0x000000010000000D,
                            sizeof(input0),
                            0,
-                           -2,
+                           static_cast<uint64_t>(static_cast<int64_t>(-2)),
                            sizeof(oldNormalPtr),
                            sizeof(oldNormalPtr),
                            0x0100000000000002,
@@ -528,12 +545,13 @@ TEST_F(DumpArgsUtest, Test_Dump_Args)
     exceptionInfo.expandInfo.type = RT_EXCEPTION_INVALID;
     EXPECT_EQ(ADUMP_FAILED, DumpManager::Instance().DumpExceptionInfo(exceptionInfo));
 
+    exceptionInfo.expandInfo.type = RT_EXCEPTION_AICORE;
     exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.argAddr = nullptr;
     ret = DumpManager::Instance().DumpExceptionInfo(exceptionInfo);
     EXPECT_EQ(ret, ADUMP_FAILED);
 
     sizeInfoAddr[1] = 0x000000010000000D;
-    sizeInfoAddr[4] = -2;
+    sizeInfoAddr[4] = static_cast<uint64_t>(static_cast<int64_t>(-2));
     exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.argAddr = args;
     exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.sizeInfo.atomicIndex = atomicIndex;
     exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.argsize = sizeof(args);
@@ -553,7 +571,7 @@ TEST_F(DumpArgsUtest, Test_Dump_Args)
     exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.kernelNameSize = kernelName.size();
     ret = DumpManager::Instance().DumpExceptionInfo(exceptionInfo);
     EXPECT_EQ(ret, ADUMP_SUCCESS);  // copy kernel bin file failed
-    sleep(2);  // wait async process done
+    sleep(1);  // wait async process done
 
     // check host kernel file dump success
     Path hostKernelPath(ws.Root());
@@ -589,16 +607,19 @@ TEST_F(DumpArgsUtest, Test_Dump_Args)
     MOCKER_CPP(&File::Copy).stubs().will(returnValue(ADUMP_SUCCESS));
     ret = DumpManager::Instance().DumpExceptionInfo(exceptionInfo);
     EXPECT_EQ(ret, ADUMP_SUCCESS);
+    sleep(1);  // wait async process done
 
     // mock real path failed
     MOCKER(&DumpFile::Dump).stubs().will(returnValue(ADUMP_SUCCESS));
     MOCKER_CPP(&Path::RealPath).stubs().will(returnValue(false));
     ret = DumpManager::Instance().DumpExceptionInfo(exceptionInfo);
     EXPECT_EQ(ret, ADUMP_FAILED);
+    sleep(1);  // wait async process done
 
     MOCKER_CPP(&File::Write).stubs().will(returnValue((int64_t)EN_ERROR));
     ret = DumpManager::Instance().DumpExceptionInfo(exceptionInfo);
     EXPECT_EQ(ret, ADUMP_FAILED);
+    sleep(1);  // wait async process done
 
     EXPECT_EQ(AdumpIsDumpEnable(DumpType::ARGS_EXCEPTION), true);
     uint64_t dumpSwitch = 0;
@@ -659,7 +680,7 @@ TEST_F(DumpArgsUtest, Test_Dump_Args_Quick_Recover)
                            0x000000010000000D,
                            sizeof(input0),
                            0,
-                           -2,
+                           static_cast<uint64_t>(static_cast<int64_t>(-2)),
                            sizeof(oldNormalPtr),
                            sizeof(oldNormalPtr),
                            0x0100000000000002,
@@ -737,7 +758,7 @@ TEST_F(DumpArgsUtest, Test_Dump_Args_OPP_Path)
                            0x000000010000000D,
                            sizeof(input0),
                            0,
-                           -2,
+                           static_cast<uint64_t>(static_cast<int64_t>(-2)),
                            sizeof(oldNormalPtr),
                            sizeof(oldNormalPtr),
                            0x0100000000000002,
@@ -788,7 +809,7 @@ TEST_F(DumpArgsUtest, Test_Dump_Args_OPP_Path)
     EXPECT_EQ(ret, ADUMP_FAILED);
 
     sizeInfoAddr[1] = 0x000000010000000D;
-    sizeInfoAddr[4] = -2;
+    sizeInfoAddr[4] = static_cast<uint64_t>(static_cast<int64_t>(-2));
     exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.argAddr = args;
     exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.sizeInfo.atomicIndex = atomicIndex;
     exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.argsize = sizeof(args);
@@ -808,7 +829,7 @@ TEST_F(DumpArgsUtest, Test_Dump_Args_OPP_Path)
     exceptionInfo.expandInfo.u.aicoreInfo.exceptionArgs.exceptionKernelInfo.kernelNameSize = kernelName.size();
     ret = DumpManager::Instance().DumpExceptionInfo(exceptionInfo);
     EXPECT_EQ(ret, ADUMP_SUCCESS);  // copy kernel bin file failed
-    sleep(2);  // wait async process done
+    sleep(1);  // wait async process done
 
     // check host kernel file dump success
     Path hostKernelPath(ws.Root());
@@ -844,16 +865,19 @@ TEST_F(DumpArgsUtest, Test_Dump_Args_OPP_Path)
     MOCKER_CPP(&File::Copy).stubs().will(returnValue(ADUMP_SUCCESS));
     ret = DumpManager::Instance().DumpExceptionInfo(exceptionInfo);
     EXPECT_EQ(ret, ADUMP_SUCCESS);
+    sleep(1);  // wait async process done
 
     // mock real path failed
     MOCKER(&DumpFile::Dump).stubs().will(returnValue(ADUMP_SUCCESS));
     MOCKER_CPP(&Path::RealPath).stubs().will(returnValue(false));
     ret = DumpManager::Instance().DumpExceptionInfo(exceptionInfo);
     EXPECT_EQ(ret, ADUMP_FAILED);
+    sleep(1);  // wait async process done
 
     MOCKER_CPP(&File::Write).stubs().will(returnValue((int64_t)EN_ERROR));
     ret = DumpManager::Instance().DumpExceptionInfo(exceptionInfo);
     EXPECT_EQ(ret, ADUMP_FAILED);
+    sleep(1);  // wait async process done
 
     EXPECT_EQ(AdumpIsDumpEnable(DumpType::ARGS_EXCEPTION), true);
     uint64_t dumpSwitch = 0;
@@ -915,7 +939,7 @@ TEST_F(DumpArgsUtest, Test_Dump_Ffts_Args)
                            0x000000010000000D,
                            sizeof(input0),
                            0,
-                           -2,
+                           static_cast<uint64_t>(static_cast<int64_t>(-2)),
                            sizeof(oldNormalPtr),
                            sizeof(oldNormalPtr),
                            0x0100000000000002,
@@ -1093,7 +1117,6 @@ TEST_F(DumpArgsUtest, Test_Dump_Args_With_Dfx_Static)
     MOCKER(dlsym).stubs().will(invoke(mmDlsym));
     MOCKER(dlclose).stubs().will(returnValue(0));
     MOCKER(dlerror).stubs().will(invoke(mmDlerror));
-    MOCKER(&Adx::KernelInfoCollector::ParseKernelSymbols).stubs().will(invoke(Adx::ParseKernelSymbolsStub));
     Tools::CaseWorkspace ws("Test_Dump_Args_With_Dfx_Static");
 
     DumpConfig dumpConf;
@@ -1342,7 +1365,6 @@ TEST_F(DumpArgsUtest, Test_Dump_Args_With_Dfx_Dynamic)
     EXPECT_EQ(AdumpSetDumpConfig(DumpType::ARGS_EXCEPTION, dumpConf), ADUMP_SUCCESS);
     uint32_t v2type = 5;
     MOCKER_CPP(&Adx::AdumpDsmi::DrvGetPlatformType).stubs().with(outBound(v2type)).will(returnValue(true));
-    MOCKER(&Adx::KernelInfoCollector::ParseKernelSymbols).stubs().will(invoke(Adx::ParseKernelSymbolsStub));
 
     rtExceptionInfo exceptionInfo = {0};
     exceptionInfo.streamid = 1;
@@ -2195,7 +2217,6 @@ TEST_F(DumpArgsUtest, Test_Dump_Args_For_MC2_CTX_910C)
     uint32_t v2type = 5; // CHIP_CLOUD_V2
     MOCKER_CPP(&Adx::AdumpDsmi::DrvGetPlatformType).stubs().with(outBound(v2type)).will(returnValue(true));
     MOCKER(rtGetSocVersion).stubs().will(invoke(rtGetSocVersionStub));
-    MOCKER(&Adx::KernelInfoCollector::ParseKernelSymbols).stubs().will(invoke(Adx::ParseKernelSymbolsStub));
 
     Tools::CaseWorkspace ws("Test_Dump_Args_For_MC2_CTX");
 
@@ -2355,7 +2376,7 @@ TEST_F(DumpArgsUtest, Test_Dump_Args_Multi_Thread)
                         0x000000010000000D,
                         sizeof(input0),
                         0,
-                        -2,
+                        static_cast<uint64_t>(static_cast<int64_t>(-2)),
                         sizeof(oldNormalPtr),
                         sizeof(oldNormalPtr),
                         0x0100000000000002,
@@ -2413,7 +2434,7 @@ TEST_F(DumpArgsUtest, Test_Dump_Args_For_L2_Shape)
     MOCKER(dlclose).stubs().will(returnValue(0));
     MOCKER(dlerror).stubs().will(invoke(mmDlerror));
 
-    Tools::CaseWorkspace ws("Test_Dump_Args_For_L2_Shape", false);
+    Tools::CaseWorkspace ws("Test_Dump_Args_For_L2_Shape");
 
     DumpConfig dumpConf;
     dumpConf.dumpPath = ws.Root();
@@ -2528,4 +2549,96 @@ TEST_F(DumpArgsUtest, Test_Dump_Args_For_L2_Shape)
 
     EXPECT_EQ(checker.CheckOutputTensorSize(3, sizeof(shapePtrScalar)), true);
     EXPECT_EQ(checker.CheckOutputTensorData(3, GetTensorData(shapePtrScalar)), true);
+}
+
+// 幂等:_host.o 已存在时，DumpHostKernelBin 应跳过写、直接返回成功（提前落盘后，后置慢搜索路径不重复落盘）。
+TEST_F(DumpArgsUtest, Test_DumpHostKernelBin_Idempotent)
+{
+    Tools::CaseWorkspace ws("Test_DumpHostKernelBin_Idempotent");
+    const std::string kernelName = "AddCustom_idem";
+    MOCKER_CPP(&ExceptionInfoCommon::GetBinDataFromHandle).stubs().will(invoke(StubGetBinDataForIdem));
+
+    KernelInfoCollector collector;
+    char fakeHandle[] = "fake_bin_handle";
+    ASSERT_EQ(collector.InitFromBinHandle(static_cast<rtBinHandle>(fakeHandle), kernelName), ADUMP_SUCCESS);
+
+    // 首次落盘：文件不存在，正常写入。
+    std::string hostOPath;
+    EXPECT_EQ(collector.DumpHostKernelBin(ws.Root(), hostOPath), ADUMP_SUCCESS);
+    Path hostBinPath(ws.Root());
+    hostBinPath.Concat(kernelName + "_host.o");
+    EXPECT_TRUE(hostBinPath.Exist());
+    // 出参应回填实际落盘路径，且与文件系统上的 _host.o 一致。
+    EXPECT_EQ(hostOPath, hostBinPath.GetString());
+
+    // 二次落盘：文件已存在且大小一致。即使 File::Write 被打桩为失败，幂等守卫也应跳过写并返回成功。
+    MOCKER_CPP(&File::Write).expects(never());
+    EXPECT_EQ(collector.DumpHostKernelBin(ws.Root(), hostOPath), ADUMP_SUCCESS);
+    GlobalMockObject::verify();
+}
+
+// kernelName 为空时应跳过落盘并返回成功，避免退化成非唯一文件名 "_host.o" 互相覆盖。
+TEST_F(DumpArgsUtest, Test_DumpHostKernelBin_EmptyKernelNameSkip)
+{
+    Tools::CaseWorkspace ws("Test_DumpHostKernelBin_EmptyKernelNameSkip");
+    MOCKER_CPP(&ExceptionInfoCommon::GetBinDataFromHandle).stubs().will(invoke(StubGetBinDataForIdem));
+
+    KernelInfoCollector collector;
+    char fakeHandle[] = "fake_bin_handle";
+    // kernelName 为空
+    ASSERT_EQ(collector.InitFromBinHandle(static_cast<rtBinHandle>(fakeHandle), ""), ADUMP_SUCCESS);
+
+    // 前置守卫命中，跳过写、返回成功，且不产生 "_host.o"。
+    std::string hostOPath;
+    EXPECT_EQ(collector.DumpHostKernelBin(ws.Root(), hostOPath), ADUMP_SUCCESS);
+    Path hostBinPath(ws.Root());
+    hostBinPath.Concat("_host.o");
+    EXPECT_FALSE(hostBinPath.Exist());
+}
+
+// 幂等校验基于文件大小:磁盘上残留截断/空文件(部分写)时，Exist() 为真但大小不匹配，应重写而非跳过。
+TEST_F(DumpArgsUtest, Test_DumpHostKernelBin_TruncatedFileRewrite)
+{
+    Tools::CaseWorkspace ws("Test_DumpHostKernelBin_TruncatedFileRewrite");
+    const std::string kernelName = "AddCustom_trunc";
+    MOCKER_CPP(&ExceptionInfoCommon::GetBinDataFromHandle).stubs().will(invoke(StubGetBinDataForIdem));
+
+    KernelInfoCollector collector;
+    char fakeHandle[] = "fake_bin_handle";
+    ASSERT_EQ(collector.InitFromBinHandle(static_cast<rtBinHandle>(fakeHandle), kernelName), ADUMP_SUCCESS);
+
+    // 预置一个大小不足的截断文件，模拟上次部分写残留。
+    Path hostBinPath(ws.Root());
+    hostBinPath.Concat(kernelName + "_host.o");
+    {
+        std::ofstream truncated(hostBinPath.GetString(), std::ios::binary | std::ios::trunc);
+        truncated << "partial";  // 长度短于 g_idemHostBinContent
+    }
+    ASSERT_TRUE(hostBinPath.Exist());
+
+    // 大小不匹配，幂等守卫不跳过，应重写为完整内容。
+    std::string hostOPath;
+    EXPECT_EQ(collector.DumpHostKernelBin(ws.Root(), hostOPath), ADUMP_SUCCESS);
+    EXPECT_EQ(hostOPath, hostBinPath.GetString());
+    std::ifstream rewritten(hostBinPath.GetString(), std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(rewritten)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, g_idemHostBinContent);
+}
+
+// 落盘不完整(写后文件大小不足全长)应经 stat 校验判失败并返回 ADUMP_FAILED，避免截断文件被后续幂等误判为完整。
+TEST_F(DumpArgsUtest, Test_DumpHostKernelBin_ShortWriteFail)
+{
+    Tools::CaseWorkspace ws("Test_DumpHostKernelBin_ShortWriteFail");
+    const std::string kernelName = "AddCustom_shortwrite";
+    MOCKER_CPP(&ExceptionInfoCommon::GetBinDataFromHandle).stubs().will(invoke(StubGetBinDataForIdem));
+    // 打桩 File::Write 返回正值但不实际写入,模拟落盘残缺(文件被 M_TRUNC 建为空,大小不足全长)。
+    MOCKER_CPP(&File::Write).stubs().will(returnValue(static_cast<int64_t>(1)));
+
+    KernelInfoCollector collector;
+    char fakeHandle[] = "fake_bin_handle";
+    ASSERT_EQ(collector.InitFromBinHandle(static_cast<rtBinHandle>(fakeHandle), kernelName), ADUMP_SUCCESS);
+
+    std::string hostOPath;
+    EXPECT_EQ(collector.DumpHostKernelBin(ws.Root(), hostOPath), ADUMP_FAILED);
+    GlobalMockObject::verify();
 }

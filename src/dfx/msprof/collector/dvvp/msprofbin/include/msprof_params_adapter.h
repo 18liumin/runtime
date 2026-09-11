@@ -26,15 +26,10 @@ public:
     int32_t UpdateParams(SHARED_PTR_ALIA<analysis::dvvp::message::ProfileParams> params) const;
 
 private:
-    std::string GenerateCapacityEvents() const;
-    std::string GenerateBandwidthEvents() const;
-    void GenerateLlcDefEvents(SHARED_PTR_ALIA<analysis::dvvp::message::ProfileParams> params) const;
-
-private:
     std::map<std::string, std::string> aicoreEvents_;
 };
-}
-}
-}
+} // namespace Msprof
+} // namespace Dvvp
+} // namespace Analysis
 
 #endif

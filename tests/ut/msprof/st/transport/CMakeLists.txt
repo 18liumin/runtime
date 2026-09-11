@@ -32,6 +32,7 @@ set(profilerSrcFiles
     ${MSPROF_SOURCE_DIR}/dvvp/common/thread/thread.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/thread/thread_pool.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dev_api.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/msprof_drv_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dsmi_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/channel/ai_drv_prof_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/file_slice.cpp
@@ -65,6 +66,7 @@ set(profilerSrcFiles
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_channel_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_stars_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_biu_perf_job.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_collect_info.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/acp/src/acp_compute_device_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/acp/src/acp_pipe_transfer.cpp
     ${CppPath}
@@ -97,8 +99,8 @@ target_include_directories(transport_stest PRIVATE
     ${TOP_DIR}/inc/external
     ../stub/
     ${TOP_DIR}/llt/abl/msprof/st/stub
-    ${TOP_DIR}/abl/adump
-    ${TOP_DIR}/abl/adump/external
+    ${TOP_DIR}/runtime/src/dfx/adump
+    ${TOP_DIR}/runtime/src/dfx/adump/external
     ${TOP_DIR}/ace/npuruntime/inc
     ${TOP_DIR}/ace/npuruntime/inc/external/
     ${TOP_DIR}/abl/msprof/inc
@@ -145,7 +147,7 @@ target_compile_options(transport_stest PRIVATE
     -g
     -pipe
     -Wall
-    -std=c++11
+    -std=c++14
     -fno-access-control
     -Wfloat-equal
     -Wextra

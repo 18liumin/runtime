@@ -23,28 +23,34 @@
 extern "C" {
 #endif
 
-#define ACL_PROF_ACL_API                0x0001ULL
-#define ACL_PROF_TASK_TIME              0x0002ULL
-#define ACL_PROF_AICORE_METRICS         0x0004ULL
-#define ACL_PROF_AICPU                  0x0008ULL
-#define ACL_PROF_L2CACHE                0x0010ULL
-#define ACL_PROF_HCCL_TRACE             0x0020ULL
-#define ACL_PROF_TRAINING_TRACE         0x0040ULL
-#define ACL_PROF_MSPROFTX               0x0080ULL
-#define ACL_PROF_RUNTIME_API            0x0100ULL
-#define ACL_PROF_GE_API_L0              0x0200ULL
-#define ACL_PROF_TASK_TIME_L0           0x0800ULL
-#define ACL_PROF_TASK_MEMORY            0x1000ULL
-#define ACL_PROF_GE_API_L1              0x01000000ULL
-#define ACL_PROF_TASK_TIME_L2           0x2000ULL
-#define ACL_PROF_OP_ATTR                0x4000ULL
-#define ACL_PROF_TASK_TIME_L3           0x8000ULL
+#define ACL_PROF_ACL_API 0x0001ULL
+#define ACL_PROF_TASK_TIME 0x0002ULL
+#define ACL_PROF_AICORE_METRICS 0x0004ULL
+#define ACL_PROF_AICPU 0x0008ULL
+#define ACL_PROF_L2CACHE 0x0010ULL
+#define ACL_PROF_HCCL_TRACE 0x0020ULL
+#define ACL_PROF_TRAINING_TRACE 0x0040ULL
+#define ACL_PROF_MSPROFTX 0x0080ULL
+#define ACL_PROF_RUNTIME_API 0x0100ULL
+#define ACL_PROF_GE_API_L0 0x0200ULL
+#define ACL_PROF_TASK_TIME_L0 0x0800ULL
+#define ACL_PROF_TASK_MEMORY 0x1000ULL
+#define ACL_PROF_GE_API_L1 0x01000000ULL
+#define ACL_PROF_TASK_TIME_L2 0x2000ULL
+#define ACL_PROF_OP_ATTR 0x4000ULL
+#define ACL_PROF_TASK_TIME_L3 0x8000ULL
+#define ACL_PROF_API_STATS 0x400000000ULL
+#define ACL_PROF_AICORE_SHAPE 0x800000000ULL
 
 /**
- * @deprecated please use aclprofGetOpTypeLen and aclprofGetOpTNameLen instead
+ * @deprecated please use aclprofGetOpTypeLen and aclprofGetOpNameLen instead
  */
-#define ACL_PROF_MAX_OP_NAME_LEN        257
-#define ACL_PROF_MAX_OP_TYPE_LEN        65
+#define ACL_PROF_MAX_OP_NAME_LEN 257
+#define ACL_PROF_MAX_OP_TYPE_LEN 65
+
+#ifndef ACL_PROF_TENSOR_DATA_SHAPE_LEN
+#define ACL_PROF_TENSOR_DATA_SHAPE_LEN 8 // frozen: must never change (changes aclprofTensor size/stride)
+#endif
 
 typedef enum {
     ACL_AICORE_ARITHMETIC_UTILIZATION = 0,
@@ -61,7 +67,7 @@ typedef enum {
 
 typedef enum {
     ACL_STEP_START = 0, // step  start
-    ACL_STEP_END = 1   // step  end
+    ACL_STEP_END = 1    // step  end
 } aclprofStepTag;
 
 typedef enum {
@@ -71,34 +77,75 @@ typedef enum {
     ACL_SUBSCRIBE_NONE = 0xFF
 } aclprofSubscribeOpFlag;
 
-typedef enum {
-    ACL_SUBSCRIBE_ATTRI_THREADID = 0,
-    ACL_SUBSCRIBE_ATTRI_NONE
-} aclprofSubscribeOpAttri;
+typedef enum { ACL_SUBSCRIBE_ATTRI_THREADID = 0, ACL_SUBSCRIBE_ATTRI_NONE } aclprofSubscribeOpAttri;
 
 typedef enum {
-    ACL_PROF_ARGS_MIN                   = 0,
-    ACL_PROF_STORAGE_LIMIT              = 1,
-    ACL_PROF_SYS_HARDWARE_MEM_FREQ      = 3,
-    ACL_PROF_LLC_MODE                   = 4,
-    ACL_PROF_SYS_IO_FREQ                = 5,
-    ACL_PROF_SYS_INTERCONNECTION_FREQ   = 6,
-    ACL_PROF_DVPP_FREQ                  = 7,
-    ACL_PROF_HOST_SYS                   = 8,
-    ACL_PROF_HOST_SYS_USAGE             = 9,
-    ACL_PROF_HOST_SYS_USAGE_FREQ        = 10,
-    ACL_PROF_LOW_POWER_FREQ             = 11,
-    ACL_PROF_SYS_MEM_SERVICEFLOW        = 12,
-    ACL_PROF_SYS_CPU_FREQ               = 13,
-    ACL_PROF_SCALE                      = 14,
-    ACL_PROF_ARGS_MAX                   = 15
+    ACL_PROF_ARGS_MIN = 0,
+    ACL_PROF_STORAGE_LIMIT = 1,
+    ACL_PROF_SYS_HARDWARE_MEM_FREQ = 3,
+    ACL_PROF_LLC_MODE = 4,
+    ACL_PROF_SYS_IO_FREQ = 5,
+    ACL_PROF_SYS_INTERCONNECTION_FREQ = 6,
+    ACL_PROF_DVPP_FREQ = 7,
+    ACL_PROF_HOST_SYS = 8,
+    ACL_PROF_HOST_SYS_USAGE = 9,
+    ACL_PROF_HOST_SYS_USAGE_FREQ = 10,
+    ACL_PROF_LOW_POWER_FREQ = 11,
+    ACL_PROF_SYS_MEM_SERVICEFLOW = 12,
+    ACL_PROF_SYS_CPU_FREQ = 13,
+    ACL_PROF_OPTYPE = 14,
+    ACL_PROF_NTS_METRICS = 15,
+    ACL_PROF_PATH = 16,
+    ACL_PROF_ARGS_MAX = 17
 } aclprofConfigType;
+
+typedef enum { ACL_PROF_MESSAGE_TYPE_TENSOR_INFO = 0 } aclprofMessageType;
 
 typedef struct aclprofConfig aclprofConfig;
 typedef struct aclprofStopConfig aclprofStopConfig;
 typedef struct aclprofAicoreEvents aclprofAicoreEvents;
 typedef struct aclprofSubscribeConfig aclprofSubscribeConfig;
 typedef struct aclprofStepInfo aclprofStepInfo;
+
+// These three structs may have been self-defined by early users before they became official.
+// Define ACL_PROF_TENSOR_INFO_DEFINED before including this header to suppress the official
+// definitions and keep your own. The layout below is frozen for binary compatibility: existing
+// fields must never be reordered/retyped; evolve only by appending fields at the tail and bumping
+// ACL_PROF_EVENT_ATTR_VERSION (parse defensively by aclprofEventAttributes.size/version).
+#ifndef ACL_PROF_TENSOR_INFO_DEFINED
+#define ACL_PROF_TENSOR_INFO_DEFINED
+
+#define ACL_PROF_EVENT_ATTR_VERSION 1 // bump on every tail-append to aclprofEventAttributes
+
+typedef struct aclprofTensor {
+    uint32_t type;                                  // tensor类型, 0: input, 1: output
+    uint32_t format;                                // format类型: aclFormat
+    uint32_t dataType;                              // dataType类型 aclDataType
+    uint32_t shapeDim;                              // shape dim <= 8
+    uint32_t shape[ACL_PROF_TENSOR_DATA_SHAPE_LEN]; // tensor内存大小
+} aclprofTensor;
+
+typedef struct aclprofTensorInfo {
+    uint64_t opNameId; // 通过uint64_t aclprofStr2Id(const char *message)
+    uint64_t opTypeId;
+    uint32_t resv;
+    uint32_t tensorNum;
+    uint32_t kernelType;
+    uint32_t blockNums;
+    void* stream; // stream信息
+    aclprofTensor* tensors;
+} aclprofTensorInfo;
+
+typedef struct aclprofEventAttributes {
+    uint16_t version;
+    uint16_t size;
+    uint32_t messageType; // MESSAGE_TYPE_TENSOR_INFO
+    union Message {
+        aclprofTensorInfo* tensorInfo;
+    } message;
+} aclprofEventAttributes;
+
+#endif // ACL_PROF_TENSOR_INFO_DEFINED
 
 /**
  * @ingroup AscendCL
@@ -112,7 +159,7 @@ typedef struct aclprofStepInfo aclprofStepInfo;
  *
  * @see aclprofFinalize
  */
-MSVP_PROF_API aclError aclprofInit(const char *profilerResultPath, size_t length);
+MSVP_PROF_API aclError aclprofInit(const char* profilerResultPath, size_t length);
 
 /**
  * @ingroup AscendCL
@@ -136,7 +183,7 @@ MSVP_PROF_API aclError aclprofFinalize();
  *
  * @see aclprofStop
  */
-MSVP_PROF_API aclError aclprofStart(const aclprofConfig *profilerConfig);
+MSVP_PROF_API aclError aclprofStart(const aclprofConfig* profilerConfig);
 
 /**
  * @ingroup AscendCL
@@ -152,8 +199,9 @@ MSVP_PROF_API aclError aclprofStart(const aclprofConfig *profilerConfig);
  *
  * @see aclprofDestroyConfig
  */
-MSVP_PROF_API aclprofConfig *aclprofCreateConfig(uint32_t *deviceIdList, uint32_t deviceNums,
-    aclprofAicoreMetrics aicoreMetrics, const aclprofAicoreEvents *aicoreEvents, uint64_t dataTypeConfig);
+MSVP_PROF_API aclprofConfig* aclprofCreateConfig(
+    uint32_t* deviceIdList, uint32_t deviceNums, aclprofAicoreMetrics aicoreMetrics,
+    const aclprofAicoreEvents* aicoreEvents, uint64_t dataTypeConfig);
 
 /**
  * @ingroup AscendCL
@@ -166,7 +214,7 @@ MSVP_PROF_API aclprofConfig *aclprofCreateConfig(uint32_t *deviceIdList, uint32_
  *
  * @see aclprofCreateConfig
  */
-MSVP_PROF_API aclError aclprofDestroyConfig(const aclprofConfig *profilerConfig);
+MSVP_PROF_API aclError aclprofDestroyConfig(const aclprofConfig* profilerConfig);
 
 /**
  * @ingroup AscendCL
@@ -179,7 +227,7 @@ MSVP_PROF_API aclError aclprofDestroyConfig(const aclprofConfig *profilerConfig)
  *
  * @see aclprofStart
  */
-MSVP_PROF_API aclError aclprofStop(const aclprofConfig *profilerConfig);
+MSVP_PROF_API aclError aclprofStop(const aclprofConfig* profilerConfig);
 
 /**
  * @ingroup AscendCL
@@ -194,7 +242,7 @@ MSVP_PROF_API aclError aclprofStop(const aclprofConfig *profilerConfig);
  *
  * @see aclprofSetConfig
  */
-MSVP_PROF_API aclError aclprofSetConfig(aclprofConfigType configType, const char *config, size_t configLength);
+MSVP_PROF_API aclError aclprofSetConfig(aclprofConfigType configType, const char* config, size_t configLength);
 
 /**
  * @ingroup AscendCL
@@ -208,8 +256,7 @@ MSVP_PROF_API aclError aclprofSetConfig(aclprofConfigType configType, const char
  *
  * @see aclprofModelUnSubscribe
  */
-MSVP_PROF_API aclError aclprofModelSubscribe(uint32_t modelId,
-    const aclprofSubscribeConfig *profSubscribeConfig);
+MSVP_PROF_API aclError aclprofModelSubscribe(uint32_t modelId, const aclprofSubscribeConfig* profSubscribeConfig);
 
 /**
  * @ingroup AscendCL
@@ -236,8 +283,8 @@ MSVP_PROF_API aclError aclprofModelUnSubscribe(uint32_t modelId);
  *
  * @see aclprofDestroySubscribeConfig
  */
-MSVP_PROF_API aclprofSubscribeConfig *aclprofCreateSubscribeConfig(int8_t timeInfoSwitch,
-    aclprofAicoreMetrics aicoreMetrics, void *fd);
+MSVP_PROF_API aclprofSubscribeConfig* aclprofCreateSubscribeConfig(
+    int8_t timeInfoSwitch, aclprofAicoreMetrics aicoreMetrics, void* fd);
 
 /**
  * @ingroup AscendCL
@@ -250,7 +297,7 @@ MSVP_PROF_API aclprofSubscribeConfig *aclprofCreateSubscribeConfig(int8_t timeIn
  *
  * @see aclprofCreateSubscribeConfig
  */
-MSVP_PROF_API aclError aclprofDestroySubscribeConfig(const aclprofSubscribeConfig *profSubscribeConfig);
+MSVP_PROF_API aclError aclprofDestroySubscribeConfig(const aclprofSubscribeConfig* profSubscribeConfig);
 
 /**
  * @ingroup AscendCL
@@ -261,7 +308,7 @@ MSVP_PROF_API aclError aclprofDestroySubscribeConfig(const aclprofSubscribeConfi
  * @retval ACL_SUCCESS The function is successfully executed.
  * @retval OtherValues Failure
  */
-MSVP_PROF_API aclError aclprofGetOpDescSize(size_t *opDescSize);
+MSVP_PROF_API aclError aclprofGetOpDescSize(size_t* opDescSize);
 
 /**
  * @ingroup AscendCL
@@ -274,7 +321,7 @@ MSVP_PROF_API aclError aclprofGetOpDescSize(size_t *opDescSize);
  * @retval ACL_SUCCESS The function is successfully executed.
  * @retval OtherValues Failure
  */
-MSVP_PROF_API aclError aclprofGetOpNum(const void *opInfo, size_t opInfoLen, uint32_t *opNumber);
+MSVP_PROF_API aclError aclprofGetOpNum(const void* opInfo, size_t opInfoLen, uint32_t* opNumber);
 
 /**
  * @ingroup AscendCL
@@ -288,8 +335,7 @@ MSVP_PROF_API aclError aclprofGetOpNum(const void *opInfo, size_t opInfoLen, uin
  * @retval ACL_SUCCESS The function is successfully executed.
  * @retval OtherValues Failure
  */
-MSVP_PROF_API aclError aclprofGetOpTypeLen(const void *opInfo, size_t opInfoLen, uint32_t index,
-    size_t *opTypeLen);
+MSVP_PROF_API aclError aclprofGetOpTypeLen(const void* opInfo, size_t opInfoLen, uint32_t index, size_t* opTypeLen);
 
 /**
  * @ingroup AscendCL
@@ -304,8 +350,8 @@ MSVP_PROF_API aclError aclprofGetOpTypeLen(const void *opInfo, size_t opInfoLen,
  * @retval ACL_SUCCESS The function is successfully executed.
  * @retval OtherValues Failure
  */
-MSVP_PROF_API aclError aclprofGetOpType(const void *opInfo, size_t opInfoLen, uint32_t index,
-    char *opType, size_t opTypeLen);
+MSVP_PROF_API aclError aclprofGetOpType(
+    const void* opInfo, size_t opInfoLen, uint32_t index, char* opType, size_t opTypeLen);
 
 /**
  * @ingroup AscendCL
@@ -319,8 +365,7 @@ MSVP_PROF_API aclError aclprofGetOpType(const void *opInfo, size_t opInfoLen, ui
  * @retval ACL_SUCCESS The function is successfully executed.
  * @retval OtherValues Failure
  */
-MSVP_PROF_API aclError aclprofGetOpNameLen(const void *opInfo, size_t opInfoLen, uint32_t index,
-    size_t *opNameLen);
+MSVP_PROF_API aclError aclprofGetOpNameLen(const void* opInfo, size_t opInfoLen, uint32_t index, size_t* opNameLen);
 
 /**
  * @ingroup AscendCL
@@ -335,8 +380,8 @@ MSVP_PROF_API aclError aclprofGetOpNameLen(const void *opInfo, size_t opInfoLen,
  * @retval ACL_SUCCESS The function is successfully executed.
  * @retval OtherValues Failure
  */
-MSVP_PROF_API aclError aclprofGetOpName(const void *opInfo, size_t opInfoLen, uint32_t index,
-    char *opName, size_t opNameLen);
+MSVP_PROF_API aclError aclprofGetOpName(
+    const void* opInfo, size_t opInfoLen, uint32_t index, char* opName, size_t opNameLen);
 
 /**
  * @ingroup AscendCL
@@ -349,7 +394,7 @@ MSVP_PROF_API aclError aclprofGetOpName(const void *opInfo, size_t opInfoLen, ui
  * @retval start time(us) of specified op with timestamp
  * @retval 0 for failed
  */
-MSVP_PROF_API uint64_t aclprofGetOpStart(const void *opInfo, size_t opInfoLen, uint32_t index);
+MSVP_PROF_API uint64_t aclprofGetOpStart(const void* opInfo, size_t opInfoLen, uint32_t index);
 
 /**
  * @ingroup AscendCL
@@ -362,7 +407,7 @@ MSVP_PROF_API uint64_t aclprofGetOpStart(const void *opInfo, size_t opInfoLen, u
  * @retval end time(us) of specified op with timestamp
  * @retval 0 for failed
  */
-MSVP_PROF_API uint64_t aclprofGetOpEnd(const void *opInfo, size_t opInfoLen, uint32_t index);
+MSVP_PROF_API uint64_t aclprofGetOpEnd(const void* opInfo, size_t opInfoLen, uint32_t index);
 
 /**
  * @ingroup AscendCL
@@ -375,7 +420,7 @@ MSVP_PROF_API uint64_t aclprofGetOpEnd(const void *opInfo, size_t opInfoLen, uin
  * @retval execution time(us) of specified op with timestamp
  * @retval 0 for failed
  */
-MSVP_PROF_API uint64_t aclprofGetOpDuration(const void *opInfo, size_t opInfoLen, uint32_t index);
+MSVP_PROF_API uint64_t aclprofGetOpDuration(const void* opInfo, size_t opInfoLen, uint32_t index);
 
 /**
  * @ingroup AscendCL
@@ -387,7 +432,7 @@ MSVP_PROF_API uint64_t aclprofGetOpDuration(const void *opInfo, size_t opInfoLen
  * @retval model id of subscription data
  * @retval 0 for failed
  */
-MSVP_PROF_API size_t aclprofGetModelId(const void *opInfo, size_t opInfoLen, uint32_t index);
+MSVP_PROF_API size_t aclprofGetModelId(const void* opInfo, size_t opInfoLen, uint32_t index);
 
 /**
  * @ingroup AscendCL
@@ -400,7 +445,7 @@ MSVP_PROF_API size_t aclprofGetModelId(const void *opInfo, size_t opInfoLen, uin
  * @retval op flag
  * @retval ACL_SUBSCRIBE_NONE for failed
  */
-MSVP_PROF_API aclprofSubscribeOpFlag aclprofGetOpFlag(const void *opInfo, size_t opInfoLen, uint32_t index);
+MSVP_PROF_API aclprofSubscribeOpFlag aclprofGetOpFlag(const void* opInfo, size_t opInfoLen, uint32_t index);
 
 /**
  * @ingroup AscendCL
@@ -414,8 +459,8 @@ MSVP_PROF_API aclprofSubscribeOpFlag aclprofGetOpFlag(const void *opInfo, size_t
  * @retval op flag
  * @retval NULL for failed
  */
-MSVP_PROF_API const char *aclprofGetOpAttriValue(const void *opInfo, size_t opInfoLen, uint32_t index,
-    aclprofSubscribeOpAttri attri);
+MSVP_PROF_API const char* aclprofGetOpAttriValue(
+    const void* opInfo, size_t opInfoLen, uint32_t index, aclprofSubscribeOpAttri attri);
 
 /**
  * @ingroup AscendCL
@@ -429,7 +474,7 @@ MSVP_PROF_API const char *aclprofGetOpAttriValue(const void *opInfo, size_t opIn
  */
 MSVP_PROF_API aclError aclprofGetStepTimestamp(aclprofStepInfo* stepInfo, aclprofStepTag tag, aclrtStream stream);
 
- /**
+/**
  * @ingroup AscendCL
  * @brief create pointer to aclprofStepInfo data
  *
@@ -438,98 +483,142 @@ MSVP_PROF_API aclError aclprofGetStepTimestamp(aclprofStepInfo* stepInfo, aclpro
  */
 MSVP_PROF_API aclprofStepInfo* aclprofCreateStepInfo();
 
- /**
+/**
  * @ingroup AscendCL
  * @brief destroy aclprofStepInfo pointer
  *
+ * @param stepinfo [IN] pointer to aclprofStepInfo data
  *
  * @retval void
  */
 MSVP_PROF_API void aclprofDestroyStepInfo(aclprofStepInfo* stepinfo);
 
 /**
-* @ingroup AscendCL
-* @brief create pointer to aclprofstamp
-*
-*
-* @retval aclprofStamp pointer
-*/
-MSVP_PROF_API void *aclprofCreateStamp();
+ * @ingroup AscendCL
+ * @brief create pointer to aclprofstamp
+ *
+ *
+ * @retval aclprofStamp pointer
+ */
+MSVP_PROF_API void* aclprofCreateStamp();
 
 /**
-* @ingroup AscendCL
-* @brief destroy stamp pointer
-*
-*
-* @retval void
-*/
-MSVP_PROF_API void aclprofDestroyStamp(void *stamp);
+ * @ingroup AscendCL
+ * @brief destroy stamp pointer
+ *
+ * @param stamp [IN] pointer to aclprofStamp data
+ *
+ * @retval void
+ */
+MSVP_PROF_API void aclprofDestroyStamp(void* stamp);
 
 /**
-* @ingroup AscendCL
-* @brief Record push timestamp
-*
-* @retval ACL_SUCCESS The function is successfully executed.
-* @retval OtherValues Failure
-*/
-MSVP_PROF_API aclError aclprofPush(void *stamp);
+ * @ingroup AscendCL
+ * @brief Record push timestamp
+ *
+ * @param stamp [IN] pointer to aclprofStamp data
+ *
+ * @retval ACL_SUCCESS The function is successfully executed.
+ * @retval OtherValues Failure
+ */
+MSVP_PROF_API aclError aclprofPush(void* stamp);
 
 /**
-* @ingroup AscendCL
-* @brief Record pop timestamp
-*
-*
-* @retval ACL_SUCCESS The function is successfully executed.
-* @retval OtherValues Failure
-*/
+ * @ingroup AscendCL
+ * @brief Record pop timestamp
+ *
+ *
+ * @retval ACL_SUCCESS The function is successfully executed.
+ * @retval OtherValues Failure
+ */
 MSVP_PROF_API aclError aclprofPop();
 
 /**
-* @ingroup AscendCL
-* @brief Record range start timestamp
-*
-* @retval ACL_SUCCESS The function is successfully executed.
-* @retval OtherValues Failure
-*/
-MSVP_PROF_API aclError aclprofRangeStart(void *stamp, uint32_t *rangeId);
+ * @ingroup AscendCL
+ * @brief Record range start timestamp
+ *
+ * @param stamp [IN] pointer to aclprofStamp data
+ * @param rangeId [OUT] pointer to range id
+ *
+ * @retval ACL_SUCCESS The function is successfully executed.
+ * @retval OtherValues Failure
+ */
+MSVP_PROF_API aclError aclprofRangeStart(void* stamp, uint32_t* rangeId);
 
 /**
-* @ingroup AscendCL
-* @brief Record range end timestamp
-*
-* @retval ACL_SUCCESS The function is successfully executed.
-* @retval OtherValues Failure
-*/
+ * @ingroup AscendCL
+ * @brief Record range end timestamp
+ *
+ * @param rangeId [IN] range id returned by aclprofRangeStart
+ *
+ * @retval ACL_SUCCESS The function is successfully executed.
+ * @retval OtherValues Failure
+ */
 MSVP_PROF_API aclError aclprofRangeStop(uint32_t rangeId);
 
 /**
-* @ingroup AscendCL
-* @brief set message to stamp
-*
-*
-* @retval void
-*/
-MSVP_PROF_API aclError aclprofSetStampTraceMessage(void *stamp, const char *msg, uint32_t msgLen);
+ * @ingroup AscendCL
+ * @brief set message to stamp
+ *
+ * @param stamp [IN] pointer to aclprofStamp data
+ * @param msg [IN] pointer to message string
+ * @param msgLen [IN] length of message
+ *
+ * @retval ACL_SUCCESS The function is successfully executed.
+ * @retval OtherValues Failure
+ */
+MSVP_PROF_API aclError aclprofSetStampTraceMessage(void* stamp, const char* msg, uint32_t msgLen);
 
 /**
-* @ingroup AscendCL
-* @brief Record mark timestamp
-*
-* @retval ACL_SUCCESS The function is successfully executed.
-* @retval OtherValues Failure
-*/
-MSVP_PROF_API aclError aclprofMark(void *stamp);
+ * @ingroup AscendCL
+ * @brief Record mark timestamp
+ *
+ * @param stamp [IN] pointer to aclprofStamp data
+ *
+ * @retval ACL_SUCCESS The function is successfully executed.
+ * @retval OtherValues Failure
+ */
+MSVP_PROF_API aclError aclprofMark(void* stamp);
 
 /**
-* @ingroup AscendCL
-* @brief Record markEx timestamp
-* @param [in] msg: message identify host ex point name
-* @param [in] msgLen: the length of message without '/0'
-* @param [in] stream: the stream created by aclCreateStream
-* @retval ACL_SUCCESS The function is successfully executed.
-* @retval OtherValues Failure
-*/
-MSVP_PROF_API aclError aclprofMarkEx(const char *msg, size_t msgLen, aclrtStream stream);
+ * @ingroup AscendCL
+ * @brief Record markEx timestamp
+ * @param [in] msg: message identify host ex point name
+ * @param [in] msgLen: the length of message without '/0'
+ * @param [in] stream: the stream created by aclCreateStream
+ * @retval ACL_SUCCESS The function is successfully executed.
+ * @retval OtherValues Failure
+ */
+MSVP_PROF_API aclError aclprofMarkEx(const char* msg, size_t msgLen, aclrtStream stream);
+
+/**
+ * @ingroup AscendCL
+ * @brief change op name to id
+ * @param [in] message: op name
+ * @retval ACL_SUCCESS The function is successfully executed.
+ * @retval OtherValues Failure
+ */
+MSVP_PROF_API uint64_t aclprofStr2Id(const char* message);
+
+/**
+ * @ingroup AscendCL
+ * @brief Push a range with event attributes
+ *
+ * @param attr [IN] pointer to event attributes, including tensor information
+ *
+ * @retval ACL_SUCCESS The function is successfully executed.
+ * @retval OtherValues Failure
+ */
+MSVP_PROF_API aclError aclprofRangePushEx(aclprofEventAttributes* attr);
+
+/**
+ * @ingroup AscendCL
+ * @brief Pop the latest range started by aclprofRangePushEx
+ *
+ * @retval ACL_SUCCESS The function is successfully executed.
+ * @retval OtherValues Failure
+ */
+MSVP_PROF_API aclError aclprofRangePop();
 #ifdef __cplusplus
 }
 #endif

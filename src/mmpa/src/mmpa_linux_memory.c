@@ -7,10 +7,11 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
+
 #include "mmpa_api.h"
 
 #ifdef __cplusplus
-#if    __cplusplus
+#if __cplusplus
 extern "C" {
 #endif /* __cpluscplus */
 #endif /* __cpluscplus */
@@ -18,10 +19,7 @@ extern "C" {
 /*
  * 描述:创建一个内存屏障
  */
-VOID mmMb(VOID)
-{
-    __asm__ __volatile__ ("" : : : "memory");
-}
+VOID mmMb(VOID) { __asm__ __volatile__("" : : : "memory"); }
 
 /*
  * 描述： 申请和内存页对齐的内存
@@ -29,16 +27,13 @@ VOID mmMb(VOID)
  *        alignSize--内存对齐的大小
  * 返回值：成功执行时，返回内存地址；失败返回NULL
  */
-VOID *mmAlignMalloc(mmSize mallocSize, mmSize alignSize)
-{
-    return memalign(alignSize, mallocSize);
-}
+VOID* mmAlignMalloc(mmSize mallocSize, mmSize alignSize) { return memalign(alignSize, mallocSize); }
 
 /*
  * 描述： 释放内存页对齐的内存
  * 参数： addr--内存地址
  */
-VOID mmAlignFree(VOID *addr)
+VOID mmAlignFree(VOID* addr)
 {
     if (addr != NULL) {
         free(addr);
@@ -50,4 +45,3 @@ VOID mmAlignFree(VOID *addr)
 }
 #endif /* __cpluscplus */
 #endif /* __cpluscplus */
-

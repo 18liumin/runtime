@@ -1,0 +1,150 @@
+/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+#include "xpu_kernel_task.h"
+#include "tprt_sqe_cqe.h"
+#include "stream_xpu.hpp"
+#include "kernel.hpp"
+#include "runtime_task_manager.h"
+#include "xpu_task_fail_callback_data_manager.h"
+#include "error_code.h"
+#include "task_scheduler_error.h"
+
+namespace cce {
+namespace runtime {
+
+template <typename T>
+void PrintXpuSqe(T const sqe, const char* desc, size_t size = 64)
+{
+    if (CheckLogLevel(static_cast<int32_t>(RUNTIME), DLOG_DEBUG) == 0) {
+        return;
+    }
+    const uint32_t* const cmd = RtPtrToPtr<const uint32_t*>(sqe);
+    for (size_t i = 0UL; i < (size / sizeof(uint32_t)); i += 8U) {
+        RT_LOG(
+            RT_LOG_DEBUG, "%s: %08x %08x %08x %08x %08x %08x %08x %08x", desc, cmd[i], cmd[i + 1U], cmd[i + 2U],
+            cmd[i + 3U], cmd[i + 4U], cmd[i + 5U], cmd[i + 6U], cmd[i + 7U]);
+    }
+}
+
+void ConstructTprtSqeForHeadCommon(const TaskInfo* taskInfo, TprtSqe_t* const sqe)
+{
+    Stream* const stream = taskInfo->stream;
+    (void)memset_s(sqe, sizeof(TprtSqe_t), 0, sizeof(TprtSqe_t));
+    sqe->commonSqe.sqeHeader.sqId = stream->GetSqId();
+    sqe->commonSqe.sqeHeader.taskSn = taskInfo->taskSn;
+    sqe->commonSqe.sqeHeader.dfxId = taskInfo->drvErr;
+}
+
+void ConstructTprtAICpuSqeForDavinciTask(TaskInfo* taskInfo, TprtSqe_t* const command)
+{
+    ConstructTprtSqeForHeadCommon(taskInfo, command);
+    TprtStarsAicpuSqe* const sqe = &(command->aicpuSqe);
+
+    AicpuTaskInfo* aicpuTaskInfo = &(taskInfo->u.aicpuTaskInfo);
+
+    /* word0-1 */
+    sqe->header.type = TPRT_SQE_TYPE_AICPU;
+
+    /* word2 - 3 */
+    sqe->startPcAddr = RtPtrToValue(aicpuTaskInfo->kernel->GetFuncNameDevAddr(taskInfo->stream->Device_()->Id_()));
+
+    /* word4 - 5 */
+    sqe->argsAddr = RtPtrToValue(aicpuTaskInfo->comm.args);
+
+    /* word6 */
+    sqe->timeout = aicpuTaskInfo->timeout;
+
+    PrintXpuSqe(command, "AICpuTask");
+    RT_LOG(RT_LOG_INFO, "TprtAICpu sq_id=%u, task_sn=%u, pos=%u.", sqe->header.sqId, sqe->header.taskSn, taskInfo->id);
+    return;
+}
+
+void XpuNotifyCallback(TaskInfo* taskInfo, const uint32_t devId)
+{
+    rtExceptionInfo_t exception = {};
+    exception.expandInfo.type = RT_EXCEPTION_INVALID;
+    // drvErr is auto-increment task id
+    exception.taskid = taskInfo->drvErr;
+    exception.tid = taskInfo->tid;
+    exception.deviceid = devId;
+    exception.streamid = static_cast<uint32_t>(taskInfo->stream->Id_());
+    rtError_t rtErrCode = RT_ERROR_NONE;
+    const char_t* const retDes = GetTsErrCodeMap(taskInfo->errorCode, &rtErrCode);
+    exception.retcode = static_cast<uint32_t>(RT_TRANS_EXT_ERRCODE(rtErrCode));
+    RT_LOG(
+        RT_LOG_DEBUG,
+        "XpuNotifyCallback, notify auto-increment task_id=%u, stream_id=%u, retcode=%#x[%s], tid=%u, device_id=%u, ",
+        exception.taskid, exception.streamid, exception.retcode, retDes, exception.tid, exception.deviceid);
+    XpuTaskFailCallBackManager::Instance().XpuNotify(&exception);
+}
+
+void DoCompleteSuccessForXpuDavinciTask(TaskInfo* taskInfo, const uint32_t devId)
+{
+    XpuPrintAICpuErrorInfoForDavinciTask(taskInfo, devId);
+    taskInfo->stream->SetErrCode(taskInfo->errorCode);
+    XpuNotifyCallback(taskInfo, devId);
+}
+
+void XpuPrintAICpuErrorInfoForDavinciTask(TaskInfo* taskInfo, const uint32_t devId)
+{
+    AicpuTaskInfo* aicpuTaskInfo = &(taskInfo->u.aicpuTaskInfo);
+    const uint32_t taskId = taskInfo->id;
+    const int32_t streamId = taskInfo->stream->Id_();
+    const Kernel* kernel = aicpuTaskInfo->kernel;
+    const std::string funcName = (kernel != nullptr) ? kernel->GetCpuFuncName() : "";
+    std::string kernelName = (kernel != nullptr) ? kernel->GetCpuOpType() : "";
+    std::string soName = (kernel != nullptr) ? kernel->GetCpuKernelSo() : "";
+
+    RT_LOG_CALL_MSG(
+        ERR_MODULE_AICPU,
+        "Aicpu kernel execution failed, device_id=%u, stream_id=%d,"
+        "%s=%u, soName=%s, funcName=%s, kernelName=%s, errorCode=%#x.",
+        devId, streamId, TaskIdDesc(), taskId, soName.c_str(), funcName.c_str(), kernelName.c_str(),
+        taskInfo->errorCode);
+}
+
+void TprtDavinciTaskUnInit(TaskInfo* taskInfo)
+{
+    if ((taskInfo->stream != nullptr) && (taskInfo->stream->Context_() != nullptr)) {
+        static_cast<XpuStream*>(taskInfo->stream)->ArgRelease(taskInfo, true);
+        RT_LOG(RT_LOG_INFO, "stream_id=%u, task_sn=%u.", taskInfo->stream->Id_(), taskInfo->taskSn);
+    }
+    if (taskInfo->type == TS_TASK_TYPE_KERNEL_AICPU) {
+        AicpuTaskInfo* aicpuTaskInfo = &(taskInfo->u.aicpuTaskInfo);
+        aicpuTaskInfo->comm.args = nullptr;
+        aicpuTaskInfo->funcName = nullptr;
+        DELETE_O(aicpuTaskInfo->kernel);
+    } else {
+        RT_LOG(RT_LOG_ERROR, "Only task type AI CPU supports TprtDavinciTaskUnInit.");
+    }
+}
+
+void SetTprtResultForDavinciTask(TaskInfo* taskInfo, const TprtLogicCqReport_t& logicCq)
+{
+    if ((logicCq.errorType & RT_STARS_EXIST_ERROR) != 0U) {
+        uint32_t aicpuErrMap[TS_STARS_ERROR_MAX_INDEX] = {TS_ERROR_AICPU_EXCEPTION, TS_ERROR_AICPU_TIMEOUT,
+                                                          logicCq.errorCode,        logicCq.errorCode,
+                                                          logicCq.errorCode,        logicCq.errorCode};
+
+        const uint32_t errorIndex = static_cast<uint32_t>(BitScan(static_cast<uint64_t>(logicCq.errorType)));
+        if (taskInfo->type == TS_TASK_TYPE_KERNEL_AICPU) {
+            taskInfo->errorCode = aicpuErrMap[errorIndex];
+            STREAM_REPORT_ERR_MSG(
+                taskInfo->stream, ERR_MODULE_HCCL,
+                "An error occurred in the AI CPU kernel task, retCode=%#x, streamId=%d, taskId=%u.",
+                taskInfo->errorCode, taskInfo->stream->Id_(), taskInfo->id);
+        } else {
+            RT_LOG(RT_LOG_ERROR, "only support aicpu, streamId=%d, taskId=%u.", taskInfo->stream->Id_(), taskInfo->id);
+        }
+    }
+}
+
+} // namespace runtime
+} // namespace cce

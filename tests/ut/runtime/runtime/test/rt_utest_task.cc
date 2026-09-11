@@ -1,0 +1,4201 @@
+﻿/**
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+#include "runtime/rt.h"
+#include "event.hpp"
+#include "scheduler.hpp"
+#include "gtest/gtest.h"
+#include "stars.hpp"
+#include "hwts.hpp"
+#include "npu_driver.hpp"
+#include "event.hpp"
+#include "notify.hpp"
+#include "subscribe.hpp"
+#include "task_res.hpp"
+#include "rt_unwrap.h"
+#include "stars_engine.hpp"
+#include "raw_device.hpp"
+#include "barrier_task.h"
+#include "runtime_dump_task.h"
+#include "model_maintaince_task.h"
+#include "model_execute_task.h"
+#include "model_graph_task.h"
+#include "model_update_task.h"
+#include "profiling_task.h"
+#include "cond_op_stream_task.h"
+#include "cond_op_label_task.h"
+#include "host_task.hpp"
+#include "task.hpp"
+#include "common_task.h"
+#include "reduce_task.h"
+#include "count_notify.hpp"
+#include "ffts_task.h"
+#include "kernel.hpp"
+#include "binary_loader.hpp"
+#include "program_common.hpp"
+#undef protected
+#undef private
+#include <thread>
+#include <chrono>
+#include <limits>
+#include "ctrl_stream.hpp"
+#include "ctrl_stream.hpp"
+#include "runtime.hpp"
+#include "runtime_keeper.h"
+#include "mockcpp/mockcpp.hpp"
+#include "uma_arg_loader.hpp"
+#include "task_test_helper.h"
+#include "driver/ascend_hal.h"
+#include "osal.hpp"
+#include "api.hpp"
+#include "stars.hpp"
+#include "stars_david.hpp"
+#include "stars.hpp"
+#include "hwts.hpp"
+#include "profiler.hpp"
+#include "profiler_struct.hpp"
+#include "toolchain/prof_api.h"
+#include "task_submit.hpp"
+#include "thread_local_container.hpp"
+#include "device/device_error_proc.hpp"
+#include "memory_task.h"
+#include "kernel_fusion_task.h"
+#include "task_fail_callback_manager.hpp"
+#include "davinci_kernel_task.h"
+#include "stub_task.hpp"
+#include "task_info.hpp"
+#include "printf.hpp"
+#include "cmo_task.h"
+#include "stream_task.h"
+#include "task_info_v100.h"
+#include "event_task.h"
+#include "notify_task.h"
+#include "maintenance_task.h"
+
+using namespace testing;
+using namespace cce::runtime;
+
+namespace {
+void* g_expectedAicpuArgAddr = nullptr;
+uint32_t g_expectedAicpuArgSize = 0U;
+bool g_aicpuExceptionCallbackCalled = false;
+bool g_aicoreExceptionCallbackCalled = false;
+bool g_rawAicpuExceptionCallbackCalled = false;
+uint32_t g_invalidRawAicpuExceptionCallbackCount = 0U;
+void* g_cachedRawAicpuSoNameAddr = nullptr;
+void* g_cachedRawAicpuFunctionNameAddr = nullptr;
+
+void GetCachedRawAicpuNameStub(ArgLoader* argLoader, std::string& name, const KernelInfoType type, void* addr)
+{
+    UNUSED(argLoader);
+    if ((type == KernelInfoType::SO_NAME) && (addr == g_cachedRawAicpuSoNameAddr)) {
+        name = "libraw_aicpu.so";
+    } else if ((type == KernelInfoType::KERNEL_NAME) && (addr == g_cachedRawAicpuFunctionNameAddr)) {
+        name = "RawAicpuFunction";
+    }
+}
+
+void CheckAicpuExceptionCallback(rtExceptionInfo_t* exceptionInfo, void* userData)
+{
+    (void)userData;
+    ASSERT_NE(exceptionInfo, nullptr);
+    EXPECT_EQ(exceptionInfo->expandInfo.type, RT_EXCEPTION_AICPU);
+    const rtAicpuExDetailInfo_t& aicpuInfo = exceptionInfo->expandInfo.u.aicpuInfo;
+    EXPECT_EQ(aicpuInfo.argAddr, g_expectedAicpuArgAddr);
+    EXPECT_EQ(aicpuInfo.argsize, g_expectedAicpuArgSize);
+    EXPECT_STREQ(aicpuInfo.soName, "libcpu.so");
+    EXPECT_STREQ(aicpuInfo.functionName, "RunCpuKernel");
+    EXPECT_STREQ(aicpuInfo.kernelName, "Add");
+    g_aicpuExceptionCallbackCalled = true;
+}
+
+void CheckAicoreExceptionCallback(rtExceptionInfo_t* exceptionInfo)
+{
+    ASSERT_NE(exceptionInfo, nullptr);
+    EXPECT_EQ(exceptionInfo->expandInfo.type, RT_EXCEPTION_AICORE);
+    EXPECT_EQ(exceptionInfo->expandInfo.u.aicoreInfo.exceptionArgs.argAddr, g_expectedAicpuArgAddr);
+    EXPECT_EQ(exceptionInfo->expandInfo.u.aicoreInfo.exceptionArgs.argsize, g_expectedAicpuArgSize);
+    g_aicoreExceptionCallbackCalled = true;
+}
+
+void CheckRawAicpuExceptionCallback(rtExceptionInfo_t* exceptionInfo)
+{
+    ASSERT_NE(exceptionInfo, nullptr);
+    EXPECT_EQ(exceptionInfo->expandInfo.type, RT_EXCEPTION_AICPU);
+    const rtAicpuExDetailInfo_t& aicpuInfo = exceptionInfo->expandInfo.u.aicpuInfo;
+    EXPECT_EQ(aicpuInfo.argAddr, g_expectedAicpuArgAddr);
+    EXPECT_EQ(aicpuInfo.argsize, g_expectedAicpuArgSize);
+    EXPECT_EQ(aicpuInfo.funcHandle, nullptr);
+    EXPECT_STREQ(aicpuInfo.soName, "libraw_aicpu.so");
+    EXPECT_STREQ(aicpuInfo.functionName, "RawAicpuFunction");
+    EXPECT_EQ(aicpuInfo.kernelName, nullptr);
+
+    rtFuncHandle funcHandle = nullptr;
+    EXPECT_EQ(rtGetFuncHandleFromExceptionInfo(exceptionInfo, &funcHandle), ACL_ERROR_RT_PARAM_INVALID);
+    EXPECT_EQ(funcHandle, nullptr);
+    g_rawAicpuExceptionCallbackCalled = true;
+}
+
+void CheckInvalidRawAicpuExceptionCallback(rtExceptionInfo_t* exceptionInfo)
+{
+    ASSERT_NE(exceptionInfo, nullptr);
+    EXPECT_EQ(exceptionInfo->expandInfo.type, RT_EXCEPTION_AICPU);
+    const rtAicpuExDetailInfo_t& aicpuInfo = exceptionInfo->expandInfo.u.aicpuInfo;
+    EXPECT_EQ(aicpuInfo.argAddr, g_expectedAicpuArgAddr);
+    EXPECT_EQ(aicpuInfo.argsize, g_expectedAicpuArgSize);
+    EXPECT_EQ(aicpuInfo.funcHandle, nullptr);
+    EXPECT_EQ(aicpuInfo.soName, nullptr);
+    EXPECT_EQ(aicpuInfo.functionName, nullptr);
+    EXPECT_EQ(aicpuInfo.kernelName, nullptr);
+    ++g_invalidRawAicpuExceptionCallbackCount;
+}
+} // namespace
+
+class TaskTest : public testing::Test {
+protected:
+    static void SetUpTestCase()
+    {
+        (void)rtSetDevice(0);
+        rtError_t error1 = rtStreamCreate(&streamHandle_, 0);
+        rtError_t error2 = rtEventCreate(&eventHandle_);
+        stream_ = rt_ut::UnwrapOrNull<Stream>(streamHandle_);
+        event_ = rt_ut::UnwrapOrNull<Event>(eventHandle_);
+        std::cout << "task test start: " << error1 << ", " << error2 << std::endl;
+    }
+
+    static void TearDownTestCase()
+    {
+        rtError_t error1 = rtStreamDestroy(streamHandle_);
+        rtError_t error2 = rtEventDestroy(eventHandle_);
+        std::cout << "task test end" << error1 << ", " << error2 << std::endl;
+        rtDeviceReset(0);
+    }
+
+    virtual void SetUp() {}
+
+    virtual void TearDown()
+    {
+        GlobalMockObject::verify();
+        GlobalMockObject::reset();
+    }
+
+    static Stream* stream_;
+    static Event* event_;
+    static rtStream_t streamHandle_;
+    static rtEvent_t eventHandle_;
+
+    static void ResetDeviceAndRecreateSharedResources()
+    {
+        rtError_t error = rtDeviceReset(0);
+        EXPECT_EQ(error, RT_ERROR_NONE);
+        error = rtSetDevice(0);
+        EXPECT_EQ(error, RT_ERROR_NONE);
+        streamHandle_ = NULL;
+        eventHandle_ = NULL;
+        error = rtStreamCreate(&streamHandle_, 0);
+        EXPECT_EQ(error, RT_ERROR_NONE);
+        stream_ = rt_ut::UnwrapOrNull<Stream>(streamHandle_);
+        error = rtEventCreate(&eventHandle_);
+        EXPECT_EQ(error, RT_ERROR_NONE);
+        event_ = rt_ut::UnwrapOrNull<Event>(eventHandle_);
+    }
+
+    static Model* EnsureStreamModel(rtModel_t* modelHandle)
+    {
+        *modelHandle = nullptr;
+        Model* model = stream_->Model_();
+        if (model != nullptr) {
+            return model;
+        }
+
+        rtError_t error = rtModelCreate(modelHandle, 0);
+        EXPECT_EQ(error, RT_ERROR_NONE);
+        if (error != RT_ERROR_NONE) {
+            return nullptr;
+        }
+        model = rt_ut::UnwrapOrNull<Model>(*modelHandle);
+        EXPECT_NE(model, nullptr);
+        if (model == nullptr) {
+            return nullptr;
+        }
+        stream_->SetModel(model);
+        return model;
+    }
+
+    static void ReleaseOwnedStreamModel(rtModel_t modelHandle, Model* model)
+    {
+        if (modelHandle == nullptr) {
+            return;
+        }
+        stream_->SetModel(nullptr);
+        (void)rtModelDestroy(modelHandle);
+    }
+};
+
+Stream* TaskTest::stream_ = NULL;
+Event* TaskTest::event_ = NULL;
+rtStream_t TaskTest::streamHandle_ = NULL;
+rtEvent_t TaskTest::eventHandle_ = NULL;
+
+drvError_t drvDeviceGetTransWay_stub_1(void* src, void* dst, uint8_t* trans_type)
+{
+    drvError_t error = DRV_ERROR_NONE;
+    *trans_type = RT_MEMCPY_CHANNEL_TYPE_PCIe;
+
+    return error;
+}
+
+drvError_t drvDeviceGetTransWay_stub_2(void* src, void* dst, uint8_t* trans_type)
+{
+    drvError_t error = DRV_ERROR_NONE;
+    *trans_type = RT_MEMCPY_CHANNEL_TYPE_HCCs;
+
+    return error;
+}
+
+rtError_t MemCopySync_stub(
+    NpuDriver* drv, void* dst, uint64_t destMax, const void* src, uint64_t size, rtMemcpyKind_t kind)
+{
+    memcpy(dst, src, destMax);
+    return RT_ERROR_NONE;
+}
+
+namespace {
+constexpr uint64_t kFftsContextLenForTest = 128U;
+uint32_t g_fftsMemCopySyncCallCount = 0U;
+rtFftsPlusAicAivCtx_t g_fftsAicAivCtxForTest = {};
+rtFftsPlusMixAicAivCtx_t g_fftsMixCtxForTest = {};
+
+rtError_t FftsMemCopySyncFailStub(
+    Driver* drv, void* dst, uint64_t destMax, const void* src, uint64_t size, rtMemcpyKind_t kind)
+{
+    ++g_fftsMemCopySyncCallCount;
+    return RT_ERROR_INVALID_VALUE;
+}
+
+rtError_t FftsMemCopySyncMixCtxStub(
+    Driver* drv, void* dst, uint64_t destMax, const void* src, uint64_t size, rtMemcpyKind_t kind)
+{
+    ++g_fftsMemCopySyncCallCount;
+    *static_cast<rtFftsPlusMixAicAivCtx_t*>(dst) = g_fftsMixCtxForTest;
+    return RT_ERROR_NONE;
+}
+
+rtError_t FftsMemCopySyncAicAivCtxStub(
+    Driver* drv, void* dst, uint64_t destMax, const void* src, uint64_t size, rtMemcpyKind_t kind)
+{
+    ++g_fftsMemCopySyncCallCount;
+    *static_cast<rtFftsPlusAicAivCtx_t*>(dst) = g_fftsAicAivCtxForTest;
+    return RT_ERROR_NONE;
+}
+} // namespace
+
+TEST_F(TaskTest, OnlineProfEnable_to_cmd)
+{
+    TaskInfo onlineProfTask = {};
+    rtCommand_t command;
+    NpuDriver drv;
+
+    InitByStream(&onlineProfTask, stream_);
+    EXPECT_NE(onlineProfTask.stream, nullptr);
+    rtError_t error = OnlineProfEnableTaskInit(&onlineProfTask, 1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemAddressTranslate).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+    onlineProfTask.stream = stream_;
+    ToCommand(&onlineProfTask, &command);
+}
+
+TEST_F(TaskTest, fusion_dump_addr_set_ToCommandBody)
+{
+    TaskInfo fusionDumpAddrSetTask = {};
+    rtCommand_t command;
+    NpuDriver drv;
+
+    InitByStream(&fusionDumpAddrSetTask, stream_);
+    EXPECT_NE(fusionDumpAddrSetTask.stream, nullptr);
+    rtError_t error = FusionDumpAddrSetTaskInit(&fusionDumpAddrSetTask, 0, NULL, 1, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemAddressTranslate).stubs().will(returnValue(RT_ERROR_NONE));
+
+    fusionDumpAddrSetTask.stream = stream_;
+
+    ToCommand(&fusionDumpAddrSetTask, &command);
+}
+
+TEST_F(TaskTest, ActiveAicpuStreamTask_to_cmd)
+{
+    TaskInfo task = {};
+
+    rtCommand_t command;
+    InitByStream(&task, stream_);
+    auto error = ActiveAicpuStreamTaskInit(&task, 1, 64, 1, 1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    ToCommand(&task, &command);
+}
+
+TEST_F(TaskTest, DynamicProfilingEnableTask_to_cmd)
+{
+    TaskInfo task = {};
+    uint64_t val[12];
+    rtCommand_t command;
+    InitByStream(&task, stream_);
+    auto error = DynamicProfilingEnableTaskInit(&task, 1, (rtProfCfg_t*)&val);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    ToCommand(&task, &command);
+}
+
+TEST_F(TaskTest, DynamicProfilingDisableTask_to_cmd)
+{
+    TaskInfo task = {};
+    uint64_t val[12];
+    rtCommand_t command;
+    InitByStream(&task, stream_);
+    auto error = DynamicProfilingDisableTaskInit(&task, 1, (rtProfCfg_t*)&val);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    ToCommand(&task, &command);
+}
+
+TEST_F(TaskTest, notify_wait_task_fail_print)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    NotifyWaitTaskInit(&task, 0, 0, nullptr, nullptr, false);
+
+    uint32_t errorcode = 10;
+    SetResult(&task, (const uint32_t*)&errorcode, 1);
+    Complete(&task, 0);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTest, notify_wait_task_set_task_tag)
+{
+    TaskInfo task = {};
+    task.id = 1;
+
+    const char* taskTag1 = "123456123456";
+    rtError_t error = rtSetTaskTag(taskTag1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStream_t stream = NULL;
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    const char* taskTag = "123456";
+    error = rtSetTaskTag(taskTag);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
+    rtInstance->SetNpuCollectFlag(true);
+    SetTaskTag(&task);
+    EXPECT_STREQ(task.stream->GetTaskTag(task.id).c_str(), taskTag);
+
+    rtInstance->SetNpuCollectFlag(false);
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTest, model_maintance_DoCompleteSuccess_01)
+{
+    TaskInfo model_maintance_task = {};
+
+    Runtime* rt = ((Runtime*)Runtime::Instance());
+    Device* device = new RawDevice(0);
+    device->Init();
+    Stream* stream = new Stream(device, 0);
+    Stream* opStream = new Stream(device, 0);
+    stream->streamId_ = 100; // id不能跟SetUpTestCase中创建的stream
+                             // id相同（优化bitmap类后，id按序从最近一次分配id的free_bitmap分配，0和1为有效id）
+    opStream->streamId_ = 101;
+    uint32_t res = RT_ERROR_MODEL_EXE_FAILED;
+    rtError_t error;
+
+    InitByStream(&model_maintance_task, stream);
+    error = ModelMaintainceTaskInit(&model_maintance_task, MMT_STREAM_ADD, NULL, opStream, RT_MODEL_HEAD_STREAM, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    SetResult(&model_maintance_task, (void*)&res, 1);
+    Complete(&model_maintance_task, 0);
+
+    delete stream;
+    delete opStream;
+    delete device;
+}
+
+TEST_F(TaskTest, model_execute_task_print)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP(&Stream::IsPendingListEmpty).stubs().will(returnValue(false));
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    ModelExecuteTaskInit(&task, NULL, 0, 1);
+
+    uint32_t errorcode[3] = {10, 1, 0};
+    WaitExecFinishForModelExecuteTask(&task);
+    SetResult(&task, (const uint32_t*)errorcode, 1);
+    Complete(&task, 0);
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, SetStarsResult_ModelExecuteTask_Timeout)
+{
+    TaskInfo task = {};
+    rtStream_t stream = NULL;
+    EXPECT_EQ(rtStreamCreate(&stream, 0), RT_ERROR_NONE);
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    ModelExecuteTaskInit(&task, NULL, 0, 1);
+
+    rtCqReport_t logicCq = {};
+    logicCq.errorType = 0x4U;
+    logicCq.errorCode = 0;
+
+    SetStarsResultForModelExecuteTask(&task, logicCq);
+    EXPECT_EQ(task.errorCode, TS_ERROR_TASK_TIMEOUT);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, davinci_kernel_task_print)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    AicpuTaskInit(&task, 1, 1);
+    EXPECT_EQ(task.type, TS_TASK_TYPE_KERNEL_AICPU);
+    uint32_t errorcode[3] = {10, 1, 0};
+    SetResult(&task, (const uint32_t*)errorcode, 1);
+    PreCheckTaskErr(&task, 0);
+    PrintErrorInfo(&task, 0);
+
+    uint32_t timeoutErr[3] = {0x28, 1, 0};
+    SetResult(&task, (const uint32_t*)timeoutErr, 1);
+    PreCheckTaskErr(&task, 0);
+    PrintErrorInfo(&task, 0);
+
+    task.u.aicTaskInfo.comm.args = (void*)0x1;
+    task.u.aicTaskInfo.comm.argsSize = 256U;
+
+    error = GetArgsInfo(&task);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, GetTaskKernelName)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    std::string name = GetTaskKernelName(nullptr); // task = nullptr
+    EXPECT_EQ(name, "none");
+
+    task.type = TS_TASK_TYPE_KERNEL_AICPU;
+    name = GetTaskKernelName(&task); // task.type
+    EXPECT_EQ(name, "none");
+
+    const void* stubFunc = (void*)0x02;
+    const char* stubName = "abc";
+    Kernel* kernel = NULL;
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICORE);
+    Program* program = &stubProg;
+    program->kernelNames_ = {'a', 'b', 'c', 'd', '\0'};
+    kernel = new (std::nothrow) Kernel("", 0ULL, program, RT_KERNEL_ATTR_TYPE_AICORE, 0);
+    kernel->SetStub_(stubFunc);
+    AicTaskInfo* aicTaskInfo = &task.u.aicTaskInfo;
+    aicTaskInfo->kernel = kernel;
+
+    kernel->name_ = ""; // kernel name is empty
+    task.type = TS_TASK_TYPE_KERNEL_AICORE;
+    name = GetTaskKernelName(&task);
+    EXPECT_EQ(name, "none");
+    task.type = TS_TASK_TYPE_KERNEL_AIVEC;
+    name = GetTaskKernelName(&task);
+    EXPECT_EQ(name, "none");
+
+    kernel->name_ = "op_name_test";
+    task.type = TS_TASK_TYPE_KERNEL_AICORE;
+    name = GetTaskKernelName(&task);
+    EXPECT_EQ(name, "op_name_test");
+    task.type = TS_TASK_TYPE_KERNEL_AIVEC;
+    name = GetTaskKernelName(&task);
+    EXPECT_EQ(name, "op_name_test");
+    delete kernel;
+}
+
+TEST_F(TaskTest, davinci_kernel_task_print_mixCtx)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    // new kernel
+    const void* stubFunc = (void*)0x02;
+    const char* stubName = "abc";
+    Kernel* kernel = NULL;
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICORE);
+    Program* program = &stubProg;
+    program->kernelNames_ = {'a', 'b', 'c', 'd', '\0'};
+    MOCKER_CPP(&Runtime::GetProgram).stubs().will(returnValue(true));
+    MOCKER_CPP(&Runtime::PutProgram).stubs().will(ignoreReturnValue());
+
+    kernel = new (std::nothrow) Kernel("", 0ULL, program, RT_KERNEL_ATTR_TYPE_AICORE, 0);
+    kernel->SetStub_(stubFunc);
+    ((Runtime*)Runtime::Instance())->kernelTable_.Add(kernel);
+    task.u.aicTaskInfo.kernel = kernel;
+    kernel->SetMixType(MIX_AIC);
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    Kernel* aicKernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    AicTaskInit(&task, aicKernel, aicKernel->GetKernelAttrType(), 1, nullptr);
+    delete aicKernel;
+
+    task.u.aicTaskInfo.comm.args = (void*)0x1;
+    task.u.aicTaskInfo.comm.argsSize = 256U;
+
+    error = GetArgsInfo(&task);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    // stub for descAlignBuf = nullptr
+    error = GetMixCtxInfo(&task);
+    EXPECT_EQ(error, RTS_INNER_ERROR);
+
+    // stub for descAlignBuf != nullptr
+    task.u.aicTaskInfo.descAlignBuf = malloc(256);
+    error = GetMixCtxInfo(&task);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    // stub for MemCopySync fail
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_DEVICE_NULL));
+    error = GetMixCtxInfo(&task);
+    EXPECT_EQ(error, RT_ERROR_DEVICE_NULL);
+
+    // set mixType != NO_MIX.aicTaskInfo
+    EXPECT_EQ(task.u.aicTaskInfo.kernel->mixType_, 1U);
+
+    // printErrorInfo for mixCtx
+    PrintErrorInfo(&task, 0);
+
+    free(task.u.aicTaskInfo.descAlignBuf);
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, davinci_mix_kernel_task_print)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    Kernel* kernel = CreateTestKernelWithMixType(RT_KERNEL_ATTR_TYPE_AICORE, MIX_AIC_AIV_MAIN_AIC);
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+    EXPECT_EQ(task.type, TS_TASK_TYPE_KERNEL_AICORE);
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, stream_IsNeedPostProc_true)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtContext_t ctx;
+    TaskInfo tsk = {};
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    Stream* stream_var = rt_ut::UnwrapOrNull<Stream>(stream);
+    stream_var->isHasPcieBar_ = true;
+    tsk.stream = stream_var;
+    stream_var->IsNeedPostProc(&tsk);
+    tsk.type = TS_TASK_TYPE_NOTIFY_WAIT;
+    stream_var->IsNeedPostProc(&tsk);
+    tsk.type = TS_TASK_TYPE_NOTIFY_RECORD;
+    stream_var->IsNeedPostProc(&tsk);
+    error = rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, stream_IsNeedPostProc_false)
+{
+    rtError_t error;
+    rtStream_t stream;
+    rtContext_t ctx;
+    TaskInfo tsk = {};
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    Stream* stream_var = rt_ut::UnwrapOrNull<Stream>(stream);
+    tsk.stream = stream_var;
+    tsk.type = TS_TASK_TYPE_FFTS_PLUS;
+    stream_var->IsNeedPostProc(&tsk);
+    error = rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, davinci_kernel_aic_task_print)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+    EXPECT_EQ(task.type, TS_TASK_TYPE_KERNEL_AICORE);
+
+    uint32_t errorcode[3] = {10, 1, 0};
+    SetResult(&task, (const uint32_t*)errorcode, 1);
+    PreCheckTaskErr(&task, 0);
+    PrintErrorInfo(&task, 0);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, davinci_kernel_aic_task_print1)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+
+    uint32_t errorcode[3] = {10, 1, 0};
+    SetResult(&task, (const uint32_t*)errorcode, 1);
+    task.mte_error = 0x58;
+    PreCheckTaskErr(&task, 0);
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, davinci_kernel_task_print2)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+    EXPECT_EQ(task.type, TS_TASK_TYPE_KERNEL_AICORE);
+
+    const uint32_t argsSize = sizeof(uint32_t) + sizeof(uint64_t) * 2;
+    char args[argsSize] = {};
+    uintptr_t argsAddr = reinterpret_cast<uintptr_t>(args);
+    uint32_t* fwkKernelType = reinterpret_cast<uint32_t*>(argsAddr);
+    *fwkKernelType = 0;
+
+    std::string opName = "test";
+    const uint64_t extendInfoLen = sizeof(int32_t) + sizeof(uint32_t) + sizeof(opName.length());
+    char extendInfo[extendInfoLen] = {};
+    uint64_t* extInfoLen = reinterpret_cast<uint64_t*>(argsAddr + argsSize - sizeof(uint64_t) * 2);
+    *extInfoLen = extendInfoLen;
+    uint64_t* extInfoAddr = reinterpret_cast<uint64_t*>(argsAddr + argsSize - sizeof(uint64_t));
+    *extInfoAddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(extendInfo));
+
+    uintptr_t extendInfoAddr = reinterpret_cast<uintptr_t>(extendInfo);
+    int32_t* infoType = reinterpret_cast<int32_t*>(extendInfoAddr);
+    *infoType = 4;
+    uint32_t* infoLen = reinterpret_cast<uint32_t*>(extendInfoAddr + sizeof(int32_t));
+    *infoLen = opName.length();
+    uintptr_t msgInfoAddr = extendInfoAddr + sizeof(int32_t) + sizeof(uint32_t);
+    memcpy(reinterpret_cast<void*>(msgInfoAddr), opName.c_str(), opName.length());
+    SetArgs(&task, args, argsSize, NULL);
+
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(invoke(MemCopySync_stub));
+
+    uint32_t errorcode[3] = {10, 1, 0};
+    SetResult(&task, (const uint32_t*)errorcode, 1);
+    PreCheckTaskErr(&task, 0);
+    PrintErrorInfo(&task, 0);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, davinci_kernel_task_print3)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+    EXPECT_EQ(task.type, TS_TASK_TYPE_KERNEL_AICORE);
+    uint32_t errorcode[3] = {10, 1, 0};
+    SetResult(&task, (const uint32_t*)errorcode, 1);
+    PreCheckTaskErr(&task, 0);
+    PrintErrorInfo(&task, 0);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, davinci_kernel_task_print4)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+    EXPECT_EQ(task.type, TS_TASK_TYPE_KERNEL_AICORE);
+
+    const uint32_t argsSize = sizeof(uint32_t) + sizeof(uint64_t) * 2;
+    char args[argsSize] = {};
+    uintptr_t argsAddr = reinterpret_cast<uintptr_t>(args);
+    uint32_t* fwkKernelType = reinterpret_cast<uint32_t*>(argsAddr);
+    *fwkKernelType = 0;
+    SetArgs(&task, args, argsSize, NULL);
+
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::GetRunMode).stubs().will(returnValue((uint32_t)1));
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_DRV_NULL));
+
+    uint32_t errorcode[3] = {10, 1, 0};
+    SetResult(&task, (const uint32_t*)errorcode, 1);
+    PreCheckTaskErr(&task, 0);
+    PrintErrorInfo(&task, 0);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, davinci_kernel_task_print5)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+
+    const uint32_t argsSize = sizeof(uint32_t) + sizeof(uint64_t);
+    char args[argsSize] = {};
+    SetArgs(&task, args, argsSize, NULL);
+
+    uint32_t errorcode[3] = {10, 1, 0};
+    SetResult(&task, (const uint32_t*)errorcode, 1);
+    PrintErrorInfo(&task, 0);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, davinci_kernel_task_print6)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+
+    const uint32_t argsSize = sizeof(uint32_t) * 3 + sizeof(uint64_t);
+    char args[argsSize] = {};
+    uintptr_t argsAddr = reinterpret_cast<uintptr_t>(args);
+
+    int32_t shapeType = 1;
+    const uint64_t extendInfoLen = sizeof(int32_t) + sizeof(uint32_t) + sizeof(int32_t);
+    char extendInfo[extendInfoLen] = {};
+    uint64_t* extInfoLen = reinterpret_cast<uint64_t*>(argsAddr + sizeof(uint32_t) * 2);
+    *extInfoLen = extendInfoLen;
+    uint64_t* extInfoAddr = reinterpret_cast<uint64_t*>(argsAddr + sizeof(uint32_t) * 3);
+    *extInfoAddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(extendInfo));
+
+    uintptr_t extendInfoAddr = reinterpret_cast<uintptr_t>(extendInfo);
+    int32_t* infoType = reinterpret_cast<int32_t*>(extendInfoAddr);
+    *infoType = 0;
+    uint32_t* infoLen = reinterpret_cast<uint32_t*>(extendInfoAddr + sizeof(int32_t));
+    *infoLen = sizeof(int32_t);
+    uintptr_t msgInfoAddr = extendInfoAddr + sizeof(int32_t) + sizeof(uint32_t);
+    memcpy(reinterpret_cast<void*>(msgInfoAddr), &shapeType, sizeof(int32_t));
+    SetArgs(&task, args, argsSize, NULL);
+
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(invoke(MemCopySync_stub));
+
+    uint32_t errorcode[3] = {10, 1, 0};
+    SetResult(&task, (const uint32_t*)errorcode, 1);
+    PrintErrorInfo(&task, 0);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, davinci_kernel_task_print7)
+{
+    GlobalMockObject::verify();
+    TaskInfo task = {};
+    rtError_t error;
+
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    EXPECT_NE(rtInstance, nullptr);
+    rtInstance->SetSimtPrintFifoSize(1048576U);
+    EXPECT_EQ(rtInstance->GetSimtPrintFifoSize(), 1048576U);
+
+    RawDevice* device = new RawDevice(0);
+    EXPECT_NE(device, nullptr);
+    device->Init();
+    device->simtEnable_ = true;
+    Stream* stream = new Stream(device, 0);
+
+    Kernel* testKernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, stream);
+    AicTaskInit(&task, testKernel, testKernel->GetKernelAttrType(), 1, nullptr);
+    delete testKernel;
+    EXPECT_EQ(task.type, TS_TASK_TYPE_KERNEL_AICORE);
+
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICORE);
+    Program* program = &stubProg;
+    int32_t fun1;
+    Kernel* kernel = new Kernel("f1", 0ULL, program, RT_KERNEL_ATTR_TYPE_AICORE, 10);
+    kernel->SetStub_(&fun1);
+    kernel->SetMixType(0);
+    AicTaskInfo* aicTaskInfo = &(task.u.aicTaskInfo);
+    aicTaskInfo->kernel = kernel;
+
+    Module module(device);
+    MOCKER_CPP(&Context::GetModule).stubs().will(returnValue(&module));
+    PrintErrorInfo(&task, 0);
+
+    device->simtPrintLen_ = 1048576U;
+    std::vector<uint8_t> hostData(1048576U, 0);
+    error = InitSimtPrintf(hostData.data(), 1048576U, device->driver_);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    device->simtPrintfAddr_ = hostData.data();
+    PrintErrorInfo(&task, 0);
+
+    delete kernel;
+    delete stream;
+    delete device;
+    GlobalMockObject::verify();
+}
+
+TEST_F(TaskTest, base_task_print0)
+{
+    TaskInfo task = {};
+    rtStream_t stream = NULL;
+    rtError_t error;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    AddEndGraphTaskInit(&task, 0, 0, 0, 0, 0);
+    PrintErrorInfo(&task, 0);
+
+    rtStarsSqe_t sqe;
+    ToConstructSqe(&task, &sqe);
+    Complete(&task, 0);
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, base_task_lock_unlock)
+{
+    TaskInfo task = {};
+    TaskInfo task1 = {};
+    rtStream_t stream = NULL;
+    rtError_t error;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    SqLockUnlockTaskInit(&task, true);
+    InitByStream(&task1, rt_ut::UnwrapOrNull<Stream>(stream));
+    SqLockUnlockTaskInit(&task1, false);
+
+    rtStarsSqe_t sqe;
+    ToConstructSqe(&task, &sqe);
+    Complete(&task, 0);
+    rtStarsSqe_t sqe1;
+    ToConstructSqe(&task1, &sqe1);
+    Complete(&task1, 0);
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, model_update_task_to_command_test)
+{
+    rtCommand_t command;
+    rtError_t error;
+    TaskInfo task = {};
+    task.type = TS_TASK_TYPE_MODEL_TASK_UPDATE;
+
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+
+    ToCommand(&task, &command);
+    Complete(&task, 0);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, commamdBodyForLabel)
+{
+    rtCommand_t command;
+    TaskInfo task = {};
+    task.type = TS_TASK_TYPE_LABEL_GOTO;
+    task.u.labelGotoTask.labelId = 1U;
+
+    rtStream_t stream = NULL;
+    rtError_t error;
+
+    error = rtSetDevice(0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+
+    ToCommand(&task, &command);
+    EXPECT_EQ(command.u.labelGotoTask.labelId, 1U);
+    Complete(&task, 0);
+
+    rtStreamDestroy(stream);
+    ResetDeviceAndRecreateSharedResources();
+}
+TEST_F(TaskTest, base_aicpu_info_load_task)
+{
+    TaskInfo task = {};
+    rtStream_t stream = NULL;
+    rtError_t error;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    char aicpu_info[16] = "aicpu info";
+    AicpuInfoLoadTaskInit(&task, aicpu_info, 16);
+
+    rtStarsSqe_t sqe;
+    ToConstructSqe(&task, &sqe);
+    rtCqReport_t cqe;
+    cqe.errorType = 1;
+    cqe.errorCode = 1;
+    SetStarsResult(&task, cqe);
+    Complete(&task, 0);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, base_task_nop)
+{
+    TaskInfo task = {};
+    rtStream_t stream = NULL;
+    rtError_t error;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    NopTaskInit(&task);
+
+    rtStarsSqe_t sqe;
+    ToConstructSqe(&task, &sqe);
+    Complete(&task, 0);
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, aicpu_info_load_task_to_command_01)
+{
+    TaskInfo aicpu_info_load_task = {};
+    rtCommand_t command;
+    rtError_t error;
+    Runtime* rt = ((Runtime*)Runtime::Instance());
+    Device* device = new RawDevice(0);
+    device->Init();
+    Stream* stream = new Stream(device, 0);
+    NpuDriver drv;
+    stream->streamId_ = 100;
+
+    InitByStream(&aicpu_info_load_task, stream);
+    EXPECT_NE(aicpu_info_load_task.stream, nullptr);
+    char aicpu_info[16] = "aicpu info";
+    error = AicpuInfoLoadTaskInit(&aicpu_info_load_task, aicpu_info, 16);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    TaskUnInitProc(&aicpu_info_load_task);
+    delete stream;
+    delete device;
+}
+
+TEST_F(TaskTest, davinci_kernel_task_ref_module)
+{
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Device* dev = (rt_ut::UnwrapOrNull<Stream>(stream))->Device_();
+    {
+        TaskInfo task = {};
+        Kernel* aicKernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+        InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+        AicTaskInit(&task, aicKernel, aicKernel->GetKernelAttrType(), 1, nullptr);
+        delete aicKernel;
+        TaskUnInitProc(&task);
+    }
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, stars_aicpu_sqe)
+{
+    TaskInfo task = {};
+    rtError_t error;
+
+    rtStarsSqe_t command;
+    InitByStream(&task, stream_);
+    AicpuTaskInit(&task, 1, 1);
+    EXPECT_EQ(task.type, TS_TASK_TYPE_KERNEL_AICPU);
+    RtStarsAicpuKernelSqe* const sqe = &(command.aicpuSqe);
+    task.u.aicpuTaskInfo.comm.kernelFlag = RT_KERNEL_HOST_FIRST;
+    ToConstructSqe(&task, &command);
+    task.u.aicpuTaskInfo.aicpuKernelType = 1;
+    EXPECT_EQ(sqe->topic_type, TOPIC_TYPE_HOST_AICPU_FIRST);
+
+    task.u.aicpuTaskInfo.comm.kernelFlag = RT_KERNEL_HOST_ONLY;
+    ToConstructSqe(&task, &command);
+    EXPECT_EQ(sqe->topic_type, TOPIC_TYPE_HOST_AICPU_ONLY);
+    task.u.aicpuTaskInfo.comm.kernelFlag = RT_KERNEL_DEVICE_FIRST;
+    ToConstructSqe(&task, &command);
+    EXPECT_EQ(sqe->topic_type, TOPIC_TYPE_DEVICE_AICPU_FIRST);
+    rtCqReport_t cqe;
+    cqe.errorType = 1;
+    cqe.errorCode = 1;
+    SetStarsResult(&task, cqe);
+    EXPECT_EQ(task.errorCode, TS_ERROR_AICPU_EXCEPTION);
+}
+
+TEST_F(TaskTest, stars_eventrecord_sqe)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    Event evt;
+    evt.device_ = stream_->Device_();
+
+    rtStarsSqe_t sqe;
+    InitByStream(&task, stream_);
+    EventRecordTaskInit(&task, &evt, false, evt.EventId_());
+    ToConstructSqe(&task, &sqe);
+    Complete(&task, 0);
+
+    rtCqReport_t cqe;
+    cqe.errorType = 1;
+    cqe.errorCode = 2;
+    SetStarsResult(&task, cqe);
+    EXPECT_EQ(task.errorCode, 2);
+    cqe.errorType = 0;
+    SetStarsResult(&task, cqe);
+    TaskUnInitProc(&task);
+}
+
+TEST_F(TaskTest, stars_eventwait_sqe)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    Event evt;
+    evt.device_ = stream_->Device_();
+    rtEvent_t event;
+    uint32_t event_id = 0;
+
+    rtStarsSqe_t command;
+    InitByStream(&task, stream_);
+    EventWaitTaskInit(&task, &evt, event_id, 0, 0);
+    EXPECT_EQ(task.type, TS_TASK_TYPE_STREAM_WAIT_EVENT);
+    ToConstructSqe(&task, &command);
+    RtStarsEventSqe* evSqe = &(command.eventSqe);
+    EXPECT_EQ(evSqe->header.type, RT_STARS_SQE_TYPE_EVENT_WAIT);
+    evt.EventIdCountAdd((task.u.eventWaitTaskInfo).eventId);
+    Complete(&task, 0);
+}
+
+// Memcpy Async D2D and H2D
+TEST_F(TaskTest, stars_memcpy_async_sqe_d2d)
+{
+    void* dst = nullptr;
+    void* src = nullptr;
+    uint64_t count = 1;
+    rtMemcpyKind_t kind = RT_MEMCPY_DEVICE_TO_DEVICE;
+
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    MemcpyAsyncTaskInitV3(&task, kind, src, dst, count, 0, NULL);
+    ToConstructSqe(&task, &sqe);
+    MemcpyAsyncTaskInitV3(&task, RT_MEMCPY_HOST_TO_DEVICE_EX, src, dst, count, 0, NULL);
+
+    rtCqReport_t cqe = {};
+    Complete(&task, 0);
+    PrintErrorInfo(&task, 0);
+    SetStarsResult(&task, cqe);
+    TaskUnInitProc(&task);
+    rtStreamDestroy(stream);
+}
+
+// Memcpy Async D2D
+TEST_F(TaskTest, stars_memcpy_async_sqe_d2d_error)
+{
+    void* dst = nullptr;
+    void* src = nullptr;
+    uint64_t count = 1;
+    rtMemcpyKind_t kind = RT_MEMCPY_DEVICE_TO_DEVICE;
+
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    MemcpyAsyncTaskInitV3(&task, kind, src, dst, count, 0, NULL);
+    ToConstructSqe(&task, &sqe);
+
+    rtCqReport_t cqe = {};
+    cqe.errorType = 1U;
+    Complete(&task, 0);
+    PrintErrorInfo(&task, 0);
+    SetStarsResult(&task, cqe);
+    TaskUnInitProc(&task);
+    rtStreamDestroy(stream);
+}
+
+// dsq sqe update
+TEST_F(TaskTest, stars_dsa_update_sqe_d2h_error)
+{
+    void* src = nullptr;
+    uint64_t count = 40U;
+    TaskInfo task = {};
+    rtError_t error;
+
+    Driver* drv;
+    drv = ((Runtime*)Runtime::Instance())->driverFactory_.GetDriver(NPU_DRIVER);
+    rtStarsSqe_t sqe;
+    InitByStream(&task, stream_);
+    MemcpyAsyncD2HTaskInit(&task, src, count, 2U, 3U);
+    EXPECT_EQ(task.type, TS_TASK_TYPE_MEMCPY);
+    ToConstructSqe(&task, &sqe);
+    rtCqReport_t cqe = {};
+    cqe.errorType = 1U;
+    Complete(&task, 0);
+
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(drv), &NpuDriver::GetRunMode)
+        .stubs()
+        .will(returnValue((uint32_t)RT_RUN_MODE_ONLINE));
+    PrintErrorInfo(&task, 0);
+    SetStarsResult(&task, cqe);
+    EXPECT_EQ(task.errorCode, TS_ERROR_SDMA_ERROR);
+    TaskUnInitProc(&task);
+}
+
+// dsq sqe update not a dsa
+TEST_F(TaskTest, stars_dsa_update_sqe_d2h_error_not_dsa)
+{
+    void* src = nullptr;
+    uint64_t count = 40U;
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = nullptr;
+
+    Driver* drv;
+    drv = ((Runtime*)Runtime::Instance())->driverFactory_.GetDriver(NPU_DRIVER);
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    MemcpyAsyncD2HTaskInit(&task, src, count, 2U, 3U);
+    EXPECT_EQ(task.type, TS_TASK_TYPE_MEMCPY);
+    ToConstructSqe(&task, &sqe);
+
+    rtCqReport_t cqe = {};
+    cqe.errorType = 1U;
+    Complete(&task, 0);
+
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(drv), &NpuDriver::GetRunMode)
+        .stubs()
+        .will(returnValue((uint32_t)RT_RUN_MODE_ONLINE));
+
+    task.u.memcpyAsyncTaskInfo.dsaSqeUpdateFlag = false;
+    PrintErrorInfo(&task, 0);
+    SetStarsResult(&task, cqe);
+    EXPECT_EQ(task.errorCode, TS_ERROR_SDMA_ERROR);
+    TaskUnInitProc(&task);
+
+    error = rtStreamDestroy(stream);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTest, RecycleTaskResource_ut)
+{
+    TaskInfo task = {};
+    EXPECT_NE(sizeof(task), 0);
+    RecycleTaskResourceForMemcpyAsyncTask(&task);
+}
+
+// Reduce Async
+TEST_F(TaskTest, stars_reduce_async_sqe)
+{
+    void* dst = nullptr;
+    void* src = nullptr;
+    uint64_t count = 4;
+    TaskInfo tasks[RT_DATA_TYPE_END * (RT_RECUDE_KIND_END - RT_MEMCPY_SDMA_AUTOMATIC_ADD)] = {{}};
+    rtError_t error;
+    rtStream_t stream = NULL;
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    TaskInfo* pTask;
+    for (int iKind = (int)RT_MEMCPY_SDMA_AUTOMATIC_ADD; iKind < (int)RT_RECUDE_KIND_END; iKind++) {
+        for (int jType = 0; jType < (int)RT_DATA_TYPE_END; jType++) {
+            pTask = &(tasks[(iKind - (int)RT_MEMCPY_SDMA_AUTOMATIC_ADD) * (RT_DATA_TYPE_END) + jType]);
+            InitByStream(pTask, rt_ut::UnwrapOrNull<Stream>(stream));
+            MemcpyAsyncTaskInitV3(pTask, (rtRecudeKind_t)iKind, src, dst, count, 0, NULL);
+            pTask->u.memcpyAsyncTaskInfo.copyDataType = (rtDataType_t)jType;
+            ToConstructSqe(pTask, &sqe);
+            Complete(pTask, 0);
+            TaskUnInitProc(pTask);
+        }
+    }
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, stars_notify_record_sqe_notify_null)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+
+    SingleBitNotifyRecordInfo single_bit_notify_info = {false, false, false, false, 0, 0, false};
+    NotifyRecordTaskInit(&task, 0, 0, 0, &single_bit_notify_info, nullptr, nullptr, false);
+
+    ToConstructSqe(&task, &sqe);
+    Complete(&task, 0);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, stars_notify_wait_sqe)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    NotifyWaitTaskInit(&task, 0, 0, nullptr, nullptr, false);
+    ToConstructSqe(&task, &sqe);
+    Complete(&task, 0);
+    PrintErrorInfo(&task, 0);
+
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, stars_stream_activate_sqe)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+    uint32_t event_id = 0;
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    StreamActiveTaskInit(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    ToConstructSqe(&task, &sqe);
+    Complete(&task, 0);
+    rtStarsStreamActiveFcPara_t fcPara = {};
+    error = InitFuncCallParaForStreamActiveTask(&task, fcPara, CHIP_MINI_V3);
+    rtStreamDestroy(stream);
+    ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
+}
+
+TEST_F(TaskTest, stars_stream_activate_func_call_para_not_support)
+{
+    TaskInfo task = {};
+    rtStream_t stream = nullptr;
+    rtError_t error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    StreamActiveTaskInit(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    rtStarsStreamActiveFcPara_t fcPara = {};
+    error = InitFuncCallParaForStreamActiveTask(&task, fcPara, CHIP_ADC);
+    EXPECT_EQ(error, RT_ERROR_FEATURE_NOT_SUPPORT);
+
+    rtStreamDestroy(stream);
+    ((Runtime*)Runtime::Instance())->SetIsUserSetSocVersion(false);
+}
+
+TEST_F(TaskTest, stars_ph_sqe)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+    uint32_t event_id = 0;
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    DataDumpLoadInfoTaskInit(&task, 0, 0, RT_KERNEL_DEFAULT);
+    ToConstructSqe(&task, &sqe);
+    Complete(&task, 0);
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, stars_callback_launch)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtCommand_t command;
+    rtStarsSqe_t starsSqe;
+    InitByStream(&task, stream_);
+    CallbackLaunchTaskInit(&task, nullptr, nullptr, true, -1);
+    EXPECT_EQ(task.type, TS_TASK_TYPE_HOSTFUNC_CALLBACK);
+    ToConstructSqe(&task, &starsSqe);
+    MOCKER_CPP(&CbSubscribe::GetGroupIdByStreamId).stubs().will(returnValue(RT_ERROR_NONE));
+    ToConstructSqe(&task, &starsSqe);
+    RtStarsHostfuncCallbackSqe* sqe = &(starsSqe.callbackSqe);
+
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(stream_->Device_()->Driver_()), &NpuDriver::GetRunMode)
+        .stubs()
+        .will(returnValue((uint32_t)RT_RUN_MODE_ONLINE));
+
+    ToConstructSqe(&task, &starsSqe);
+    EXPECT_EQ(sqe->kernel_type, TS_AICPU_KERNEL_NON);
+    Complete(&task, 0);
+    ToCommand(&task, &command);
+    EXPECT_EQ(command.taskInfoFlag, TASK_UNSINK_FLAG);
+}
+TEST_F(TaskTest, memcpy_async_task_init_02)
+{
+    TaskInfo memcpyTask = {};
+
+    Runtime* rt = ((Runtime*)Runtime::Instance());
+    Device* device = new RawDevice(0);
+    device->Init();
+    Stream* stream = new Stream(device, 0);
+    stream->streamId_ = 100;
+    NpuDriver drv;
+
+    rtError_t error;
+
+    void* src = malloc(100);
+    void* dst = malloc(100);
+    uint64_t size = sizeof(void*);
+
+    uint32_t backupcopyType_ = memcpyTask.u.memcpyAsyncTaskInfo.copyType;
+    memcpyTask.u.memcpyAsyncTaskInfo.copyType = RT_MEMCPY_HOST_TO_DEVICE_EX;
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::GetRunMode).stubs().will(returnValue((uint32_t)1));
+
+    InitByStream(&memcpyTask, stream);
+    EXPECT_NE(memcpyTask.stream, nullptr);
+    error = MemcpyAsyncTaskInitV3(&memcpyTask, RT_MEMCPY_HOST_TO_DEVICE_EX, src, dst, size, 0, NULL);
+    EXPECT_EQ(error, RT_ERROR_DRV_ERR);
+    memcpyTask.u.memcpyAsyncTaskInfo.copyType = backupcopyType_;
+
+    TaskUnInitProc(&memcpyTask);
+    free(src);
+    free(dst);
+    delete stream;
+    delete device;
+}
+
+TEST_F(TaskTest, memcpy_async_task_init_03)
+{
+    TaskInfo memcpyTask = {};
+    Runtime* rt = ((Runtime*)Runtime::Instance());
+    Device* device = new RawDevice(0);
+    device->Init();
+    Stream* stream = new Stream(device, 0);
+    stream->streamId_ = 100;
+    NpuDriver drv;
+    rtError_t error;
+
+    void* src = malloc(100);
+    void* dst = malloc(100);
+    uint64_t size = sizeof(void*);
+
+    uint32_t backupcopyType_ = memcpyTask.u.memcpyAsyncTaskInfo.copyType;
+    memcpyTask.u.memcpyAsyncTaskInfo.copyType = RT_MEMCPY_DEVICE_TO_HOST_EX;
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::GetRunMode).stubs().will(returnValue((uint32_t)1));
+    InitByStream(&memcpyTask, stream);
+    error = MemcpyAsyncTaskInitV3(&memcpyTask, RT_MEMCPY_DEVICE_TO_HOST_EX, src, dst, size, 0, NULL);
+    EXPECT_EQ(error, RT_ERROR_DRV_ERR);
+
+    memcpyTask.u.memcpyAsyncTaskInfo.copyType = backupcopyType_;
+    TaskUnInitProc(&memcpyTask);
+    free(src);
+    free(dst);
+    delete stream;
+    delete device;
+}
+
+TEST_F(TaskTest, INIT_TEST)
+{
+    rtError_t error;
+    rtCommand_t command;
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+    error = RemoteEventWaitTaskInit(&task, nullptr, 0, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    ToCommand(&task, &command);
+    EXPECT_EQ(command.taskInfoFlag, TASK_UNSINK_FLAG);
+}
+
+TEST_F(TaskTest, notify_wait_record_task_fail)
+{
+    rtError_t error;
+    TaskInfo notify_record_task_null = {};
+    InitByStream(&notify_record_task_null, stream_);
+    error = NotifyRecordTaskInit(&notify_record_task_null, 0, 0, 0, nullptr, nullptr, nullptr, false);
+    EXPECT_EQ(error, RT_ERROR_NOTIFY_NULL);
+    TaskInfo notify_record_task = {};
+    InitByStream(&notify_record_task, stream_);
+    rtCntNtyRecordInfo_t countInfo = {RECORD_ADD_MODE, 1U};
+    Notify* count_notify = new (std::nothrow) Notify(0, 0);
+    error = NotifyRecordTaskInit(&notify_record_task, 0, 0, 0, nullptr, &countInfo, count_notify, true);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    TaskInfo notify_wait_task_null = {};
+    InitByStream(&notify_wait_task_null, stream_);
+    error = NotifyWaitTaskInit(&notify_wait_task_null, 0, 0, nullptr, nullptr, true);
+    EXPECT_EQ(error, RT_ERROR_NOTIFY_NULL);
+    TaskInfo notify_wait_task = {};
+    InitByStream(&notify_wait_task, stream_);
+    CountNotifyWaitInfo cntNtfyInfo = {WAIT_EQUAL_MODE, 1U, false};
+    error = NotifyWaitTaskInit(&notify_wait_task, 0, 0, &cntNtfyInfo, count_notify, true);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    delete count_notify;
+}
+
+TEST_F(TaskTest, event_wait_task_failed)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    Event evt;
+    evt.device_ = stream_->Device_();
+    InitByStream(&task, stream_);
+    error = EventWaitTaskInit(&task, &evt, 0, 0, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    uint32_t errorCode = 0x28;
+    evt.EventIdCountAdd((task.u.eventWaitTaskInfo).eventId);
+    SetResult(&task, &errorCode, 1);
+    Complete(&task, 0);
+    EXPECT_EQ(stream_->GetErrCode(), errorCode);
+}
+
+TEST_F(TaskTest, event_wait_task_failed1)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    Event evt;
+    evt.device_ = stream_->Device_();
+    InitByStream(&task, stream_);
+    error = EventWaitTaskInit(&task, &evt, 0, 0, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    evt.EventIdCountAdd((task.u.eventWaitTaskInfo).eventId);
+    uint32_t errorCode = 0x01;
+    task.u.eventWaitTaskInfo.eventWaitFlag = 1;
+    SetResult(&task, &errorCode, 1);
+    Complete(&task, 0);
+    EXPECT_EQ(stream_->GetErrCode(), errorCode);
+}
+
+TEST_F(TaskTest, event_wait_task_end_of_seq)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    Event evt;
+    evt.device_ = stream_->Device_();
+    InitByStream(&task, stream_);
+    error = EventWaitTaskInit(&task, &evt, 0, 0, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    evt.EventIdCountAdd((task.u.eventWaitTaskInfo).eventId);
+    uint32_t errorCode = 0x95;
+    SetResult(&task, &errorCode, 1);
+    Complete(&task, 0);
+}
+
+TEST_F(TaskTest, do_complete_success)
+{
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    TaskInfo task = {};
+    rtError_t error;
+    Stream* taskStream = NULL;
+    rtStream_t taskStreamHandle = NULL;
+    error = rtStreamCreate(&taskStreamHandle, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    taskStream = rt_ut::UnwrapOrNull<Stream>(taskStreamHandle);
+    InitByStream(&task, taskStream);
+    EventResetTaskInit(&task, nullptr, false, -1);
+
+    std::string socVersion = rtInstance->GetSocVersion();
+    rtInstance->SetSocVersion("Ascend910B1");
+    Complete(&task, 0);
+    rtInstance->SetSocVersion(socVersion);
+}
+
+TEST_F(TaskTest, kernel_task_async_copy_wait)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    Stream* taskStream = NULL;
+    rtStream_t taskStreamHandle = NULL;
+    NpuDriver drv;
+
+    error = rtStreamCreate(&taskStreamHandle, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    taskStream = rt_ut::UnwrapOrNull<Stream>(taskStreamHandle);
+
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, taskStream);
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+    EXPECT_EQ(task.u.aicTaskInfo.comm.dim, 1U);
+
+    Handle hdl;
+    RawDevice* device = new RawDevice(0);
+    device->driver_ = &drv;
+    memset_s(&hdl, sizeof(Handle), '\0', sizeof(Handle));
+    CpyHandle cpyHdl;
+    H2DCopyMgr* argAllocator =
+        new (std::nothrow) H2DCopyMgr(device, 10, 1024U, 1024U, BufferAllocator::LINEAR, COPY_POLICY_DEFAULT);
+    hdl.kerArgs = argAllocator->AllocDevMem();
+    hdl.argsAlloc = argAllocator;
+    SetArgs(&task, nullptr, 0, &hdl);
+    WaitAsyncCopyComplete(&task);
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopyAsyncWaitFinish).stubs().will(returnValue(RT_ERROR_NONE));
+    WaitAsyncCopyComplete(&task);
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopyAsyncWaitFinish).stubs().will(returnValue(RT_ERROR_NONE));
+    WaitAsyncCopyComplete(&task);
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopyAsyncWaitFinishEx).stubs().will(returnValue(RT_ERROR_DRV_MEMORY));
+    WaitAsyncCopyComplete(&task);
+    SetArgs(&task, nullptr, 0, nullptr);
+
+    delete argAllocator;
+    delete device;
+    GlobalMockObject::verify();
+}
+
+TEST_F(TaskTest, FillKernelLaunchPara)
+{
+    TaskInfo task = {};
+    rtKernelLaunchNames_t launchNames;
+    launchNames.kernelName = "ADD";
+    launchNames.opName = "Frameworkop";
+    launchNames.soName = "aicpusd.so";
+    Device* device = new RawDevice(0);
+    device->Init();
+    UmaArgLoader devArgLdr(device);
+    MOCKER_CPP_VIRTUAL(devArgLdr, &UmaArgLoader::GetKernelInfoDevAddr)
+        .stubs()
+        .will(returnValue((int32_t)RT_ERROR_NONE));
+    rtError_t error = FillKernelLaunchPara(&launchNames, &task, &devArgLdr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    delete device;
+    GlobalMockObject::verify();
+}
+
+TEST_F(TaskTest, kernel_task_no_complete)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    Stream* taskStream = NULL;
+    rtStream_t taskStreamHandle = NULL;
+    NpuDriver drv;
+
+    error = rtStreamCreate(&taskStreamHandle, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    taskStream = rt_ut::UnwrapOrNull<Stream>(taskStreamHandle);
+
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, taskStream);
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+    EXPECT_EQ(task.u.aicTaskInfo.comm.dim, 1U);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::GetRunMode).stubs().will(returnValue((uint32_t)RT_RUN_MODE_ONLINE));
+    GlobalMockObject::verify();
+}
+
+TEST_F(TaskTest, PreCheckTaskErr)
+{
+    uint32_t devId = 0;
+    rtStream_t stream = NULL;
+    rtError_t error;
+    const void* stubFunc = (void*)0x01;
+    const char* stubName = "abc";
+    Kernel* kernel = NULL;
+    char funcName[KERNEL_INFO_ENTRY_SIZE] = {};
+    char soName[KERNEL_INFO_ENTRY_SIZE] = {};
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICPU);
+    Program* program = &stubProg;
+    program->kernelNames_ = {'a', 'b', 'c', 'd', '\0'};
+    MOCKER_CPP(&Runtime::GetProgram).stubs().will(returnValue(true));
+    MOCKER_CPP(&Runtime::PutProgram).stubs().will(ignoreReturnValue());
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    TaskInfo davinciKernelTask = {};
+    davinciKernelTask.errorCode = TS_ERROR_REPEAT_NOTIFY_WAIT;
+    InitByStream(&davinciKernelTask, rt_ut::UnwrapOrNull<Stream>(stream));
+    AicpuTaskInit(&davinciKernelTask, (uint16_t)1, (uint32_t)0);
+    PreCheckTaskErr(&davinciKernelTask, devId);
+    Kernel* vecKernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_VECTOR);
+    AicTaskInit(&davinciKernelTask, vecKernel, vecKernel->GetKernelAttrType(), (uint16_t)1, nullptr);
+    delete vecKernel;
+    PreCheckTaskErr(&davinciKernelTask, devId);
+}
+
+TEST_F(TaskTest, Init)
+{
+    rtError_t error;
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    // 压测MOCKER(CheckLogLevel).stubs().will(returnValue(1));
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+
+    // 压测MOCKER(CheckLogLevel).stubs().will(returnValue(1));
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+
+    error = FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_NONE));
+
+    error = FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    TaskUnInitProc(&fftsPlusTask);
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, InitFftsPlusTaskForDynamicShape)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x10;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+    EXPECT_NE(fftsPlusTask.stream, nullptr);
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_NONE));
+
+    rtError_t error = FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(fftsPlusTask.type, TS_TASK_TYPE_FFTS_PLUS);
+    rtStarsSqe_t sqe[3] = {};
+    ToConstructSqe(&fftsPlusTask, &sqe[0]);
+
+    TaskUnInitProc(&fftsPlusTask);
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, InitFftsPlusTaskForStaticShape)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x20;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+    EXPECT_NE(fftsPlusTask.stream, nullptr);
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_NONE));
+
+    FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    EXPECT_EQ(fftsPlusTask.type, TS_TASK_TYPE_FFTS_PLUS);
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&fftsPlusTask, &sqe);
+
+    TaskUnInitProc(&fftsPlusTask);
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, ConstructSqe)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    char* stub = "123";
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
+    EXPECT_NE(rtInstance, nullptr);
+    rtInstance->SetBiuperfProfFlag(true);
+    EXPECT_EQ(rtInstance->GetBiuperfProfFlag(), true);
+
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_VECTOR);
+    Program* program = &stubProg;
+    Kernel* kernel = new Kernel("test", 0ULL, program, RT_KERNEL_ATTR_TYPE_VECTOR, 10);
+
+    InitByStream(&task, stream_);
+    EXPECT_NE(task.stream, nullptr);
+    task.u.aicTaskInfo.kernel = kernel;
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    delete kernel;
+}
+
+TEST_F(TaskTest, AllocSqeDevBuf)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    char* stub = "123";
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
+    EXPECT_NE(rtInstance, nullptr);
+    rtInstance->SetBiuperfProfFlag(true);
+    EXPECT_EQ(rtInstance->GetBiuperfProfFlag(), true);
+
+    InitByStream(&task, stream_);
+    EXPECT_NE(task.stream, nullptr);
+
+    task.isUpdateSinkSqe = true;
+    Kernel* aicKernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    AicTaskInit(&task, aicKernel, aicKernel->GetKernelAttrType(), 1, nullptr, true);
+    delete aicKernel;
+    EXPECT_NE(task.u.aicTaskInfo.sqeDevBuf, nullptr);
+
+    DavinciTaskUnInit(&task);
+    EXPECT_EQ(task.u.aicTaskInfo.sqeDevBuf, nullptr);
+}
+
+TEST_F(TaskTest, ConstructSqe_MACH_AI_MIX_KERNEL_01)
+{
+    const void* stubFunc = (void*)0x02;
+    const char* stubName = "abc";
+    Kernel* kernel = NULL;
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICORE);
+    Program* program = &stubProg;
+    program->kernelNames_ = {'a', 'b', 'c', 'd', '\0'};
+    kernel = new (std::nothrow) Kernel("", 0ULL, program, RT_KERNEL_ATTR_TYPE_AICORE, 0);
+    kernel->SetStub_(stubFunc);
+
+    TaskInfo task = {};
+    rtError_t error;
+    char* stub = "123";
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
+    rtInstance->SetBiuperfProfFlag(true);
+    EXPECT_EQ(rtInstance->GetBiuperfProfFlag(), true);
+    InitByStream(&task, stream_);
+    EXPECT_NE(task.stream, nullptr);
+    Kernel* aicKernel2 = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    AicTaskInit(&task, aicKernel2, aicKernel2->GetKernelAttrType(), 1, nullptr);
+    delete aicKernel2;
+    AicTaskInfo* aicTaskInfo = &(task.u.aicTaskInfo);
+    aicTaskInfo->kernel = kernel;
+    aicTaskInfo->kernel->funcType_ = KERNEL_FUNCTION_TYPE_AIC;
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    delete kernel;
+    rtFftsPlusSqe_t* fftsSqe = &(sqe.fftsPlusSqe);
+    EXPECT_EQ(fftsSqe->sqeHeader.type, RT_STARS_SQE_TYPE_FFTS);
+}
+
+TEST_F(TaskTest, ConstructSqe_MACH_AI_MIX_KERNEL_02)
+{
+    const void* stubFunc = (void*)0x02;
+    const char* stubName = "abc";
+    Kernel* kernel = NULL;
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICORE);
+    Program* program = &stubProg;
+    program->kernelNames_ = {'a', 'b', 'c', 'd', '\0'};
+    kernel = new (std::nothrow) Kernel("", 0ULL, program, RT_KERNEL_ATTR_TYPE_AICORE, 0);
+    kernel->SetStub_(stubFunc);
+    TaskInfo task = {};
+    rtError_t error;
+    char* stub = "123";
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
+    EXPECT_NE(rtInstance, nullptr);
+    rtInstance->SetBiuperfProfFlag(true);
+    EXPECT_EQ(rtInstance->GetBiuperfProfFlag(), true);
+    InitByStream(&task, stream_);
+    EXPECT_NE(task.stream, nullptr);
+    Kernel* aicKernel3 = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    AicTaskInit(&task, aicKernel3, aicKernel3->GetKernelAttrType(), 1, nullptr);
+    delete aicKernel3;
+    AicTaskInfo* aicTaskInfo = &(task.u.aicTaskInfo);
+    aicTaskInfo->kernel = kernel;
+    aicTaskInfo->kernel->funcType_ = KERNEL_FUNCTION_TYPE_AIV;
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    delete kernel;
+    rtFftsPlusSqe_t* fftsSqe = &(sqe.fftsPlusSqe);
+    EXPECT_EQ(fftsSqe->sqeHeader.type, RT_STARS_SQE_TYPE_FFTS);
+}
+
+TEST_F(TaskTest, ConstructSqe_MACH_AI_MIX_KERNEL_03)
+{
+    const void* stubFunc = (void*)0x02;
+    const char* stubName = "abc";
+    Kernel* kernel = NULL;
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_AICORE);
+    Program* program = &stubProg;
+    program->kernelNames_ = {'a', 'b', 'c', 'd', '\0'};
+    kernel = new (std::nothrow) Kernel("", 0ULL, program, RT_KERNEL_ATTR_TYPE_AICORE, 0);
+    kernel->SetStub_(stubFunc);
+    TaskInfo task = {};
+    rtError_t error;
+    char* stub = "123";
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
+    EXPECT_NE(rtInstance, nullptr);
+    rtInstance->SetBiuperfProfFlag(true);
+    EXPECT_EQ(rtInstance->GetBiuperfProfFlag(), true);
+    InitByStream(&task, stream_);
+    EXPECT_NE(task.stream, nullptr);
+    Kernel* aicKernel4 = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    AicTaskInit(&task, aicKernel4, aicKernel4->GetKernelAttrType(), 1, nullptr);
+    delete aicKernel4;
+    AicTaskInfo* aicTaskInfo = &(task.u.aicTaskInfo);
+    aicTaskInfo->kernel = kernel;
+    aicTaskInfo->kernel->funcType_ = KERNEL_FUNCTION_TYPE_INVALID;
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    delete kernel;
+}
+
+TEST_F(TaskTest, ConstructSqe_MACH_AI_MIX_KERNEL_04)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    char* stub = "123";
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
+    EXPECT_NE(rtInstance, nullptr);
+    rtInstance->SetBiuperfProfFlag(true);
+    EXPECT_EQ(rtInstance->GetBiuperfProfFlag(), true);
+    InitByStream(&task, stream_);
+    EXPECT_NE(task.stream, nullptr);
+
+    PlainProgram stubProg(RT_KERNEL_ATTR_TYPE_MIX);
+    Program* program = &stubProg;
+    Kernel* kernel = new Kernel("test", 0ULL, program, RT_KERNEL_ATTR_TYPE_MIX, 10);
+
+    Kernel* mixKernel = CreateTestKernelWithMixType(RT_KERNEL_ATTR_TYPE_AICORE, MIX_AIC_AIV_MAIN_AIC);
+    AicTaskInit(&task, mixKernel, mixKernel->GetKernelAttrType(), 1, nullptr);
+    delete mixKernel;
+    task.u.aicTaskInfo.kernel = kernel;
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    delete kernel;
+}
+
+TEST_F(TaskTest, ProfilerTraceExTask_ConstructSqe)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    InitByStream(&task, stream_);
+    EXPECT_NE(task.stream, nullptr);
+    error = ProfilerTraceExTaskInit(&task, 1, 1, 1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+}
+
+TEST_F(TaskTest, LabelSetTask_ConstructSqe)
+{
+    TaskInfo task = {};
+    uint32_t devDestSize = 4;
+    void* const devDestAddr = &devDestSize;
+
+    InitByStream(&task, stream_);
+    LabelSetTaskInit(&task, 1, devDestAddr);
+    rtModel_t model;
+    rtError_t ret = rtModelCreate(&model, 0);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    Model* modelPtr = rt_ut::UnwrapOrNull<Model>(model);
+    ASSERT_NE(modelPtr, nullptr);
+    stream_->SetModel(modelPtr);
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    EXPECT_EQ(sqe.phSqe.type, RT_STARS_SQE_TYPE_PLACE_HOLDER);
+    stream_->SetModel(nullptr);
+    ret = rtModelDestroy(model);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTest, StarsCommonTask_ConstructSqe)
+{
+    Runtime* rt = ((Runtime*)Runtime::Instance());
+    Device* device = new RawDevice(0);
+    device->Init();
+    Stream* stream = new Stream(device, 0);
+    stream->streamId_ = 100;
+    TaskInfo dvppTask = {};
+    InitByStream(&dvppTask, stream);
+    dvppTask.u.starsCommTask.errorTimes++;
+    uint16_t errTimes = dvppTask.u.starsCommTask.errorTimes;
+    EXPECT_EQ(errTimes, 1U);
+
+    cce::runtime::rtStarsCommonSqe_t vpcSqe = {};
+    vpcSqe.sqeHeader.type = RT_STARS_SQE_TYPE_FFTS;
+    StarsCommonTaskInit(&dvppTask, vpcSqe, 0);
+
+    vpcSqe.sqeHeader.type = RT_STARS_SQE_TYPE_CDQM;
+    StarsCommonTaskInit(&dvppTask, vpcSqe, 0);
+
+    vpcSqe.sqeHeader.type = RT_STARS_SQE_TYPE_VPC;
+    StarsCommonTaskInit(&dvppTask, vpcSqe, 0);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&dvppTask, &sqe);
+
+    MOCKER(memcpy_s).stubs().will(returnValue(NULL));
+    ToConstructSqe(&dvppTask, &sqe);
+
+    delete stream;
+    delete device;
+}
+
+TEST_F(TaskTest, GetDevMsgTask_ConstructSqe)
+{
+    TaskInfo task = {};
+    uint32_t devMemSize = 4;
+    const void* devMemAddr = &devMemSize;
+    InitByStream(&task, stream_);
+    GetDevMsgTaskInit(&task, devMemAddr, devMemSize, RT_GET_DEV_ERROR_MSG);
+    rtStarsSqe_t command;
+    command.phSqe = {};
+    ToConstructSqe(&task, &command);
+    EXPECT_EQ(command.phSqe.task_type, TS_TASK_TYPE_GET_DEVICE_MSG);
+}
+
+void GetMsgCallbackStub1(const char* msg, uint32_t len) {}
+
+TEST_F(TaskTest, CmoTask_test)
+{
+    rtError_t error;
+    rtStream_t streamHandle = nullptr;
+    rtError_t ret = rtStreamCreate(&streamHandle, 0);
+    ASSERT_EQ(ret, RT_ERROR_NONE);
+    Stream* stream = rt_ut::UnwrapOrNull<Stream>(streamHandle);
+    ASSERT_NE(stream, nullptr);
+
+    rtModel_t model;
+    ret = rtModelCreate(&model, 0);
+    ASSERT_EQ(ret, RT_ERROR_NONE);
+    Model* modelPtr = rt_ut::UnwrapOrNull<Model>(model);
+    ASSERT_NE(modelPtr, nullptr);
+    stream->SetModel(modelPtr);
+
+    TaskInfo task = {};
+    InitByStream(&task, stream);
+    EXPECT_NE(task.stream, nullptr);
+    rtCmoTaskInfo_t cmoTask = {};
+    error = CmoTaskInit(&task, &cmoTask, stream, 0);
+
+    Model* tmpModel = stream->Model_();
+    stream->SetModel(nullptr);
+    error = CmoTaskInit(&task, &cmoTask, stream, 0);
+    EXPECT_EQ(error, RT_ERROR_MODEL_NULL);
+    stream->SetModel(tmpModel);
+    MOCKER(memcpy_s).stubs().will(returnValue(1));
+    error = CmoTaskInit(&task, &cmoTask, stream, 0);
+    EXPECT_EQ(error, RT_ERROR_SEC_HANDLE);
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    TaskUnInitProc(&task);
+    stream->SetModel(nullptr);
+    ret = rtModelDestroy(model);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    ret = rtStreamDestroy(streamHandle);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTest, BarrierTask_test)
+{
+    rtStream_t streamHandle = nullptr;
+    rtError_t ret = rtStreamCreate(&streamHandle, 0);
+    ASSERT_EQ(ret, RT_ERROR_NONE);
+    Stream* stream = rt_ut::UnwrapOrNull<Stream>(streamHandle);
+    ASSERT_NE(stream, nullptr);
+
+    rtModel_t model;
+    ret = rtModelCreate(&model, 0);
+    ASSERT_EQ(ret, RT_ERROR_NONE);
+    Model* modelPtr = rt_ut::UnwrapOrNull<Model>(model);
+    ASSERT_NE(modelPtr, nullptr);
+    stream->SetModel(modelPtr);
+
+    TaskInfo task = {};
+    InitByStream(&task, stream);
+
+    rtBarrierTaskInfo_t barrierTask = {};
+    rtError_t error = BarrierTaskInit(&task, &barrierTask, stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    Model* tmpModel = stream->Model_();
+    stream->SetModel(nullptr);
+    error = BarrierTaskInit(&task, &barrierTask, stream, 0);
+    EXPECT_EQ(error, RT_ERROR_MODEL_NULL);
+    stream->SetModel(tmpModel);
+    MOCKER(memcpy_s).stubs().will(returnValue(1));
+    error = BarrierTaskInit(&task, &barrierTask, stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    stream->SetModel(nullptr);
+    ret = rtModelDestroy(model);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    ret = rtStreamDestroy(streamHandle);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+}
+
+TEST_F(TaskTest, npuGetFloatStatus_01)
+{
+    TaskInfo task = {};
+    bool bindFlag = stream_->GetBindFlag();
+    stream_->SetBindFlag(true);
+    InitByStream(&task, stream_);
+    uint32_t checkmode = 0;
+    NpuGetFloatStaTaskInit(&task, nullptr, 32, checkmode);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    stream_->SetBindFlag(bindFlag);
+    EXPECT_EQ(sqe.getFloatStatusSqe.sqeHeader.type, RT_STARS_SQE_TYPE_COND);
+}
+
+TEST_F(TaskTest, npuGetFloatDebugStatus_01)
+{
+    TaskInfo task = {};
+    bool bindFlag = stream_->GetBindFlag();
+    stream_->SetBindFlag(true);
+    InitByStream(&task, stream_);
+    uint32_t checkmode = 0;
+    NpuGetFloatStaTaskInit(&task, nullptr, 32, checkmode, true);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    stream_->SetBindFlag(bindFlag);
+    EXPECT_EQ(sqe.getFloatStatusSqe.sqeHeader.type, RT_STARS_SQE_TYPE_COND);
+}
+
+TEST_F(TaskTest, npuGetFloatStatus_02)
+{
+    TaskInfo task = {};
+    bool bindFlag = stream_->GetBindFlag();
+    stream_->SetBindFlag(false);
+    InitByStream(&task, stream_);
+    uint32_t checkmode = 0;
+    NpuGetFloatStaTaskInit(&task, nullptr, 32, checkmode);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    stream_->SetBindFlag(bindFlag);
+    EXPECT_EQ(sqe.getFloatStatusSqe.sqeHeader.type, RT_STARS_SQE_TYPE_COND);
+
+    TaskInfo tagTask = {};
+    InitByStream(&tagTask, stream_);
+    StreamTagSetTaskInit(&tagTask, stream_, 0);
+    rtStarsSqe_t command;
+    command.phSqe = {};
+    ToConstructSqe(&tagTask, &command);
+}
+
+TEST_F(TaskTest, npuGetFloatDebugStatus_02)
+{
+    TaskInfo task = {};
+    bool bindFlag = stream_->GetBindFlag();
+    stream_->SetBindFlag(false);
+    InitByStream(&task, stream_);
+    uint32_t checkmode = 0;
+    NpuGetFloatStaTaskInit(&task, nullptr, 32, checkmode, true);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    stream_->SetBindFlag(bindFlag);
+    EXPECT_EQ(sqe.getFloatStatusSqe.sqeHeader.type, RT_STARS_SQE_TYPE_COND);
+
+    TaskInfo tagTask = {};
+    InitByStream(&tagTask, stream_);
+    StreamTagSetTaskInit(&tagTask, stream_, 0);
+    rtStarsSqe_t command;
+    command.phSqe = {};
+    ToConstructSqe(&tagTask, &command);
+}
+
+TEST_F(TaskTest, npuClearFloatStatus_01)
+{
+    TaskInfo task = {};
+    bool bindFlag = stream_->GetBindFlag();
+    stream_->SetBindFlag(false);
+    InitByStream(&task, stream_);
+    uint32_t checkmode = 0;
+    NpuClrFloatStaTaskInit(&task, checkmode);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    stream_->SetBindFlag(bindFlag);
+    EXPECT_EQ(sqe.phSqe.type, RT_STARS_SQE_TYPE_PLACE_HOLDER);
+}
+
+TEST_F(TaskTest, npuClearFloatDebugStatus_01)
+{
+    TaskInfo task = {};
+    bool bindFlag = stream_->GetBindFlag();
+    stream_->SetBindFlag(false);
+    InitByStream(&task, stream_);
+    uint32_t checkmode = 0;
+    NpuClrFloatStaTaskInit(&task, checkmode, true);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    stream_->SetBindFlag(bindFlag);
+    EXPECT_EQ(sqe.phSqe.type, RT_STARS_SQE_TYPE_PLACE_HOLDER);
+}
+
+TEST_F(TaskTest, npuClearFloatStatus_02)
+{
+    TaskInfo task = {};
+    bool bindFlag = stream_->GetBindFlag();
+    stream_->SetBindFlag(true);
+    InitByStream(&task, stream_);
+    uint32_t checkmode = 0;
+    NpuClrFloatStaTaskInit(&task, checkmode);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    stream_->SetBindFlag(bindFlag);
+    EXPECT_EQ(sqe.phSqe.type, RT_STARS_SQE_TYPE_PLACE_HOLDER);
+}
+
+TEST_F(TaskTest, npuClearFloatDebugStatus_02)
+{
+    TaskInfo task = {};
+    bool bindFlag = stream_->GetBindFlag();
+    stream_->SetBindFlag(true);
+    InitByStream(&task, stream_);
+    uint32_t checkmode = 0;
+    NpuClrFloatStaTaskInit(&task, checkmode, true);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    stream_->SetBindFlag(bindFlag);
+    EXPECT_EQ(sqe.phSqe.type, RT_STARS_SQE_TYPE_PLACE_HOLDER);
+}
+
+TEST_F(TaskTest, PrintSqe)
+{
+    // EventResetTask
+    TaskInfo eventResetTask = {};
+    rtStarsSqe_t sqe = {};
+    rtDavidSqe_t sqe1 = {};
+    EXPECT_NE(&sqe, nullptr);
+    PrintSqe(&sqe, "event reset");
+    PrintDavidSqe(&sqe1, "event reset");
+}
+
+TEST_F(TaskTest, Task_base)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    CreateL2AddrTaskInit(&task, 0x1);
+    uint32_t errorcode = 10;
+    SetResult(&task, (const uint32_t*)&errorcode, 1);
+    Complete(&task, 0);
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, ToCommandForFlipTask)
+{
+    TaskInfo task = {};
+    task.stream = stream_;
+    uint16_t flipNum = 1U;
+    FlipTaskInit(&task, flipNum);
+    rtCommand_t cmd = {};
+    ToCommand(&task, &cmd);
+    EXPECT_EQ(cmd.u.flipTask.flipNumReport, flipNum);
+}
+
+TEST_F(TaskTest, ToConstructSqeForFlipTask)
+{
+    TaskInfo task = {};
+    task.stream = stream_;
+    uint16_t flipNum = 1U;
+    FlipTaskInit(&task, flipNum);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    EXPECT_EQ(sqe.phSqe.task_type, TS_TASK_TYPE_FLIP);
+}
+
+TEST_F(TaskTest, ToConstructSqeForFlipTaskTaskID)
+{
+    TaskInfo task = {};
+    task.stream = stream_;
+    uint16_t flipNum = 1U;
+    FlipTaskInit(&task, flipNum, 0, 1);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    EXPECT_EQ(sqe.phSqe.task_type, TS_TASK_TYPE_FLIP);
+    EXPECT_EQ(sqe.phSqe.task_id, UINT16_MAX);
+}
+
+TEST_F(TaskTest, ToConstructSqeForUpdateAddressTask)
+{
+    TaskInfo task = {};
+    task.stream = stream_;
+    UpdateAddressTaskInit(&task, 0, 1);
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    EXPECT_EQ(sqe.phSqe.task_type, TS_TASK_TYPE_UPDATE_ADDRESS);
+}
+
+TEST_F(TaskTest, FftsPlusTaskProcessErr)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x12;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+    stream_->SetOverflowSwitch(true);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_NONE));
+
+    rtError_t ret = FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe[3] = {};
+    ToConstructSqe(&fftsPlusTask, &sqe[0]);
+    rtCqReport_t cqe;
+    cqe.errorType = 1;
+    cqe.errorCode = 1;
+    SetStarsResult(&fftsPlusTask, cqe);
+    Complete(&fftsPlusTask, 0);
+    rtFftsPlusTaskErrInfo_t fftsPlusErrInfo = {};
+    fftsPlusErrInfo.contextId = 1024;
+    fftsPlusErrInfo.threadId = 0;
+    fftsPlusErrInfo.errType = 1;
+    PushBackErrInfo(&fftsPlusTask, static_cast<const void*>(&fftsPlusErrInfo), sizeof(rtFftsPlusTaskErrInfo_t));
+    Complete(&fftsPlusTask, 0);
+    TaskUnInitProc(&fftsPlusTask);
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, FftsPlusTaskProcessErr1)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x12;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+    stream_->SetOverflowSwitch(true);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_NONE));
+
+    rtError_t ret = FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe[3] = {};
+    ToConstructSqe(&fftsPlusTask, &sqe[0]);
+    rtCqReport_t cqe;
+    cqe.errorType = 1;
+    cqe.errorCode = 1;
+    SetStarsResult(&fftsPlusTask, cqe);
+    Complete(&fftsPlusTask, 0);
+    rtFftsPlusTaskErrInfo_t fftsPlusErrInfo = {};
+    fftsPlusErrInfo.contextId = 1024;
+    fftsPlusErrInfo.threadId = 0;
+    fftsPlusErrInfo.errType = 10;
+    PushBackErrInfo(&fftsPlusTask, static_cast<const void*>(&fftsPlusErrInfo), sizeof(rtFftsPlusTaskErrInfo_t));
+    Complete(&fftsPlusTask, 0);
+    TaskUnInitProc(&fftsPlusTask);
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, FftsPlusTaskProcessErr2)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x10;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+
+    rtFftsPlusAicAivCtx_t temp = {};
+    temp.contextType = RT_CTX_TYPE_AICORE;
+    void* addr = reinterpret_cast<void*>(&temp);
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync)
+        .stubs()
+        .with(outBoundP(addr, sizeof(temp)), mockcpp::any(), mockcpp::any(), mockcpp::any(), mockcpp::any())
+        .will(returnValue(RT_ERROR_NONE));
+
+    rtError_t ret = FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe[3] = {};
+    ToConstructSqe(&fftsPlusTask, &sqe[0]);
+    rtCqReport_t cqe;
+    cqe.errorType = 1;
+    cqe.errorCode = 1;
+    SetStarsResult(&fftsPlusTask, cqe);
+    Complete(&fftsPlusTask, 0);
+    rtFftsPlusTaskErrInfo_t fftsPlusErrInfo = {};
+    fftsPlusErrInfo.contextId = 0;
+    fftsPlusErrInfo.threadId = 0;
+    fftsPlusErrInfo.errType = 10;
+    PushBackErrInfo(&fftsPlusTask, static_cast<const void*>(&fftsPlusErrInfo), sizeof(rtFftsPlusTaskErrInfo_t));
+    Complete(&fftsPlusTask, 0);
+    TaskUnInitProc(&fftsPlusTask);
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, FftsPlusTaskProcessErr3)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x10;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+
+    rtFftsPlusAicAivCtx_t temp = {};
+    temp.contextType = RT_CTX_TYPE_MIX_AIC;
+    void* addr = reinterpret_cast<void*>(&temp);
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync)
+        .stubs()
+        .with(outBoundP(addr, sizeof(temp)), mockcpp::any(), mockcpp::any(), mockcpp::any(), mockcpp::any())
+        .will(returnValue(RT_ERROR_NONE));
+
+    rtError_t ret = FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe[3] = {};
+    ToConstructSqe(&fftsPlusTask, &sqe[0]);
+    rtCqReport_t cqe;
+    cqe.errorType = 1;
+    cqe.errorCode = 1;
+    SetStarsResult(&fftsPlusTask, cqe);
+    Complete(&fftsPlusTask, 0);
+    rtFftsPlusTaskErrInfo_t fftsPlusErrInfo = {};
+    fftsPlusErrInfo.contextId = 0;
+    fftsPlusErrInfo.threadId = 0;
+    fftsPlusErrInfo.errType = 10;
+    PushBackErrInfo(&fftsPlusTask, static_cast<const void*>(&fftsPlusErrInfo), sizeof(rtFftsPlusTaskErrInfo_t));
+    Complete(&fftsPlusTask, 0);
+    TaskUnInitProc(&fftsPlusTask);
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, FftsPlusTaskProcessErr5)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x10;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}, 1};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+
+    rtFftsPlusSdmaCtx_t temp = {};
+    temp.contextType = RT_CTX_TYPE_SDMA;
+    void* addr = reinterpret_cast<void*>(&temp);
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync)
+        .stubs()
+        .with(outBoundP(addr, sizeof(temp)), mockcpp::any(), mockcpp::any(), mockcpp::any(), mockcpp::any())
+        .will(returnValue(RT_ERROR_NONE));
+
+    rtError_t ret = FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe[3] = {};
+    ToConstructSqe(&fftsPlusTask, &sqe[0]);
+    rtCqReport_t cqe;
+    cqe.errorType = 1;
+    cqe.errorCode = 1;
+    SetStarsResult(&fftsPlusTask, cqe);
+    Complete(&fftsPlusTask, 0);
+    rtFftsPlusTaskErrInfo_t fftsPlusErrInfo = {};
+    fftsPlusErrInfo.contextId = 0;
+    fftsPlusErrInfo.threadId = 0;
+    fftsPlusErrInfo.errType = 4;
+    PushBackErrInfo(&fftsPlusTask, static_cast<const void*>(&fftsPlusErrInfo), sizeof(rtFftsPlusTaskErrInfo_t));
+    Complete(&fftsPlusTask, 0);
+    TaskUnInitProc(&fftsPlusTask);
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, DoCompleteSuccess_1)
+{
+    RawDevice* device = new RawDevice(0);
+    MOCKER_CPP(&Stream::CheckASyncRecycle).stubs().will(returnValue(false));
+
+    device->Init();
+    EXPECT_NE(device->engine_, nullptr);
+    MOCKER_CPP_VIRTUAL(device->engine_, &Engine::WakeUpRecycleThread).stubs();
+
+    Stream* stream = new Stream(device, 0);
+    stream->Setup();
+
+    rtError_t error = RT_ERROR_NONE;
+    TaskInfo* task = device->GetTaskFactory()->Alloc(stream, TS_TASK_TYPE_MEMCPY, error);
+    EXPECT_NE(task, nullptr);
+    InitByStream(task, stream);
+    MemcpyAsyncTaskInitV1(task, nullptr, RT_MEMCPY_HOST_TO_DEVICE);
+    MemcpyAsyncTaskInfo* memcpyAsyncTsk = &task->u.memcpyAsyncTaskInfo;
+
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::GetRunMode).stubs().will(returnValue((uint32_t)1)); // RT_RUN_MODE_ONLINE
+
+    task->errorCode = 0;
+    memcpyAsyncTsk->copyType = RT_MEMCPY_DIR_H2D;
+    Complete(task, 0);
+    device->GetTaskFactory()->Recycle(task);
+
+    delete stream;
+    delete device;
+}
+
+TEST_F(TaskTest, SetStreamModeTask)
+{
+    TaskInfo tsk = {};
+    InitByStream(&tsk, stream_);
+    rtError_t ret = SetStreamModeTaskInit(&tsk, 0);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    rtCommand_t cmd = {};
+    ToCommand(&tsk, &cmd);
+    Complete(&tsk, 0);
+}
+
+TEST_F(TaskTest, FftsPlusTaskForDevAddr)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x10;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}, 0, 1, NULL};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+    void* handleInfo[2] = {nullptr, nullptr};
+    fftsPlusTaskInfo.argsHandleInfoPtr = handleInfo;
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_NONE));
+    fftsPlusTask.errorCode = 0;
+    rtError_t ret = FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    rtModel_t tmpModelHandle = nullptr;
+    Model* tmpModel = EnsureStreamModel(&tmpModelHandle);
+    ASSERT_NE(tmpModel, nullptr);
+    stream_->SetModel(nullptr);
+    DoCompleteSuccForFftsPlusTask(&fftsPlusTask, 0);
+    rtStarsSqe_t sqe[3] = {};
+    ToConstructSqe(&fftsPlusTask, &sqe[0]);
+
+    struct Handle {
+        void* kerArgs;
+        bool freeArgs;
+        void* argsAlloc;
+    };
+
+    struct Handle hand;
+    void* phand;
+    hand.kerArgs = descBuf;
+    hand.freeArgs = true;
+    hand.kerArgs = nullptr;
+    phand = (void*)&hand;
+
+    fftsPlusTask.u.fftsPlusTask.argsHandleInfoNum = 1;
+    fftsPlusTask.u.fftsPlusTask.argsHandleInfoPtr = new std::vector<void*>();
+    fftsPlusTask.u.fftsPlusTask.argsHandleInfoPtr->push_back(phand);
+    UmaArgLoader* argLoad = (UmaArgLoader*)(stream_->Device_()->ArgLoader_());
+    MOCKER_CPP_VIRTUAL(*argLoad, &UmaArgLoader::Release).stubs().will(returnValue(RT_ERROR_NONE));
+
+    DoCompleteSuccForFftsPlusTask(&fftsPlusTask, 0);
+
+    fftsPlusTask.u.fftsPlusTask.argsHandleInfoNum = 1;
+    fftsPlusTask.u.fftsPlusTask.argsHandleInfoPtr = new std::vector<void*>();
+    fftsPlusTask.u.fftsPlusTask.argsHandleInfoPtr->push_back(phand);
+    FftsPlusTaskUnInit(&fftsPlusTask);
+
+    free((void*)fftsPlusTaskInfo.descBuf);
+    stream_->SetModel(tmpModel);
+    ReleaseOwnedStreamModel(tmpModelHandle, tmpModel);
+}
+
+TEST_F(TaskTest, FftsPlusTaskForDevMemErr)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x10;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}, 0, 1, NULL};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+    void* handleInfo[2] = {nullptr, nullptr};
+    fftsPlusTaskInfo.argsHandleInfoPtr = handleInfo;
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_NONE));
+    FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    fftsPlusTask.errorCode = 0x58;
+    fftsPlusTask.mte_error = 0x58;
+    DoCompleteSuccForFftsPlusTask(&fftsPlusTask, 0);
+    rtStarsSqe_t sqe[3] = {};
+    ToConstructSqe(&fftsPlusTask, &sqe[0]);
+
+    FftsPlusTaskUnInit(&fftsPlusTask);
+    EXPECT_EQ(fftsPlusTask.u.fftsPlusTask.errInfo, nullptr);
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, FftsPlusTaskForDevMemErr_1)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x10;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}, 0, 1, NULL};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+    void* handleInfo[2] = {nullptr, nullptr};
+    fftsPlusTaskInfo.argsHandleInfoPtr = handleInfo;
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_NONE));
+    FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    fftsPlusTask.errorCode = 0x220;
+    fftsPlusTask.mte_error = 0x220;
+    DoCompleteSuccForFftsPlusTask(&fftsPlusTask, 0);
+    rtStarsSqe_t sqe[3] = {};
+    ToConstructSqe(&fftsPlusTask, &sqe[0]);
+
+    FftsPlusTaskUnInit(&fftsPlusTask);
+    EXPECT_EQ(fftsPlusTask.u.fftsPlusTask.errInfo, nullptr);
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, FftsPlusTaskForDevMemErr_2)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr; // device memory
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x10;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}, 0, 1, NULL};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+    void* handleInfo[2] = {nullptr, nullptr};
+    fftsPlusTaskInfo.argsHandleInfoPtr = handleInfo;
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_NONE));
+    FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    fftsPlusTask.errorCode = 0x221;
+    fftsPlusTask.mte_error = 0x221;
+    DoCompleteSuccForFftsPlusTask(&fftsPlusTask, 0);
+    rtStarsSqe_t sqe[3] = {};
+    ToConstructSqe(&fftsPlusTask, &sqe[0]);
+
+    FftsPlusTaskUnInit(&fftsPlusTask);
+    EXPECT_EQ(fftsPlusTask.u.fftsPlusTask.errInfo, nullptr);
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, FftsPlusTaskUnInit_SeparateSendAndRecycle)
+{
+    rtFftsPlusSqe_t fftsSqe = {{}, 0};
+    void* descBuf = nullptr;
+    uint32_t descBufLen = 0;
+    NpuDriver drv;
+    uint32_t flag = 0x10;
+
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo = {&fftsSqe, descBuf, descBufLen, {NULL, NULL, 0, 0}, 0, 1, NULL};
+    fftsPlusTaskInfo.descBuf = malloc(256);
+    fftsPlusTaskInfo.descBufLen = 256;
+    void* handleInfo[2] = {nullptr, nullptr};
+    fftsPlusTaskInfo.argsHandleInfoPtr = handleInfo;
+    TaskInfo fftsPlusTask = {};
+    InitByStream(&fftsPlusTask, stream_);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_NONE));
+    FftsPlusTaskInit(&fftsPlusTask, &fftsPlusTaskInfo, flag);
+    fftsPlusTask.u.fftsPlusTask.argHandle = reinterpret_cast<void*>(0x1U);
+
+    MOCKER_CPP(&Stream::IsSeparateSendAndRecycle).stubs().will(returnValue(true));
+    MOCKER_CPP_VIRTUAL(stream_->Device_(), &Device::PushFftsPlusArgHandle).expects(once());
+    FftsPlusTaskUnInit(&fftsPlusTask);
+    EXPECT_EQ(fftsPlusTask.u.fftsPlusTask.argHandle, nullptr);
+
+    free((void*)fftsPlusTaskInfo.descBuf);
+}
+
+TEST_F(TaskTest, ToConstructSqeForModelUpdateTask)
+{
+    NpuDriver drv;
+    TaskInfo task = {};
+    task.stream = stream_;
+    uint16_t desStreamId = 0;
+    uint16_t destaskId = 0;
+    uint16_t exeStreamId = 0;
+    void* devCopyMem = nullptr;
+    uint32_t tilingTabLen = 1;
+    rtFftsPlusTaskInfo_t fftsPlusTaskInfo;
+    rtMdlTaskUpdateInfo_t para;
+    para.tilingKeyAddr = nullptr;
+    para.hdl = nullptr;
+    para.fftsPlusTaskInfo = &fftsPlusTaskInfo;
+    rtError_t ret = ModelTaskUpdateInit(&task, desStreamId, destaskId, exeStreamId, devCopyMem, tilingTabLen, &para);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemAddressTranslate).stubs().will(returnValue(RT_ERROR_NONE));
+
+    rtStarsSqe_t sqe = {};
+    ToConstructSqe(&task, &sqe);
+    EXPECT_EQ(sqe.phSqe.task_type, TS_TASK_TYPE_MODEL_TASK_UPDATE);
+}
+
+TEST_F(TaskTest, SetSerialId)
+{
+    bool disableThread = Runtime::Instance()->GetDisableThread();
+    if (!disableThread) {
+        /* 在将SetDisableThread变更为true前做延时处理 */
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        ((Runtime*)Runtime::Instance())->SetDisableThread(true);
+    }
+    RawDevice* device = new RawDevice(0);
+    device->Init();
+
+    Stream* stream = new Stream(device, 0);
+    stream->streamId_ = 100;
+    TaskInfo davinciKernelTask_ = {};
+    InitByStream(&davinciKernelTask_, stream);
+    davinciKernelTask_.id = 65533;
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    AicTaskInit(&davinciKernelTask_, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+
+    device->GetTaskFactory()->SetSerialId(stream, &davinciKernelTask_);
+    ((Runtime*)Runtime::Instance())->SetDisableThread(disableThread);
+    EXPECT_EQ(davinciKernelTask_.type, TS_TASK_TYPE_KERNEL_AICORE);
+    delete stream;
+    delete device;
+}
+
+TEST_F(TaskTest, TransDavinciTaskToVectorCore)
+{
+    uint64_t addr2 = 0x100;
+    uint64_t addr1 = 0x200;
+    uint8_t mixType = 1;
+    rtKernelAttrType kernelAttrType = RT_KERNEL_ATTR_TYPE_AICORE;
+
+    TransDavinciTaskToVectorCore(0x1000, addr2, addr1, mixType, kernelAttrType, true);
+    EXPECT_EQ(addr1, 0x100);
+    EXPECT_EQ(mixType, 0);
+    EXPECT_EQ(kernelAttrType, RT_KERNEL_ATTR_TYPE_VECTOR);
+}
+
+TEST_F(TaskTest, RemoteWaitTask)
+{
+    rtError_t ret;
+    rtEvent_t event;
+    uint32_t evtId;
+    ret = rtEventCreateWithFlag(&event, RT_EVENT_WITH_FLAG);
+    EXPECT_EQ(ret, ACL_RT_SUCCESS);
+    ret = rtGetEventID(event, &evtId);
+    TaskInfo remoteWaitTask = {};
+    InitByStream(&remoteWaitTask, stream_);
+    Event* evt = rt_ut::UnwrapOrNull<Event>(event);
+    ret = RemoteEventWaitTaskInit(&remoteWaitTask, evt, 0, evtId);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    rtCommand_t cmd = {};
+    MOCKER_CPP(&Event::InsertWaitToMap).stubs();
+    ToCommand(&remoteWaitTask, &cmd);
+    MOCKER_CPP(&Event::DeleteWaitFromMap).stubs();
+    MOCKER_CPP_VIRTUAL(evt, &Event::TryFreeEventIdAndCheckCanBeDelete)
+        .stubs()
+        .will(returnValue(false))
+        .then(returnValue(true));
+    Complete(&remoteWaitTask, 0);
+    rtEventDestroy(event);
+}
+
+TEST_F(TaskTest, Subscribe)
+{
+    GlobalMockObject::verify();
+
+    rtError_t ret = RT_ERROR_NONE;
+    NpuDriver drv;
+    MOCKER_CPP(&Event::WaitForBusy).stubs().will(returnValue(1)).then(returnValue(RT_ERROR_NONE));
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::SqCqFree).stubs().will(returnValue(2)).then(returnValue(RT_ERROR_NONE));
+    RawDevice* dev = new RawDevice(1);
+    dev->Init();
+    dev->driver_ = &drv;
+    Stream* stm = new (std::nothrow) Stream(dev, RT_STREAM_PRIORITY_DEFAULT, RT_STREAM_FAST_SYNC, nullptr);
+    CbSubscribe* cbSubscribe = new (std::nothrow) CbSubscribe(static_cast<uint32_t>(RT_THREAD_GROUP_ID_MAX));
+
+    uint32_t devId = stm->Device_()->Id_();
+    uint32_t tsId = stm->Device_()->DevGetTsId();
+    int32_t streamId = stm->Id_();
+    uint64_t threadId = 0;
+    uint64_t threadIdGet = 0;
+    uint32_t sqId = 0;
+    uint32_t cqId = 0;
+    uint32_t groupId = 0;
+
+    // CbSubscribe::DeleteAll
+    Event* evt = new (std::nothrow) Event();
+    evt->device_ = stream_->Device_();
+    uint64_t key = RT_CB_SUBSCRIBE_MK_STREAM_DEV_KEY(devId, streamId);
+    cbSubscribeInfo subscribeInfo = {threadId, stm, sqId, cqId, groupId, evt};
+    cbSubscribe->subscribeMapByStreamId_[key] = subscribeInfo;
+    cbSubscribe->DeleteAll();
+    cbSubscribe->DeleteAll();
+
+    Event* evt1 = event_;
+    cbSubscribeInfo subscribeInfo1 = {threadId, stm, sqId, cqId, groupId, evt1};
+    cbSubscribe->subscribeMapByStreamId_[key] = subscribeInfo1;
+    // CbSubscribe::GetSqIdByStreamId
+    ret = cbSubscribe->GetSqIdByStreamId(devId, streamId, &sqId);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    // CbSubscribe::GetGroupIdByStreamId
+    ret = cbSubscribe->GetGroupIdByStreamId(devId, streamId, &groupId);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    // CbSubscribe::GetThreadIdByStreamId
+    ret = cbSubscribe->GetThreadIdByStreamId(devId, streamId, &threadIdGet);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    EXPECT_EQ(threadId, threadIdGet);
+
+    ret = cbSubscribe->GetThreadIdByStreamId(devId, 0x1000, &threadIdGet);
+    EXPECT_EQ(ret, RT_ERROR_SUBSCRIBE_STREAM);
+
+    // CbSubscribe::IsExistInStreamMap
+    bool exist = cbSubscribe->IsExistInStreamMap(stm);
+    EXPECT_EQ(exist, true);
+    // CbSubscribe::GetEventByStreamId
+    cbSubscribe->subscribeMapByStreamId_.clear();
+    ret = cbSubscribe->GetEventByStreamId(devId, streamId, &evt1);
+    EXPECT_EQ(ret, RT_ERROR_SUBSCRIBE_STREAM);
+    // CbSubscribe::IsExistInStreamMap
+    exist = cbSubscribe->IsExistInStreamMap(stm);
+    EXPECT_EQ(exist, false);
+
+    // CbSubscribe::GetGroupIdByThreadId
+    uint32_t key1 = RT_CB_SUBSCRIBE_MK_INFO_KEY(tsId, devId);
+    cbSubscribe->subscribeMapByThreadId_[threadId][key1][streamId] = subscribeInfo1;
+    ret = cbSubscribe->GetGroupIdByThreadId(threadId, &devId, &tsId, &groupId);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+
+    delete cbSubscribe;
+    delete stm;
+    delete dev;
+}
+
+TEST_F(TaskTest, TestGetExceptionArgsForFftsPlus)
+{
+    TaskInfo taskInfo = {};
+    rtExceptionArgsInfo_t argsInfo;
+
+    rtExceptionExpandInfo_t expandInfo = {};
+    taskInfo.u.fftsPlusTask.fftsSqe.subType = RT_STARS_FFTSPLUS_HCCL_WITHOUT_AICAIV_FLAG;
+    taskInfo.u.fftsPlusTask.errInfo = new std::vector<rtFftsPlusTaskErrInfo_t>(0);
+    rtFftsPlusTaskErrInfo_t fftsPlusErrInfo = {};
+    taskInfo.u.fftsPlusTask.errInfo->push_back(fftsPlusErrInfo);
+    GetExceptionArgsForFftsPlus(&taskInfo, &expandInfo, FFTS_PLUS_AICORE_ERROR, &argsInfo);
+    EXPECT_EQ(argsInfo.argsize, 0U);
+    EXPECT_EQ(argsInfo.sizeInfo.atomicIndex, 0U);
+
+    taskInfo.u.fftsPlusTask.fftsSqe.subType = 0x5CU;
+    taskInfo.u.fftsPlusTask.inputArgsSize.infoAddr = nullptr;
+    GetExceptionArgsForFftsPlus(&taskInfo, &expandInfo, FFTS_PLUS_AICORE_ERROR, &argsInfo);
+    EXPECT_EQ(argsInfo.argsize, 0U);
+    EXPECT_EQ(argsInfo.sizeInfo.atomicIndex, 0U);
+
+    taskInfo.u.fftsPlusTask.inputArgsSize.infoAddr = malloc(32);
+    taskInfo.u.fftsPlusTask.inputArgsSize.atomicIndex = 1;
+    taskInfo.u.fftsPlusTask.descAlignBuf = malloc(256);
+    taskInfo.u.fftsPlusTask.descBufLen = 256;
+    expandInfo.u.fftsPlusInfo.contextId = 0U;
+    InitByStream(&taskInfo, stream_);
+    NpuDriver drv;
+    rtFftsPlusMixAicAivCtx_t temp = {};
+    temp.contextType = RT_CTX_TYPE_MIX_AIC;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync)
+        .stubs()
+        .with(
+            outBoundP(reinterpret_cast<void*>(&temp), sizeof(temp)), mockcpp::any(), mockcpp::any(), mockcpp::any(),
+            mockcpp::any())
+        .will(returnValue(RT_ERROR_NONE));
+    GetExceptionArgsForFftsPlus(&taskInfo, &expandInfo, FFTS_PLUS_AICORE_ERROR, &argsInfo);
+    EXPECT_EQ(argsInfo.sizeInfo.infoAddr, taskInfo.u.fftsPlusTask.inputArgsSize.infoAddr);
+    EXPECT_EQ(argsInfo.sizeInfo.atomicIndex, taskInfo.u.fftsPlusTask.inputArgsSize.atomicIndex);
+    GlobalMockObject::verify();
+
+    temp.contextType = RT_CTX_TYPE_SDMA;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync)
+        .stubs()
+        .with(
+            outBoundP(reinterpret_cast<void*>(&temp), sizeof(temp)), mockcpp::any(), mockcpp::any(), mockcpp::any(),
+            mockcpp::any())
+        .will(returnValue(RT_ERROR_NONE));
+    GetExceptionArgsForFftsPlus(&taskInfo, &expandInfo, FFTS_PLUS_AICORE_ERROR, &argsInfo);
+    EXPECT_EQ(argsInfo.argsize, 0U);
+    EXPECT_EQ(argsInfo.sizeInfo.atomicIndex, 0U);
+
+    taskInfo.u.fftsPlusTask.errInfo->clear();
+    GetExceptionArgsForFftsPlus(&taskInfo, &expandInfo, ERROR_TYPE_BUTT, &argsInfo);
+    EXPECT_EQ(argsInfo.argsize, 0U);
+    EXPECT_EQ(argsInfo.sizeInfo.atomicIndex, 0U);
+
+    free(taskInfo.u.fftsPlusTask.inputArgsSize.infoAddr);
+    free(taskInfo.u.fftsPlusTask.descAlignBuf);
+    delete taskInfo.u.fftsPlusTask.errInfo;
+}
+
+TEST_F(TaskTest, PrintAicAivErrorInfoForFftsPlusTaskMemCopyFail)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.id = 7U;
+    taskInfo.errorCode = 0x1234U;
+    taskInfo.u.fftsPlusTask.descAlignBuf = malloc(kFftsContextLenForTest);
+    taskInfo.u.fftsPlusTask.descBufLen = kFftsContextLenForTest;
+
+    rtFftsPlusTaskErrInfo_t info = {};
+    info.contextId = 0U;
+    info.threadId = 2U;
+    info.errType = FFTS_PLUS_AICORE_ERROR;
+
+    g_fftsMemCopySyncCallCount = 0U;
+    MOCKER_CPP_VIRTUAL(stream_->Device_()->Driver_(), &Driver::MemCopySync)
+        .expects(once())
+        .will(invoke(FftsMemCopySyncFailStub));
+    PrintAicAivErrorInfoForFftsPlusTask(&taskInfo, info, stream_->Device_()->Id_());
+    EXPECT_EQ(g_fftsMemCopySyncCallCount, 1U);
+
+    free(taskInfo.u.fftsPlusTask.descAlignBuf);
+}
+
+TEST_F(TaskTest, PrintAicAivErrorInfoForFftsPlusTaskAicoreContextDetailCopiedOnce)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.id = 10U;
+    taskInfo.errorCode = 0x2233U;
+    taskInfo.u.fftsPlusTask.descAlignBuf = malloc(kFftsContextLenForTest);
+    taskInfo.u.fftsPlusTask.descBufLen = kFftsContextLenForTest;
+
+    rtFftsPlusTaskErrInfo_t info = {};
+    info.contextId = 0U;
+    info.threadId = 5U;
+    info.errType = FFTS_PLUS_AICORE_ERROR;
+    info.pcStart = 0x3333U;
+
+    g_fftsAicAivCtxForTest = {};
+    g_fftsAicAivCtxForTest.contextType = RT_CTX_TYPE_AICORE;
+    g_fftsAicAivCtxForTest.nonTailTaskStartPcH = 0U;
+    g_fftsAicAivCtxForTest.nonTailTaskStartPcL = 0x1111U;
+    g_fftsAicAivCtxForTest.tailTaskStartPcH = 0U;
+    g_fftsAicAivCtxForTest.tailTaskStartPcL = 0x2222U;
+    g_fftsAicAivCtxForTest.tailBlockdim = 4U;
+
+    g_fftsMemCopySyncCallCount = 0U;
+    MOCKER_CPP_VIRTUAL(stream_->Device_()->Driver_(), &Driver::MemCopySync)
+        .expects(once())
+        .will(invoke(FftsMemCopySyncAicAivCtxStub));
+    PrintAicAivErrorInfoForFftsPlusTask(&taskInfo, info, stream_->Device_()->Id_());
+    EXPECT_EQ(g_fftsMemCopySyncCallCount, 1U);
+
+    free(taskInfo.u.fftsPlusTask.descAlignBuf);
+}
+
+TEST_F(TaskTest, PrintErrorInfoForFftsPlusTaskUnknownErrTypeWithContextDetail)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.id = 8U;
+    taskInfo.errorCode = 0x4321U;
+    taskInfo.u.fftsPlusTask.descAlignBuf = malloc(kFftsContextLenForTest * 2U);
+    taskInfo.u.fftsPlusTask.descBufLen = kFftsContextLenForTest * 2U;
+    taskInfo.u.fftsPlusTask.errInfo = new std::vector<rtFftsPlusTaskErrInfo_t>();
+
+    rtFftsPlusTaskErrInfo_t info = {};
+    info.contextId = 1U;
+    info.threadId = 3U;
+    info.errType = ERROR_TYPE_BUTT + 1U;
+    taskInfo.u.fftsPlusTask.errInfo->push_back(info);
+
+    g_fftsMixCtxForTest = {};
+    g_fftsMixCtxForTest.contextType = RT_CTX_TYPE_MIX_AIV;
+    g_fftsMixCtxForTest.threadId = info.threadId;
+    g_fftsMixCtxForTest.threadDim = 8U;
+
+    g_fftsMemCopySyncCallCount = 0U;
+    MOCKER_CPP_VIRTUAL(stream_->Device_()->Driver_(), &Driver::MemCopySync)
+        .expects(exactly(2))
+        .will(invoke(FftsMemCopySyncMixCtxStub));
+    PrintErrorInfoForFftsPlusTask(&taskInfo, stream_->Device_()->Id_());
+    EXPECT_EQ(g_fftsMemCopySyncCallCount, 2U);
+
+    delete taskInfo.u.fftsPlusTask.errInfo;
+    free(taskInfo.u.fftsPlusTask.descAlignBuf);
+}
+
+TEST_F(TaskTest, PrintErrorInfoForFftsPlusTaskUnknownContextTypeName)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.id = 14U;
+    taskInfo.errorCode = 0x99U;
+    taskInfo.u.fftsPlusTask.descAlignBuf = malloc(kFftsContextLenForTest * 2U);
+    taskInfo.u.fftsPlusTask.descBufLen = kFftsContextLenForTest * 2U;
+    taskInfo.u.fftsPlusTask.errInfo = new std::vector<rtFftsPlusTaskErrInfo_t>();
+
+    rtFftsPlusTaskErrInfo_t info = {};
+    info.contextId = 1U;
+    info.threadId = 7U;
+    info.errType = ERROR_TYPE_BUTT + 5U;
+    taskInfo.u.fftsPlusTask.errInfo->push_back(info);
+
+    g_fftsMixCtxForTest = {};
+    g_fftsMixCtxForTest.contextType = static_cast<uint16_t>(0xFFFFU);
+    g_fftsMixCtxForTest.threadId = info.threadId;
+    g_fftsMixCtxForTest.threadDim = 16U;
+
+    g_fftsMemCopySyncCallCount = 0U;
+    MOCKER_CPP_VIRTUAL(stream_->Device_()->Driver_(), &Driver::MemCopySync)
+        .expects(exactly(2))
+        .will(invoke(FftsMemCopySyncMixCtxStub));
+    PrintErrorInfoForFftsPlusTask(&taskInfo, stream_->Device_()->Id_());
+    EXPECT_EQ(g_fftsMemCopySyncCallCount, 2U);
+
+    delete taskInfo.u.fftsPlusTask.errInfo;
+    free(taskInfo.u.fftsPlusTask.descAlignBuf);
+}
+
+TEST_F(TaskTest, PrintErrorInfoForFftsPlusTaskSdmaContextCopyFail)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.id = 11U;
+    taskInfo.errorCode = 0x66U;
+    taskInfo.u.fftsPlusTask.descAlignBuf = malloc(kFftsContextLenForTest);
+    taskInfo.u.fftsPlusTask.descBufLen = kFftsContextLenForTest;
+    taskInfo.u.fftsPlusTask.errInfo = new std::vector<rtFftsPlusTaskErrInfo_t>();
+
+    rtFftsPlusTaskErrInfo_t info = {};
+    info.contextId = 0U;
+    info.threadId = 6U;
+    info.errType = FFTS_PLUS_SDMA_ERROR;
+    taskInfo.u.fftsPlusTask.errInfo->push_back(info);
+
+    g_fftsMemCopySyncCallCount = 0U;
+    MOCKER_CPP_VIRTUAL(stream_->Device_()->Driver_(), &Driver::MemCopySync)
+        .expects(once())
+        .will(invoke(FftsMemCopySyncFailStub));
+    PrintErrorInfoForFftsPlusTask(&taskInfo, stream_->Device_()->Id_());
+    EXPECT_EQ(g_fftsMemCopySyncCallCount, 1U);
+
+    delete taskInfo.u.fftsPlusTask.errInfo;
+    free(taskInfo.u.fftsPlusTask.descAlignBuf);
+}
+
+TEST_F(TaskTest, PrintErrorInfoForFftsPlusTaskSkipsContextCopyWhenContextOutOfRange)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.id = 9U;
+    taskInfo.errorCode = 0x55U;
+    taskInfo.u.fftsPlusTask.descAlignBuf = malloc(kFftsContextLenForTest);
+    taskInfo.u.fftsPlusTask.descBufLen = kFftsContextLenForTest;
+    taskInfo.u.fftsPlusTask.errInfo = new std::vector<rtFftsPlusTaskErrInfo_t>();
+
+    rtFftsPlusTaskErrInfo_t info = {};
+    info.contextId = 1U;
+    info.threadId = 4U;
+    info.errType = ERROR_TYPE_BUTT + 2U;
+    taskInfo.u.fftsPlusTask.errInfo->push_back(info);
+
+    g_fftsMemCopySyncCallCount = 0U;
+    MOCKER_CPP_VIRTUAL(stream_->Device_()->Driver_(), &Driver::MemCopySync)
+        .stubs()
+        .will(invoke(FftsMemCopySyncMixCtxStub));
+    PrintErrorInfoForFftsPlusTask(&taskInfo, stream_->Device_()->Id_());
+    EXPECT_EQ(g_fftsMemCopySyncCallCount, 1U);
+
+    delete taskInfo.u.fftsPlusTask.errInfo;
+    free(taskInfo.u.fftsPlusTask.descAlignBuf);
+}
+
+TEST_F(TaskTest, PrintErrorInfoForFftsPlusTask_DumpContextEarlyReturnWhenNullDescAlignBuf)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.id = 12U;
+    taskInfo.errorCode = 0x77U;
+    taskInfo.u.fftsPlusTask.descAlignBuf = nullptr;
+    taskInfo.u.fftsPlusTask.descBufLen = kFftsContextLenForTest;
+    taskInfo.u.fftsPlusTask.errInfo = new std::vector<rtFftsPlusTaskErrInfo_t>();
+
+    rtFftsPlusTaskErrInfo_t info = {};
+    info.contextId = 0U;
+    info.threadId = 1U;
+    info.errType = ERROR_TYPE_BUTT + 3U;
+    taskInfo.u.fftsPlusTask.errInfo->push_back(info);
+
+    g_fftsMemCopySyncCallCount = 0U;
+    MOCKER_CPP_VIRTUAL(stream_->Device_()->Driver_(), &Driver::MemCopySync)
+        .stubs()
+        .will(invoke(FftsMemCopySyncMixCtxStub));
+    PrintErrorInfoForFftsPlusTask(&taskInfo, stream_->Device_()->Id_());
+    EXPECT_EQ(g_fftsMemCopySyncCallCount, 0U);
+
+    delete taskInfo.u.fftsPlusTask.errInfo;
+}
+
+TEST_F(TaskTest, PrintErrorInfoForFftsPlusTask_DumpContextMemCopySyncFail)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.id = 13U;
+    taskInfo.errorCode = 0x88U;
+    taskInfo.u.fftsPlusTask.descAlignBuf = malloc(kFftsContextLenForTest);
+    taskInfo.u.fftsPlusTask.descBufLen = kFftsContextLenForTest;
+    taskInfo.u.fftsPlusTask.errInfo = new std::vector<rtFftsPlusTaskErrInfo_t>();
+
+    rtFftsPlusTaskErrInfo_t info = {};
+    info.contextId = 0U;
+    info.threadId = 2U;
+    info.errType = ERROR_TYPE_BUTT + 4U;
+    taskInfo.u.fftsPlusTask.errInfo->push_back(info);
+
+    g_fftsMemCopySyncCallCount = 0U;
+    MOCKER_CPP_VIRTUAL(stream_->Device_()->Driver_(), &Driver::MemCopySync)
+        .stubs()
+        .will(invoke(FftsMemCopySyncFailStub));
+    PrintErrorInfoForFftsPlusTask(&taskInfo, stream_->Device_()->Id_());
+    EXPECT_EQ(g_fftsMemCopySyncCallCount, 2U);
+
+    delete taskInfo.u.fftsPlusTask.errInfo;
+    free(taskInfo.u.fftsPlusTask.descAlignBuf);
+}
+
+TEST_F(TaskTest, TestGetExceptionArgs)
+{
+    TaskInfo taskInfo = {};
+    rtExceptionArgsInfo_t argsInfo;
+    char addr[10];
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICORE;
+    AicTaskInfo* aicTaskInfo = &(taskInfo.u.aicTaskInfo);
+    aicTaskInfo->inputArgsSize.infoAddr = (void*)(addr); // here
+    aicTaskInfo->comm.args = (void*)(addr);
+    aicTaskInfo->comm.argsSize = 10;
+    GetExceptionArgs(&taskInfo, &argsInfo);
+    EXPECT_EQ(10, argsInfo.argsize);
+}
+
+TEST_F(TaskTest, TestGetAicpuExceptionDetailInfo)
+{
+    TaskInfo taskInfo = {};
+    rtAicpuExDetailInfo_t detailInfo = {};
+    char addr[10] = {};
+    Kernel kernel("libcpu.so", "RunCpuKernel", "Add");
+
+    InitByStream(&taskInfo, stream_);
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICPU;
+    AicpuTaskInfo* aicpuTaskInfo = &(taskInfo.u.aicpuTaskInfo);
+    aicpuTaskInfo->comm.args = addr;
+    aicpuTaskInfo->comm.argsSize = sizeof(addr);
+    aicpuTaskInfo->kernel = &kernel;
+    InitEmbeddedInnerHandle<Kernel>(&kernel);
+    aicpuTaskInfo->kernelInnerHandle = kernel.GetInnerHandle();
+
+    GetAicpuExceptionDetailInfo(&taskInfo, &detailInfo);
+    EXPECT_EQ(detailInfo.argAddr, addr);
+    EXPECT_EQ(detailInfo.argsize, sizeof(addr));
+    EXPECT_EQ(rt_ut::UnwrapOrNull<Kernel>(detailInfo.funcHandle), &kernel);
+    EXPECT_EQ(detailInfo.soName, nullptr);
+    EXPECT_EQ(detailInfo.functionName, nullptr);
+    EXPECT_EQ(detailInfo.kernelName, nullptr);
+}
+
+TEST_F(TaskTest, TestGetAicpuExceptionDetailInfoWithoutKernel)
+{
+    TaskInfo taskInfo = {};
+    rtAicpuExDetailInfo_t detailInfo = {};
+    char addr[10] = {};
+
+    InitByStream(&taskInfo, stream_);
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICPU;
+    AicpuTaskInfo* aicpuTaskInfo = &(taskInfo.u.aicpuTaskInfo);
+    aicpuTaskInfo->comm.args = addr;
+    aicpuTaskInfo->comm.argsSize = sizeof(addr);
+
+    GetAicpuExceptionDetailInfo(&taskInfo, &detailInfo);
+    EXPECT_EQ(detailInfo.argAddr, addr);
+    EXPECT_EQ(detailInfo.argsize, sizeof(addr));
+    EXPECT_EQ(detailInfo.funcHandle, nullptr);
+    EXPECT_EQ(detailInfo.soName, nullptr);
+    EXPECT_EQ(detailInfo.functionName, nullptr);
+    EXPECT_EQ(detailInfo.kernelName, nullptr);
+}
+
+TEST_F(TaskTest, TestGetAicpuExceptionDetailInfoWithInvalidKernelHandle)
+{
+    Kernel kernel("RawAicpuFunction", 0U, nullptr, RT_KERNEL_ATTR_TYPE_AICPU, 0U);
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICPU;
+    taskInfo.u.aicpuTaskInfo.kernel = &kernel;
+    taskInfo.u.aicpuTaskInfo.kernelInnerHandle = nullptr;
+    rtAicpuExDetailInfo_t detailInfo = {};
+
+    GetAicpuExceptionDetailInfo(&taskInfo, &detailInfo);
+
+    EXPECT_EQ(detailInfo.funcHandle, nullptr);
+}
+
+TEST_F(TaskTest, TestGetAicpuExceptionDetailInfoInvalidInput)
+{
+    TaskInfo taskInfo = {};
+    rtAicpuExDetailInfo_t detailInfo = {};
+    detailInfo.argAddr = reinterpret_cast<void*>(0x1);
+
+    GetAicpuExceptionDetailInfo(&taskInfo, nullptr);
+    GetAicpuExceptionDetailInfo(nullptr, &detailInfo);
+    EXPECT_EQ(detailInfo.argAddr, nullptr);
+    EXPECT_EQ(detailInfo.argsize, 0U);
+
+    detailInfo.argAddr = reinterpret_cast<void*>(0x1);
+    taskInfo.type = TS_TASK_TYPE_MEMCPY;
+    GetAicpuExceptionDetailInfo(&taskInfo, &detailInfo);
+    EXPECT_EQ(detailInfo.argAddr, nullptr);
+    EXPECT_EQ(detailInfo.argsize, 0U);
+}
+
+TEST_F(TaskTest, TestTaskFailCallBackWithAicpuExceptionInfo)
+{
+    ElfProgram binHandle;
+    Program* program = &binHandle;
+    rtBinHandle exportedBinHandle = rt_ut::InitAndExportHandle<rtBinHandle>(program);
+    EXPECT_EQ(rtBinarySetExceptionCallback(exportedBinHandle, CheckAicpuExceptionCallback, nullptr), RT_ERROR_NONE);
+
+    Kernel kernel("Add", 0U, program, RT_KERNEL_ATTR_TYPE_AICPU, 0U);
+    kernel.SetCpuKernelSo("libcpu.so");
+    kernel.SetCpuFuncName("RunCpuKernel");
+    kernel.SetCpuOpType("Add");
+
+    TaskInfo taskInfo = {};
+    char args[10] = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICPU;
+    taskInfo.id = 7U;
+    taskInfo.taskSn = 17U;
+    AicpuTaskInfo* aicpuTaskInfo = &(taskInfo.u.aicpuTaskInfo);
+    aicpuTaskInfo->comm.args = args;
+    aicpuTaskInfo->comm.argsSize = sizeof(args);
+    aicpuTaskInfo->kernel = &kernel;
+    InitEmbeddedInnerHandle<Kernel>(&kernel);
+    aicpuTaskInfo->kernelInnerHandle = kernel.GetInnerHandle();
+
+    g_expectedAicpuArgAddr = args;
+    g_expectedAicpuArgSize = sizeof(args);
+    g_aicpuExceptionCallbackCalled = false;
+    MOCKER(GetTaskInfo).stubs().will(returnValue(&taskInfo));
+    MOCKER_CPP(&TaskFactory::GetTask).stubs().will(returnValue(&taskInfo));
+
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), taskInfo.id, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+    EXPECT_TRUE(g_aicpuExceptionCallbackCalled);
+}
+
+TEST_F(TaskTest, TestTaskFailCallBackWithRawAicpuExceptionInfo)
+{
+    constexpr size_t soNameOffset = 8U;
+    constexpr size_t functionNameOffset = 40U;
+    char args[128] = {};
+    ASSERT_EQ(strcpy_s(args + soNameOffset, sizeof(args) - soNameOffset, "libraw_aicpu.so"), EOK);
+    ASSERT_EQ(strcpy_s(args + functionNameOffset, sizeof(args) - functionNameOffset, "RawAicpuFunction"), EOK);
+
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICPU;
+    taskInfo.id = 8U;
+    taskInfo.taskSn = 18U;
+    AicpuTaskInfo* const aicpuTaskInfo = &(taskInfo.u.aicpuTaskInfo);
+    aicpuTaskInfo->comm.args = args;
+    aicpuTaskInfo->comm.argsSize = sizeof(args);
+    aicpuTaskInfo->soName = args + soNameOffset;
+    aicpuTaskInfo->funcName = args + functionNameOffset;
+
+    constexpr char moduleName[] = "raw_aicpu_exception_ut";
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, CheckRawAicpuExceptionCallback), RT_ERROR_NONE);
+    g_expectedAicpuArgAddr = args;
+    g_expectedAicpuArgSize = sizeof(args);
+    g_rawAicpuExceptionCallbackCalled = false;
+    MOCKER(GetTaskInfo).stubs().will(returnValue(&taskInfo));
+    MOCKER_CPP(&TaskFactory::GetTask).stubs().will(returnValue(&taskInfo));
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(invoke(MemCopySync_stub));
+
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), taskInfo.id, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+    EXPECT_TRUE(g_rawAicpuExceptionCallbackCalled);
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, nullptr), RT_ERROR_NONE);
+}
+
+TEST_F(TaskTest, TestTaskFailCallBackWithCachedRawAicpuNames)
+{
+    char args[8] = {};
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICPU;
+    taskInfo.id = 9U;
+    taskInfo.taskSn = 19U;
+    AicpuTaskInfo* const aicpuTaskInfo = &(taskInfo.u.aicpuTaskInfo);
+    aicpuTaskInfo->comm.args = args;
+    aicpuTaskInfo->comm.argsSize = sizeof(args);
+    g_cachedRawAicpuSoNameAddr = reinterpret_cast<void*>(0x1000U);
+    g_cachedRawAicpuFunctionNameAddr = reinterpret_cast<void*>(0x2000U);
+    aicpuTaskInfo->soName = g_cachedRawAicpuSoNameAddr;
+    aicpuTaskInfo->funcName = g_cachedRawAicpuFunctionNameAddr;
+
+    constexpr char moduleName[] = "cached_raw_aicpu_exception_ut";
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, CheckRawAicpuExceptionCallback), RT_ERROR_NONE);
+    g_expectedAicpuArgAddr = args;
+    g_expectedAicpuArgSize = sizeof(args);
+    g_rawAicpuExceptionCallbackCalled = false;
+    MOCKER(GetTaskInfo).stubs().will(returnValue(&taskInfo));
+    MOCKER_CPP(&TaskFactory::GetTask).stubs().will(returnValue(&taskInfo));
+    MOCKER_CPP_VIRTUAL(stream_->Device_()->ArgLoader_(), &ArgLoader::GetKernelInfoFromAddr)
+        .stubs()
+        .will(invoke(GetCachedRawAicpuNameStub));
+
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), taskInfo.id, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+
+    EXPECT_TRUE(g_rawAicpuExceptionCallbackCalled);
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, nullptr), RT_ERROR_NONE);
+    g_cachedRawAicpuSoNameAddr = nullptr;
+    g_cachedRawAicpuFunctionNameAddr = nullptr;
+}
+
+TEST_F(TaskTest, TestTaskFailCallBackHandlesRawAicpuNameCopyFailure)
+{
+    char args[128] = {};
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICPU;
+    taskInfo.id = 10U;
+    taskInfo.taskSn = 20U;
+    AicpuTaskInfo* const aicpuTaskInfo = &(taskInfo.u.aicpuTaskInfo);
+    aicpuTaskInfo->comm.args = args;
+    aicpuTaskInfo->comm.argsSize = sizeof(args);
+    aicpuTaskInfo->soName = args + 8U;
+    aicpuTaskInfo->funcName = args + 40U;
+
+    constexpr char moduleName[] = "raw_aicpu_name_copy_failure_ut";
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, CheckInvalidRawAicpuExceptionCallback), RT_ERROR_NONE);
+    g_expectedAicpuArgAddr = args;
+    g_expectedAicpuArgSize = sizeof(args);
+    g_invalidRawAicpuExceptionCallbackCount = 0U;
+    MOCKER(GetTaskInfo).stubs().will(returnValue(&taskInfo));
+    MOCKER_CPP(&TaskFactory::GetTask).stubs().will(returnValue(&taskInfo));
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_DEVICE_NULL));
+
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), taskInfo.id, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+
+    EXPECT_EQ(g_invalidRawAicpuExceptionCallbackCount, 1U);
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, nullptr), RT_ERROR_NONE);
+}
+
+TEST_F(TaskTest, TestTaskFailCallBackHandlesMissingRawAicpuNames)
+{
+    char args[8] = {};
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICPU;
+    taskInfo.id = 11U;
+    taskInfo.taskSn = 21U;
+    taskInfo.u.aicpuTaskInfo.comm.args = args;
+    taskInfo.u.aicpuTaskInfo.comm.argsSize = sizeof(args);
+
+    constexpr char moduleName[] = "raw_aicpu_missing_names_ut";
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, CheckInvalidRawAicpuExceptionCallback), RT_ERROR_NONE);
+    g_expectedAicpuArgAddr = args;
+    g_expectedAicpuArgSize = sizeof(args);
+    g_invalidRawAicpuExceptionCallbackCount = 0U;
+    MOCKER(GetTaskInfo).stubs().will(returnValue(&taskInfo));
+    MOCKER_CPP(&TaskFactory::GetTask).stubs().will(returnValue(&taskInfo));
+
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), taskInfo.id, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+
+    taskInfo.u.aicpuTaskInfo.comm.args = nullptr;
+    taskInfo.u.aicpuTaskInfo.comm.argsSize = 0U;
+    taskInfo.u.aicpuTaskInfo.soName = reinterpret_cast<void*>(0x1000U);
+    taskInfo.u.aicpuTaskInfo.funcName = reinterpret_cast<void*>(0x2000U);
+    g_expectedAicpuArgAddr = nullptr;
+    g_expectedAicpuArgSize = 0U;
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), taskInfo.id, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+
+    EXPECT_EQ(g_invalidRawAicpuExceptionCallbackCount, 2U);
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, nullptr), RT_ERROR_NONE);
+}
+
+TEST_F(TaskTest, TestTaskFailCallBackRejectsInvalidRawAicpuNames)
+{
+    char args[128];
+    (void)memset_s(args, sizeof(args), 'x', sizeof(args));
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICPU;
+    taskInfo.id = 9U;
+    taskInfo.taskSn = 19U;
+    AicpuTaskInfo* const aicpuTaskInfo = &(taskInfo.u.aicpuTaskInfo);
+    aicpuTaskInfo->comm.args = args;
+    aicpuTaskInfo->comm.argsSize = sizeof(args);
+    aicpuTaskInfo->soName = args + 8U;
+    aicpuTaskInfo->funcName = args + 40U;
+
+    constexpr char moduleName[] = "invalid_raw_aicpu_exception_ut";
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, CheckInvalidRawAicpuExceptionCallback), RT_ERROR_NONE);
+    g_expectedAicpuArgAddr = args;
+    g_expectedAicpuArgSize = sizeof(args);
+    g_invalidRawAicpuExceptionCallbackCount = 0U;
+    MOCKER(GetTaskInfo).stubs().will(returnValue(&taskInfo));
+    MOCKER_CPP(&TaskFactory::GetTask).stubs().will(returnValue(&taskInfo));
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(invoke(MemCopySync_stub));
+
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), taskInfo.id, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+
+    const uintptr_t argsEnd = reinterpret_cast<uintptr_t>(args) + sizeof(args);
+    aicpuTaskInfo->soName = reinterpret_cast<void*>(argsEnd);
+    aicpuTaskInfo->funcName = reinterpret_cast<void*>(argsEnd + 8U);
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), taskInfo.id, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+
+    void* const overflowArgs = reinterpret_cast<void*>(std::numeric_limits<uintptr_t>::max() - 4U);
+    aicpuTaskInfo->comm.args = overflowArgs;
+    aicpuTaskInfo->comm.argsSize = 8U;
+    aicpuTaskInfo->soName = overflowArgs;
+    aicpuTaskInfo->funcName = overflowArgs;
+    g_expectedAicpuArgAddr = overflowArgs;
+    g_expectedAicpuArgSize = 8U;
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), taskInfo.id, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+
+    EXPECT_EQ(g_invalidRawAicpuExceptionCallbackCount, 3U);
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, nullptr), RT_ERROR_NONE);
+}
+
+TEST_F(TaskTest, TestTaskFailCallBackWithoutTaskInfo)
+{
+    MOCKER(GetTaskInfo).stubs().will(returnValue(static_cast<TaskInfo*>(nullptr)));
+    MOCKER_CPP(&TaskFactory::GetTask).stubs().will(returnValue(static_cast<TaskInfo*>(nullptr)));
+
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), 12U, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+}
+
+TEST_F(TaskTest, TestTaskFailCallBackWithAicoreExceptionInfo)
+{
+    char args[16] = {};
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.type = TS_TASK_TYPE_KERNEL_AICORE;
+    taskInfo.id = 14U;
+    taskInfo.taskSn = 24U;
+    taskInfo.u.aicTaskInfo.comm.args = args;
+    taskInfo.u.aicTaskInfo.comm.argsSize = sizeof(args);
+
+    constexpr char moduleName[] = "aicore_exception_ut";
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, CheckAicoreExceptionCallback), RT_ERROR_NONE);
+    g_expectedAicpuArgAddr = args;
+    g_expectedAicpuArgSize = sizeof(args);
+    g_aicoreExceptionCallbackCalled = false;
+    MOCKER(GetTaskInfo).stubs().will(returnValue(&taskInfo));
+    MOCKER_CPP(&TaskFactory::GetTask).stubs().will(returnValue(&taskInfo));
+
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), taskInfo.id, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+
+    EXPECT_TRUE(g_aicoreExceptionCallbackCalled);
+    EXPECT_EQ(rtRegTaskFailCallbackByModule(moduleName, nullptr), RT_ERROR_NONE);
+}
+
+TEST_F(TaskTest, TestTaskFailCallBackWithUnsupportedTaskType)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+    taskInfo.type = TS_TASK_TYPE_MEMCPY;
+    taskInfo.id = 13U;
+    taskInfo.taskSn = 23U;
+    MOCKER(GetTaskInfo).stubs().will(returnValue(&taskInfo));
+    MOCKER_CPP(&TaskFactory::GetTask).stubs().will(returnValue(&taskInfo));
+
+    TaskFailCallBack(
+        static_cast<uint32_t>(stream_->Id_()), taskInfo.id, 0U, TS_ERROR_AICPU_EXCEPTION, stream_->Device_(), false);
+}
+
+TEST_F(TaskTest, TestReduceAsyncV2TaskInitFailed)
+{
+    TaskInfo memcpy_asyncv2_task = {};
+    uint32_t res = RT_ERROR_MODEL_STREAM;
+    InitByStream(&memcpy_asyncv2_task, stream_);
+    rtError_t error =
+        ReduceAsyncV2TaskInit(&memcpy_asyncv2_task, RT_MEMCPY_DIR_SDMA_AUTOMATIC_ADD, NULL, NULL, 0, NULL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    SetResult(&memcpy_asyncv2_task, (void*)&res, 1);
+    Complete(&memcpy_asyncv2_task, 0);
+    TaskUnInitProc(&memcpy_asyncv2_task);
+}
+
+TEST_F(TaskTest, TestLabelSwitchTaskInit)
+{
+    TaskInfo switchTask = {};
+    InitByStream(&switchTask, stream_);
+    rtCommand_t command;
+    uint32_t data = 0;
+    const rtCondition_t cond = RT_EQUAL;
+    const uint32_t val = 0;
+    const uint16_t labelId = 1;
+    rtError_t error = LabelSwitchTaskInit(&switchTask, &data, cond, val, labelId);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    ToCommand(&switchTask, &command);
+    TaskUnInitProc(&switchTask);
+}
+
+TEST_F(TaskTest, TestLabelGotoTaskInit)
+{
+    TaskInfo gotoTask = {};
+    rtCommand_t command;
+    InitByStream(&gotoTask, stream_);
+    const uint16_t labelId = 1;
+    rtError_t error = LabelGotoTaskInit(&gotoTask, labelId);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    uint32_t pos = 0;
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopySync).stubs().will(returnValue(RT_ERROR_DEVICE_NULL));
+    gotoTask.type = TS_TASK_TYPE_LABEL_SET;
+    SetSqPos(&gotoTask, pos);
+
+    ToCommand(&gotoTask, &command);
+    TaskUnInitProc(&gotoTask);
+}
+
+TEST_F(TaskTest, ConstructSqeForMemcpyAsyncTask)
+{
+    TaskInfo memcpyAsyncTask = {};
+    rtCommand_t command;
+    rtStarsSqe_t sqe;
+
+    InitByStream(&memcpyAsyncTask, stream_);
+    uint32_t memcpyAddrInfo = 0;
+    memcpyAsyncTask.u.memcpyAsyncTaskInfo.copyType = RT_MEMCPY_ADDR_D2D_SDMA;
+    memcpyAsyncTask.u.memcpyAsyncTaskInfo.copyKind = RT_MEMCPY_RESERVED;
+    memcpyAsyncTask.u.memcpyAsyncTaskInfo.memcpyAddrInfo = &memcpyAddrInfo;
+    ConstructSqeForMemcpyAsyncTask(&memcpyAsyncTask, &sqe);
+
+    rtError_t error = GetModuleIdByMemcpyAddr(nullptr, nullptr, nullptr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    ToCommand(&memcpyAsyncTask, &command);
+    TaskUnInitProc(&memcpyAsyncTask);
+}
+
+bool CheckPcieBarStub(void) { return true; }
+
+TEST_F(TaskTest, TestStreamLabelSwitchByIndexTaskInitFailed)
+{
+    TaskInfo labelSwitchTask = {};
+    InitByStream(&labelSwitchTask, stream_);
+    uint64_t ptr = 0;
+    uint32_t max = 1;
+    uint32_t labelInfoPtr[16] = {};
+    InitByStream(&labelSwitchTask, stream_);
+    rtError_t error = StreamLabelSwitchByIndexTaskInit(&labelSwitchTask, (void*)&ptr, max, (void*)labelInfoPtr);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    uint32_t res = RT_ERROR_MODEL_STREAM;
+    SetResult(&labelSwitchTask, (void*)&res, 1);
+    Complete(&labelSwitchTask, 0);
+    TaskUnInitProc(&labelSwitchTask);
+}
+
+TEST_F(TaskTest, davinci_kernel_task_abort)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtSetDevice(0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+    EXPECT_EQ(task.type, TS_TASK_TYPE_KERNEL_AICORE);
+    uint32_t errorcode[3] = {10, 1, 0};
+    SetResult(&task, (const uint32_t*)errorcode, 1);
+    task.mte_error = TS_ERROR_AICORE_MTE_ERROR;
+    PreCheckTaskErr(&task, 0);
+    PrintErrorInfo(&task, 0);
+
+    rtStreamDestroy(stream);
+
+    ResetDeviceAndRecreateSharedResources();
+}
+
+TEST_F(TaskTest, stars_ipc_notify_record_sqe)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    rtChipType_t oriChipType = rtInstance->GetChipType();
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    SingleBitNotifyRecordInfo single_bit_notify_info = {false, false, false, false, 0, 0, false};
+    NotifyRecordTaskInit(&task, 0, 0, 0, &single_bit_notify_info, nullptr, nullptr, false);
+    ToConstructSqe(&task, &sqe);
+
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::GetChipFromDevice).stubs().will(returnValue((uint32_t)1));
+    ToConstructSqe(&task, &sqe);
+    Complete(&task, 0);
+    rtStreamDestroy(stream);
+}
+
+// Memcpy Async D2D
+TEST_F(TaskTest, stars_memcpy_async_miniv3)
+{
+    uint64_t add = 5;
+    uint64_t add1 = 5;
+    void* dst = &add1;
+    void* src = &add;
+    uint64_t count = 1;
+    rtMemcpyKind_t kind = RT_MEMCPY_HOST_TO_DEVICE;
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    rtChipType_t oriChipType = rtInstance->GetChipType();
+    rtInstance->ParseHostCpuModelInfo();
+    uint32_t cpyType = 1;
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+
+    rtInstance->isRk3588Cpu_ = true;
+    error = MemcpyAsyncTaskInitV3(&task, kind, src, dst, count, 0, NULL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    kind = RT_MEMCPY_DEVICE_TO_HOST;
+    error = MemcpyAsyncTaskInitV3(&task, kind, src, dst, count, 0, NULL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    kind = RT_MEMCPY_HOST_TO_HOST;
+    error = MemcpyAsyncTaskInitV3(&task, kind, src, dst, count, 0, NULL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    ToConstructSqe(&task, &sqe);
+
+    rtCqReport_t cqe = {};
+    cqe.errorType = 1U;
+    Complete(&task, 0);
+    PrintErrorInfo(&task, 0);
+    SetStarsResult(&task, cqe);
+    TaskUnInitProc(&task);
+    rtStreamDestroy(stream);
+}
+
+// Memcpy Async D2D
+TEST_F(TaskTest, stars_memcpy_async_miniv3_offline)
+{
+    uint64_t add = 5;
+    uint64_t add1 = 5;
+    void* dst = &add1;
+    void* src = &add;
+    uint64_t count = 1;
+    rtMemcpyKind_t kind = RT_MEMCPY_HOST_TO_DEVICE;
+    Runtime* rtInstance = (Runtime*)Runtime::Instance();
+    rtChipType_t oriChipType = rtInstance->GetChipType();
+    rtInstance->ParseHostCpuModelInfo();
+    uint32_t cpyType = 1;
+    TaskInfo task = {};
+    rtError_t error;
+    rtStream_t stream = NULL;
+
+    Driver* drv;
+    drv = ((Runtime*)Runtime::Instance())->driverFactory_.GetDriver(NPU_DRIVER);
+    MOCKER_CPP_VIRTUAL((NpuDriver*)(drv), &NpuDriver::GetRunMode)
+        .stubs()
+        .will(returnValue((uint32_t)RT_RUN_MODE_OFFLINE));
+
+    error = rtStreamCreate(&stream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    rtStarsSqe_t sqe;
+    InitByStream(&task, rt_ut::UnwrapOrNull<Stream>(stream));
+    ((RawDevice*)((rt_ut::UnwrapOrNull<Stream>(stream))->device_))->driver_ = drv;
+
+    rtInstance->isRk3588Cpu_ = true;
+    error = MemcpyAsyncTaskInitV3(&task, kind, src, dst, count, 0, NULL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    kind = RT_MEMCPY_DEVICE_TO_HOST;
+    error = MemcpyAsyncTaskInitV3(&task, kind, src, dst, count, 0, NULL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    ToConstructSqe(&task, &sqe);
+
+    rtCqReport_t cqe = {};
+    cqe.errorType = 1U;
+    Complete(&task, 0);
+    PrintErrorInfo(&task, 0);
+    SetStarsResult(&task, cqe);
+    TaskUnInitProc(&task);
+    rtStreamDestroy(stream);
+}
+
+TEST_F(TaskTest, memcpy_async_to_constructSqe_01)
+{
+    TaskInfo memcpyTask = {};
+    Runtime* rtInstance = ((Runtime*)Runtime::Instance());
+    Device* device = new RawDevice(0);
+    device->Init();
+    Stream* stream = new Stream(device, 0);
+    NpuDriver drv;
+
+    rtError_t error;
+    stream->streamId_ = 100;
+    void* src = malloc(100);
+    void* dst = malloc(100);
+    uint64_t size = 100;
+
+    memcpyTask.u.memcpyAsyncTaskInfo.copyType = RT_MEMCPY_HOST_TO_DEVICE;
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::GetRunMode).stubs().will(returnValue((uint32_t)0));
+    InitByStream(&memcpyTask, stream);
+    error = MemcpyAsyncTaskInitV3(&memcpyTask, RT_MEMCPY_DEVICE_TO_DEVICE, src, dst, size, 0, NULL);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    memcpyTask.u.memcpyAsyncTaskInfo.copyType = RT_MEMCPY_DIR_D2D_SDMA;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::GetRunMode).stubs().will(returnValue((uint32_t)0));
+    rtStarsSqe_t command;
+    ToConstructSqe(&memcpyTask, &command);
+    TaskUnInitProc(&memcpyTask);
+    free(src);
+    free(dst);
+    delete stream;
+    delete device;
+}
+
+TEST_F(TaskTest, DoCompleteSuccessForDavinciTask)
+{
+    uint32_t descBuf = 1;
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+    task.type = TS_TASK_TYPE_KERNEL_AICPU;
+    task.errorCode = 0;
+    task.u.aicTaskInfo.mixOpt = 1;
+    task.u.aicTaskInfo.descBuf = &descBuf;
+    DoCompleteSuccessForDavinciTask(&task, 10);
+    EXPECT_EQ(task.u.aicTaskInfo.descBuf, nullptr);
+}
+
+TEST_F(TaskTest, SetStarsResultForDavinciTask)
+{
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+    task.type = TS_TASK_TYPE_KERNEL_AICPU;
+    task.errorCode = 0;
+    rtCqReport_t logicCq;
+    logicCq.errorType = RT_STARS_EXIST_ERROR;
+    logicCq.errorCode = AE_STATUS_TASK_ABORT;
+    SetStarsResultForDavinciTask(&task, logicCq);
+    EXPECT_EQ(task.errorCode, 0);
+    task.type = TS_TASK_TYPE_KERNEL_AIVEC;
+    logicCq.errorCode = AE_STATUS_SILENT_FAULT;
+    SetStarsResultForDavinciTask(&task, logicCq);
+    EXPECT_EQ(task.errorCode, TS_ERROR_VECTOR_CORE_EXCEPTION);
+    task.type = TS_TASK_TYPE_KERNEL_AICORE;
+    SetStarsResultForDavinciTask(&task, logicCq);
+    EXPECT_EQ(task.errorCode, TS_ERROR_AICORE_EXCEPTION);
+}
+
+TEST_F(TaskTest, ConstructUpdateTaskTest)
+{
+    rtError_t error;
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+    task.u.aicTaskInfo.funcAddr = 0x123U;
+    task.u.aicTaskInfo.comm.args = reinterpret_cast<void*>(0x123);
+    task.u.aicTaskInfo.comm.dim = 0x1U;
+    task.u.aicTaskInfo.blockDimOffset = 0x123U;
+    task.u.aicTaskInfo.infMode = 0x1U;
+    task.u.aicTaskInfo.schemMode = 0x1U;
+    task.id = 0x1U;
+
+    rtCommand_t command;
+    TaskInfo updateTask = {};
+    InitByStream(&updateTask, stream_);
+    SqeUpdateTaskInit(&updateTask, &task);
+    EXPECT_EQ(updateTask.type, TS_TASK_TYPE_TASK_SQE_UPDATE);
+    EXPECT_EQ(updateTask.u.sqeUpdateTask.desTaskId, 0x1U);
+    EXPECT_EQ(updateTask.u.sqeUpdateTask.desStreamId, stream_->Id_());
+    ToCommand(&updateTask, &command);
+    TaskUnInitProc(&task);
+    TaskUnInitProc(&updateTask);
+}
+TEST_F(TaskTest, WaitAsyncCopyCompleteForUpdateTask)
+{
+    TaskInfo task = {};
+    rtError_t error;
+    Stream* taskStream = NULL;
+    rtStream_t taskStreamHandle = NULL;
+    NpuDriver drv;
+
+    error = rtStreamCreate(&taskStreamHandle, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    taskStream = rt_ut::UnwrapOrNull<Stream>(taskStreamHandle);
+
+    Kernel* kernel = CreateTestKernel(RT_KERNEL_ATTR_TYPE_AICORE);
+    InitByStream(&task, taskStream);
+    AicTaskInit(&task, kernel, kernel->GetKernelAttrType(), 1, nullptr);
+    delete kernel;
+    EXPECT_EQ(task.u.aicTaskInfo.comm.dim, 1U);
+
+    Handle hdl;
+    RawDevice* device = new RawDevice(0);
+    device->driver_ = &drv;
+    memset_s(&hdl, sizeof(Handle), '\0', sizeof(Handle));
+    CpyHandle cpyHdl;
+    H2DCopyMgr* argAllocator =
+        new (std::nothrow) H2DCopyMgr(device, 10, 1024U, 1024U, BufferAllocator::LINEAR, COPY_POLICY_ASYNC_PCIE_DMA);
+    hdl.kerArgs = argAllocator->AllocDevMem();
+    hdl.argsAlloc = argAllocator;
+    hdl.freeArgs = true;
+    SetArgs(&task, nullptr, 0, &hdl);
+
+    TaskInfo updateTask = {};
+    InitByStream(&updateTask, stream_);
+    SqeUpdateTaskInit(&updateTask, &task, &hdl);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopyAsyncWaitFinish).stubs().will(returnValue(RT_ERROR_NONE));
+    WaitAsyncCopyCompleteForUpdateTask(&updateTask);
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopyAsyncWaitFinishEx).stubs().will(returnValue(RT_ERROR_DRV_MEMORY));
+    WaitAsyncCopyCompleteForUpdateTask(&updateTask);
+    SetArgs(&task, nullptr, 0, nullptr);
+
+    delete argAllocator;
+    delete device;
+    rtStreamDestroy(taskStreamHandle);
+    GlobalMockObject::verify();
+}
+
+TEST_F(TaskTest, StreamSwitchNTaskInit_1)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+
+    uint32_t ptrData = 0;
+    uint32_t valueData = 0;
+    rtStream_t trueStream = nullptr;
+    rtError_t error = rtStreamCreate(&trueStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemAddressTranslate).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+
+    error = StreamSwitchNTaskInit(
+        &taskInfo, &ptrData, sizeof(ptrData), &valueData, rt_ut::UnwrapOrNull<Stream>(trueStream), sizeof(uint32_t),
+        RT_SWITCH_INT32);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+
+    (void)rtStreamDestroy(trueStream);
+}
+
+TEST_F(TaskTest, StreamSwitchNTaskInit_2)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+
+    uint32_t ptrData = 0;
+    uint32_t valueData = 0;
+    rtStream_t trueStream = nullptr;
+    rtError_t error = rtStreamCreate(&trueStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    NpuDriver drv;
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemAddressTranslate)
+        .stubs()
+        .will(returnValue(RT_ERROR_NONE))
+        .then(returnValue(RT_ERROR_INVALID_VALUE));
+
+    error = StreamSwitchNTaskInit(
+        &taskInfo, &ptrData, sizeof(ptrData), &valueData, rt_ut::UnwrapOrNull<Stream>(trueStream), sizeof(uint32_t),
+        RT_SWITCH_INT32);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+
+    (void)rtStreamDestroy(trueStream);
+}
+
+TEST_F(TaskTest, StreamSwitchNTaskInit_3)
+{
+    TaskInfo taskInfo = {};
+    InitByStream(&taskInfo, stream_);
+
+    uint32_t ptrData = 0;
+    uint32_t valueData = 0;
+    rtStream_t trueStream = nullptr;
+    rtError_t error = rtStreamCreate(&trueStream, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+
+    NpuDriver drv;
+    // 前两次成功，第三次失败
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemAddressTranslate)
+        .stubs()
+        .will(returnValue(RT_ERROR_NONE))
+        .then(returnValue(RT_ERROR_NONE))
+        .then(returnValue(RT_ERROR_INVALID_VALUE));
+
+    error = StreamSwitchNTaskInit(
+        &taskInfo, &ptrData, sizeof(ptrData), &valueData, rt_ut::UnwrapOrNull<Stream>(trueStream), sizeof(uint32_t),
+        RT_SWITCH_INT32);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+
+    (void)rtStreamDestroy(trueStream);
+}
+
+TEST_F(TaskTest, HostTaskMemCpy_WaitFinish_Failed)
+{
+    NpuDriver drv;
+    RawDevice* device = new RawDevice(0);
+    device->driver_ = &drv;
+
+    char dst[64] = {0};
+    char src[64] = {0};
+
+    HostTaskMemCpy hostTask(device, dst, sizeof(dst), src, sizeof(src), RT_MEMCPY_HOST_TO_DEVICE);
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemCopyAsyncWaitFinish).stubs().will(returnValue(RT_ERROR_DRV_MEMORY));
+
+    rtError_t error = hostTask.WaitFinish();
+    EXPECT_EQ(error, RT_ERROR_DRV_MEMORY);
+
+    delete device;
+    GlobalMockObject::verify();
+}
+
+TEST_F(TaskTest, TaskFactory_Alloc_TryAgainAllocFailed)
+{
+    RawDevice* device = new RawDevice(0);
+    TaskFactory taskFactory(device);
+    rtError_t errCode = RT_ERROR_NONE;
+
+    taskFactory.exitFlag_ = true;
+
+    TaskInfo* task = taskFactory.Alloc(stream_, TS_TASK_TYPE_KERNEL_AICORE, errCode);
+    EXPECT_EQ(task, nullptr);
+
+    delete device;
+}
+
+TEST_F(TaskTest, TaskFactory_TearDownIsIdempotent)
+{
+    RawDevice* device = new RawDevice(0);
+    TaskFactory taskFactory(device);
+    ASSERT_EQ(taskFactory.Init(), RT_ERROR_NONE);
+
+    // Stack destruction invokes TearDown again after the two explicit calls.
+    taskFactory.TearDown();
+    EXPECT_EQ(taskFactory.allocator_, nullptr);
+    EXPECT_TRUE(taskFactory.exitFlag_.load());
+
+    taskFactory.TearDown();
+    EXPECT_EQ(taskFactory.allocator_, nullptr);
+    EXPECT_TRUE(taskFactory.exitFlag_.load());
+
+    delete device;
+}
+
+TEST_F(TaskTest, DebugRegisterForStreamTaskInit)
+{
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+
+    uint64_t addr = 0x1000;
+    NpuDriver drv;
+
+    Device* device = stream_->Device_();
+    MOCKER_CPP_VIRTUAL(device, &Device::IsSupportFeature).stubs().will(returnValue(false));
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::MemAddressTranslate).stubs().will(returnValue(RT_ERROR_INVALID_VALUE));
+
+    rtError_t error = DebugRegisterForStreamTaskInit(&task, 0, &addr, 1);
+    EXPECT_EQ(error, RT_ERROR_INVALID_VALUE);
+
+    TaskUnInitProc(&task);
+}
+
+TEST_F(TaskTest, MemcpyAsyncTaskPrepare_HostMemAllocFailed)
+{
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+
+    void* hostAddr = nullptr;
+    NpuDriver drv;
+
+    MOCKER_CPP_VIRTUAL(drv, &NpuDriver::HostMemAlloc).stubs().will(returnValue(RT_ERROR_DRV_MEMORY));
+
+    rtError_t error = MemcpyAsyncTaskPrepare(&task, &hostAddr);
+    EXPECT_EQ(error, RT_ERROR_DRV_MEMORY);
+}
+
+// EventResetTaskInit中的eventPtr参数可以传空指针，内部不做空指针校验
+TEST_F(TaskTest, EventResetTaskInit_WithNullEventPtr)
+{
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+
+    rtError_t error = EventResetTaskInit(&task, nullptr, false, -1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(task.type, TS_TASK_TYPE_EVENT_RESET);
+    EXPECT_EQ(task.u.eventResetTaskInfo.event, nullptr);
+    EXPECT_EQ(task.u.eventResetTaskInfo.eventid, -1);
+    EXPECT_EQ(task.u.eventResetTaskInfo.isNotify, false);
+
+    TaskUnInitProc(&task);
+}
+
+TEST_F(TaskTest, EventResetTaskInit_WithValidEventPtr)
+{
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+
+    rtError_t error = EventResetTaskInit(&task, event_, false, 1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(task.type, TS_TASK_TYPE_EVENT_RESET);
+    EXPECT_EQ(task.u.eventResetTaskInfo.event, event_);
+    EXPECT_EQ(task.u.eventResetTaskInfo.eventid, 1);
+    EXPECT_EQ(task.u.eventResetTaskInfo.isNotify, false);
+
+    TaskUnInitProc(&task);
+}
+
+// EventWaitTaskInit中的eventRec参数可以传空指针，内部不做空指针校验
+TEST_F(TaskTest, EventWaitTaskInit_WithNullEventPtr)
+{
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+
+    rtError_t error = EventWaitTaskInit(&task, nullptr, 0, 0, 0);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(task.type, TS_TASK_TYPE_STREAM_WAIT_EVENT);
+    EXPECT_EQ(task.u.eventWaitTaskInfo.event, nullptr);
+    EXPECT_EQ(task.u.eventWaitTaskInfo.eventId, 0);
+    EXPECT_EQ(task.u.eventWaitTaskInfo.timeout, 0);
+    EXPECT_EQ(task.u.eventWaitTaskInfo.eventWaitFlag, 0);
+
+    TaskUnInitProc(&task);
+}
+
+TEST_F(TaskTest, EventWaitTaskInit_WithValidEventPtr)
+{
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+
+    rtError_t error = EventWaitTaskInit(&task, event_, 1, 100, 1);
+    EXPECT_EQ(error, RT_ERROR_NONE);
+    EXPECT_EQ(task.type, TS_TASK_TYPE_STREAM_WAIT_EVENT);
+    EXPECT_EQ(task.u.eventWaitTaskInfo.event, event_);
+    EXPECT_EQ(task.u.eventWaitTaskInfo.eventId, 1);
+    EXPECT_EQ(task.u.eventWaitTaskInfo.timeout, 100);
+    EXPECT_EQ(task.u.eventWaitTaskInfo.eventWaitFlag, 1);
+
+    TaskUnInitProc(&task);
+}
+
+TEST_F(TaskTest, KernelFusionTaskInit_Success)
+{
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+    rtError_t ret = KernelFusionTaskInit(&task, FUSION_START);
+    EXPECT_EQ(ret, RT_ERROR_NONE);
+    EXPECT_EQ(task.type, TS_TASK_TYPE_FUSION_ISSUE);
+    EXPECT_STREQ(task.typeName, "KERNEL_FUSION");
+    EXPECT_EQ(task.u.kernelFusionTaskInfo.flag, FUSION_START);
+    TaskUnInitProc(&task);
+}
+
+TEST_F(TaskTest, ToCommandBodyForKernelFusionTask_Success)
+{
+    TaskInfo task = {};
+    InitByStream(&task, stream_);
+    KernelFusionTaskInit(&task, FUSION_END);
+    rtCommand_t command = {};
+    ToCommandBodyForKernelFusionTask(&task, &command);
+    EXPECT_EQ(command.u.fusion.flag, FUSION_END);
+    TaskUnInitProc(&task);
+}
+
+TEST_F(TaskTest, CheckKernelMemoryCorruption_AllNull)
+{
+    EXPECT_NO_THROW(CheckKernelMemoryCorruption(nullptr, nullptr, 0, nullptr));
+}

@@ -8,26 +8,48 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 ########################### adump base utest ################################
-include_directories(${OPEN_SOURCE_DIR}/boost)
-include_directories(${OPEN_SOURCE_DIR}/mockcpp_src/include)
 
 set(ADUMP_BASE_UT_ROOT_PATH ${TOP_DIR}/tests/ut/adump/adump_base)
 
 ########################### adump proto for test #######################
 set(adumpBaseProtoList
     "${TOP_DIR}/src/dfx/adump/proto/op_mapping.proto"
+    "${TOP_DIR}/src/dfx/adump/proto/op_mapping_v2.proto"
     "${TOP_DIR}/src/dfx/adump/proto/dump_task.proto"
 )
 
 protobuf_generate(adump_base_proto adumpBaseProtoSrc adumBaseProtoHeaders ${adumpBaseProtoList} TARGET)
-add_dependencies(adump_base_proto protobuf_host_build ascend_protobuf_static)
+add_dependencies(adump_base_proto ascend_protobuf_static)
 ########################################################################
 
 set(adumpBaseSrcList
+    ${SRC_CODE_ROOT_PATH}/adcore/hdc/hdc_api.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/device/adx_dsmi.cpp
     ${SRC_CODE_ROOT_PATH}/adcore/common/memory_utils.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/common/thread.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/common/thread_comm.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/commopts/adx_comm_opt_manager.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/commopts/hdc_comm_opt.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/component/adx_server_manager.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/epoll/adx_hdc_epoll.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/protocol/adx_msg_proto.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/device/adx_device.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/device/adx_hdc_device.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/device/adx_sock_device.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/adx_api.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/commopts/sock_api.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/commopts/sock_comm_opt.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/epoll/adx_sock_epoll.cpp
     ${SRC_CODE_ROOT_PATH}/adcore/common/file_utils.cpp
-    ${SRC_CODE_ROOT_PATH}/adcore/common/memory_utils.cpp
     ${SRC_CODE_ROOT_PATH}/adcore/common/string_utils.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/common/create_func.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/component/server_register.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/component/adx_component_api_c.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/component/adx_common_component.cpp
+    ${SRC_CODE_ROOT_PATH}/adcore/adcore_api.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/host/adx_dump_receive.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/host/adx_datadump_callback.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/host/adx_datadump_server.cpp
 
     ${SRC_CODE_ROOT_PATH}/adump/common/str_utils.cpp
     ${SRC_CODE_ROOT_PATH}/adump/common/sys_utils.cpp
@@ -35,34 +57,43 @@ set(adumpBaseSrcList
     ${SRC_CODE_ROOT_PATH}/adump/common/file.cpp
     ${SRC_CODE_ROOT_PATH}/adump/common/lib_path.cpp
     ${SRC_CODE_ROOT_PATH}/adump/common/adump_dsmi.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/common/platform/cloud_v2_platform.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/common/platform/cloud_v4_platform.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/common/platform/cloud_v5_platform.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/common/platform/dc_platform.cpp
     ${SRC_CODE_ROOT_PATH}/adump/common/adump_platform_api/adump_platform_api.cpp
     ${SRC_CODE_ROOT_PATH}/adump/common/json_parser.cpp
-    ${SRC_CODE_ROOT_PATH}/adump/common/adump_error_manager.cpp
 
     ${SRC_CODE_ROOT_PATH}/adump/manage/adump_api.cpp
     ${SRC_CODE_ROOT_PATH}/adump/manage/adump_api_platform.cpp
     ${SRC_CODE_ROOT_PATH}/adump/manage/dump_manager/dump_manager.cpp
     ${SRC_CODE_ROOT_PATH}/adump/manage/dump_manager/dump_manager_platform.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/manage/dump_manager/dump_stream_info.cpp
     ${SRC_CODE_ROOT_PATH}/adump/impl/dump_datatype.cpp
     ${SRC_CODE_ROOT_PATH}/adump/impl/dump_memory.cpp
     ${SRC_CODE_ROOT_PATH}/adump/impl/dump_setting.cpp
     ${SRC_CODE_ROOT_PATH}/adump/impl/dump_tensor.cpp
     ${SRC_CODE_ROOT_PATH}/adump/impl/dump_config_converter.cpp
     ${SRC_CODE_ROOT_PATH}/adump/operator/operator_dumper.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/operator/kernel_dfx_dumper.cpp
     ${SRC_CODE_ROOT_PATH}/adump/operator/operator_preliminary/operator_preliminary.cpp
     ${SRC_CODE_ROOT_PATH}/adump/operator/operator_preliminary/operator_preliminary_platform.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/dump_file.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/kernel_info_collector.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/exception/kernel_symbol_locator.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/exception/kernel_source_symbolizer.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/exception/kernel_pc_fixer.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/dump_operator.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/dump_args.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/exception/dfx_args_parser.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/exception/dump_args_callback.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/thread_manager.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/exception_dumper.cpp
+    ${SRC_CODE_ROOT_PATH}/adump/exception/exception_dumper_platform.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/dump_ELF.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/dump_core/dump_core.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/dump_core/dump_core_register.cpp
-    ${SRC_CODE_ROOT_PATH}/adump/exception/dump_core/dump_core_platform.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/register_config/register_config.cpp
-    ${SRC_CODE_ROOT_PATH}/adump/exception/register_config/register_config_platform.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/exception_info_common.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/dump_tensor_plugin.cpp
     ${SRC_CODE_ROOT_PATH}/adump/exception/adx_exception_callback.cpp
@@ -80,21 +111,38 @@ set(adumpBaseUtestSrcList
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/common/common_path_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/common/common_file_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/common/common_sys_utils_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/common/platform_impl_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/dump_manager/dump_manager_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/dump_manager/dump_stream_info_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/dump_manager/dump_stream_info_func_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/impl/adump_api_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/impl/dump_datatype_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/impl/dump_memory_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/impl/dump_tensor_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/impl/dump_setting_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/impl/dump_config_converter_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/impl/dump_config_converter_extra_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/impl/acl_dump_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/impl/adx_dump_callback_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/operator/operator_preliminary_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/operator/operator_preliminary_platform_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/operator/operator_dumper_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/operator/kernel_dfx_dumper_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/dump_args_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/dump_args_callback_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/dump_ELF_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/dump_core_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/dump_file_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/kernel_symbol_locator_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/kernel_source_symbolizer_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/kernel_pc_fixer_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/dump_operator_extra_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/exception_dumper_extra_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/exception_info_common_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/exception/register_config_platform_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/printf/dump_printf_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/printf/dump_printf_platform_utest.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/testcase/printf/fp16_t_utest.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/testcase/main.cpp
 )
 
@@ -109,15 +157,23 @@ set(adumpBaseStubSrcList
     ${ADUMP_BASE_UT_ROOT_PATH}/stub/drv_stub.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/stub/error_manager_stub.cpp
     ${ADUMP_BASE_UT_ROOT_PATH}/stub/dump_exception_stub.cpp
+    ${ADUMP_BASE_UT_ROOT_PATH}/../ut/stub/ide_hdc_stub.cc
+    ${ADUMP_BASE_UT_ROOT_PATH}/../ut/common_stub/sec_stub.cc
 )
 
 set(adumpBaseHeaders
-    ${SRC_CODE_ROOT_PATH}/adcore/
-    ${SRC_CODE_ROOT_PATH}/adcore/common/
-    ${SRC_CODE_ROOT_PATH}/adcore/protocol/
-    ${SRC_CODE_ROOT_PATH}/adcore/log/
-    ${SRC_CODE_ROOT_PATH}/adcore/common/
+    ${SRC_CODE_ROOT_PATH}/inc/adump
+    ${SRC_CODE_ROOT_PATH}/adcore
+    ${SRC_CODE_ROOT_PATH}/adcore/common
+    ${SRC_CODE_ROOT_PATH}/adcore/log
+    ${SRC_CODE_ROOT_PATH}/adcore/commopts
+    ${SRC_CODE_ROOT_PATH}/adcore/component
+    ${SRC_CODE_ROOT_PATH}/adcore/protocol
+    ${SRC_CODE_ROOT_PATH}/adcore/device
+    ${SRC_CODE_ROOT_PATH}/adcore/hdc
     ${SRC_CODE_ROOT_PATH}/adump/
+    ${SRC_CODE_ROOT_PATH}/adump/device
+    ${SRC_CODE_ROOT_PATH}/adump/host/
     ${SRC_CODE_ROOT_PATH}/adump/common/
     ${SRC_CODE_ROOT_PATH}/adump/common/adump_platform_api/
     ${SRC_CODE_ROOT_PATH}/adump/impl/
@@ -134,12 +190,13 @@ set(adumpBaseHeaders
     ${SRC_CODE_ROOT_PATH}/external/
     ${SRC_CODE_ROOT_PATH}/inc/metadef/
     ${SRC_CODE_ROOT_PATH}/inc/metadef/external
-    ${TOP_DIR}/include/driver
+    ${TOP_DIR}/pkg_inc/driver
+    ${TOP_DIR}/include/dfx
     ${TOP_DIR}/include/external
     ${TOP_DIR}/include/external/acl
     ${TOP_DIR}/pkg_inc/
     ${TOP_DIR}/pkg_inc/dump/
-    ${TOP_DIR}/pkg_inc/aicpu/
+    ${TOP_DIR}/pkg_inc/aicpu_sched/
 
     ${ADUMP_BASE_UT_ROOT_PATH}/
     ${ADUMP_BASE_UT_ROOT_PATH}/tools/
@@ -158,6 +215,7 @@ add_executable(adump_base_utest
 add_dependencies(adump_base_utest adump_base_proto)
 
 target_include_directories(adump_base_utest PRIVATE
+    ${LIBC_SEC_HEADER}
     ${adumpBaseHeaders}
 )
 
@@ -171,9 +229,6 @@ target_compile_definitions(adump_base_utest PRIVATE
 
 target_link_libraries(adump_base_utest PRIVATE
     $<BUILD_INTERFACE:adx_utestonetrack_pub>
-    c_sec_static
-    ascend_protobuf_static
-    GTest::gtest
     -Wl,--no-as-needed
     json
     -Wl,--as-needed

@@ -19,33 +19,41 @@ target_include_directories(slog_headers INTERFACE
     $<INSTALL_INTERFACE:include/slog/toolchain>
 )
 
-############################# [device] ########################################
-if (${PRODUCT_SIDE} STREQUAL "device")
+set(liblog_type "device")
 
-set(liblog_type "default")
-if(PRODUCT)
-if((${PRODUCT} STREQUAL "ascend610") OR (${PRODUCT} STREQUAL "ascend610Lite") OR (${PRODUCT} STREQUAL "ascend610Liteesl") OR (${PRODUCT} STREQUAL "as31xm1"))
-    set(liblog_type "mdc")
-endif()
-endif()
-
-if (${liblog_type} STREQUAL "mdc")
-############################# [ascend610/ascend610Lite/ascend610Lite] #########
-add_subdirectory(plog_device_mdc)
-else ()
-############################# ![ascend610/ascend610Lite/ascend610Lite] ########
-add_subdirectory(plog_device)
+if(${PRODUCT_SIDE} STREQUAL "host")
+    set(liblog_type "host")
 endif ()
 
-############################# [ host ] ########################################
-elseif (${PRODUCT_SIDE} STREQUAL "host")
-############################# [Windows] #######################################
-if (${TARGET_SYSTEM_NAME} STREQUAL "Windows")
-add_subdirectory(plog)
-add_subdirectory(plog_host_win)
-else ()
-############################# [ linux ] #######################################
-add_subdirectory(plog)
-add_subdirectory(plog_host)
+### INTERNAL START ###
+# Define supported MDC products to identify device_mdc type
+if (PRODUCT)
+if ((${PRODUCT} STREQUAL "ascend610") OR 
+    (${PRODUCT} STREQUAL "ascend610Lite") OR 
+    (${PRODUCT} STREQUAL "ascend610Liteesl") OR 
+    (${PRODUCT} STREQUAL "as31xm1") OR 
+    (${PRODUCT} STREQUAL "mc32dm11a") OR 
+    (${PRODUCT} STREQUAL "mc32dm11aesl") OR 
+    (${PRODUCT} STREQUAL "mc62cm12a") OR
+    (${PRODUCT} STREQUAL "mc62cm12aesl") OR
+    ((${PRODUCT} STREQUAL "pegasus") AND (${PRODUCT_SIDE} STREQUAL "device")))
+    set(liblog_type "device_mdc")
 endif ()
 endif ()
+### INTERNAL END ###
+
+# Build configuration based on liblog_type
+if(liblog_type STREQUAL "host")
+    add_subdirectory(plog)
+    add_subdirectory(plog_host)
+elseif(liblog_type STREQUAL "device")
+    add_subdirectory(plog_device)
+endif ()
+
+### INTERNAL START ###
+# MDC device build configuration based on liblog_type
+if(liblog_type STREQUAL "device_mdc")
+    add_subdirectory(plog_device_mdc)
+endif ()
+### INTERNAL END ###
+

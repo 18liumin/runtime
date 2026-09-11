@@ -13,6 +13,15 @@
 
 #include "log_error_code.h"
 
-LogStatus SoftwareCompressFile(const char *file);
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
+
+LogStatus SoftwareCompressFile(const char* file);
+LogStatus SoftwareCompressBuffer(const char* source, uint32_t sourceLen, char** dest, uint32_t* destLen);
+
+#ifdef __cplusplus
+}
+#endif // __cplusplus
 
 #endif

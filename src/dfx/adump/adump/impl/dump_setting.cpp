@@ -25,9 +25,9 @@ constexpr char CONF_DUMP_STATUS_OFF_CAPITAL[] = "OFF";
 constexpr char CONF_DUMP_MODE_INPUT[] = "input";
 constexpr char CONF_DUMP_MODE_OUTPUT[] = "output";
 constexpr char CONF_DUMP_MODE_ALL[] = "all";
-}  // namespace
+} // namespace
 
-int32_t DumpSetting::Init(const DumpType type, const DumpConfig &dumpConfig)
+int32_t DumpSetting::Init(const DumpType type, const DumpConfig& dumpConfig)
 {
     if (type == DumpType::OPERATOR) {
         return DumpOperatorInit(dumpConfig);
@@ -40,15 +40,17 @@ int32_t DumpSetting::Init(const DumpType type, const DumpConfig &dumpConfig)
     return ADUMP_FAILED;
 }
 
-int32_t DumpSetting::DumpOperatorInit(const DumpConfig &dumpConfig)
+int32_t DumpSetting::DumpOperatorInit(const DumpConfig& dumpConfig)
 {
-    if (!InitDumpStatus(dumpConfig.dumpStatus, dumpStatus_)) {
+    bool dumpStatus = dumpStatus_;
+    if (!InitDumpStatus(dumpConfig.dumpStatus, dumpStatus)) {
         IDE_LOGE("Dump status(%s) is not valid.", dumpConfig.dumpStatus.c_str());
         return ADUMP_FAILED;
     }
 
     // if disable dump, just return.
-    if (!dumpStatus_) {
+    if (!dumpStatus) {
+        dumpStatus_ = dumpStatus;
         return ADUMP_SUCCESS;
     }
 
@@ -74,22 +76,26 @@ int32_t DumpSetting::DumpOperatorInit(const DumpConfig &dumpConfig)
         IDE_LOGE("Get platform type failed.");
         return ADUMP_FAILED;
     }
+    dumpStatus_ = dumpStatus;
     IDE_LOGD("DumpOperatorInit finished.");
     return ADUMP_SUCCESS;
 }
 
-int32_t DumpSetting::DumpOverflowInit(const DumpConfig &dumpConfig)
+int32_t DumpSetting::DumpOverflowInit(const DumpConfig& dumpConfig)
 {
-    if (!InitDumpStatus(dumpConfig.dumpStatus, dumpDebugStatus_)) {
+    bool dumpDebugStatus = dumpDebugStatus_;
+    if (!InitDumpStatus(dumpConfig.dumpStatus, dumpDebugStatus)) {
         IDE_LOGE("Dump status(%s) is not valid.", dumpConfig.dumpStatus.c_str());
         return ADUMP_FAILED;
     }
 
     // if disable dump, just return.
-    if (!dumpDebugStatus_) {
+    if (!dumpDebugStatus) {
+        dumpDebugStatus_ = dumpDebugStatus;
         return ADUMP_SUCCESS;
     }
 
+    // default all
     if (!InitDumpMode(CONF_DUMP_MODE_ALL)) {
         IDE_LOGE("Dump mode(%s) is not valid.", dumpConfig.dumpMode.c_str());
         return ADUMP_FAILED;
@@ -100,18 +106,17 @@ int32_t DumpSetting::DumpOverflowInit(const DumpConfig &dumpConfig)
         return ADUMP_FAILED;
     }
 
+    InitDumpSwitch(dumpConfig.dumpSwitch & DUMP_SWITCH_MASK);
+    dumpDebugStatus_ = dumpDebugStatus;
+    IDE_LOGD("DumpOverflowInit finished.");
     return ADUMP_SUCCESS;
 }
 
-std::string DumpSetting::GetDumpPath() const
-{
-    return dumpPath_.GetString();
-}
+std::string DumpSetting::GetDumpPath() const { return dumpPath_.GetString(); }
 
-uint32_t DumpSetting::GetDumpMode() const
-{
-    return dumpMode_;
-}
+const char* DumpSetting::GetDumpCPath() const { return dumpPath_.Empty() ? nullptr : dumpPath_.GetCString(); }
+
+uint32_t DumpSetting::GetDumpMode() const { return dumpMode_; }
 
 bool DumpSetting::GetDumpStatus() const
 {
@@ -121,37 +126,27 @@ bool DumpSetting::GetDumpStatus() const
     return dumpStatus_;
 }
 
-bool DumpSetting::GetDumpDebugStatus() const
-{
-    return dumpDebugStatus_;
-}
+bool DumpSetting::GetDumpStatusEx() const { return dumpStatus_; }
 
-const std::string DumpSetting::GetDumpData() const
-{
-    return dumpData_;
-}
+bool DumpSetting::IsDumpDataStats() const { return dumpData_.compare(DUMP_STATS_DATA) == 0; }
 
-uint64_t DumpSetting::GetDumpSwitch() const
-{
-    return dumpSwitch_;
-}
+bool DumpSetting::GetDumpDebugStatus() const { return dumpDebugStatus_; }
 
-uint64_t DumpSetting::GetDumpStatsItem() const
-{
-    return dumpStatsItem_;
-}
+const std::string DumpSetting::GetDumpData() const { return dumpData_; }
 
-PlatformType DumpSetting::GetPlatformType() const
-{
-    return static_cast<PlatformType>(platformType_);
-}
+uint64_t DumpSetting::GetDumpSwitch() const { return dumpSwitch_; }
 
-bool DumpSetting::InitDumpStatus(const std::string &dumpStatus, bool &status) const
+uint64_t DumpSetting::GetDumpStatsItem() const { return dumpStatsItem_; }
+
+PlatformType DumpSetting::GetPlatformType() const { return static_cast<PlatformType>(platformType_); }
+
+bool DumpSetting::InitDumpStatus(const std::string& dumpStatus, bool& status) const
 {
-    static const std::map<std::string, bool> DUMP_STATUS_MAP = { { CONF_DUMP_STATUS_ON, true },
-                                                                 { CONF_DUMP_STATUS_ON_CAPITAL, true },
-                                                                 { CONF_DUMP_STATUS_OFF_CAPITAL, false },
-                                                                 { CONF_DUMP_STATUS_OFF, false } };
+    static const std::map<std::string, bool> DUMP_STATUS_MAP = {
+        {CONF_DUMP_STATUS_ON, true},
+        {CONF_DUMP_STATUS_ON_CAPITAL, true},
+        {CONF_DUMP_STATUS_OFF_CAPITAL, false},
+        {CONF_DUMP_STATUS_OFF, false}};
 
     auto it = DUMP_STATUS_MAP.find(dumpStatus);
     if (it == DUMP_STATUS_MAP.cend()) {
@@ -162,13 +157,12 @@ bool DumpSetting::InitDumpStatus(const std::string &dumpStatus, bool &status) co
     return true;
 }
 
-bool DumpSetting::InitDumpMode(const std::string &dumpMode)
+bool DumpSetting::InitDumpMode(const std::string& dumpMode)
 {
     static const std::map<std::string, uint32_t> DUMP_MODE_MAP = {
-        { CONF_DUMP_MODE_INPUT, DUMP_MODE_INPUT },
-        { CONF_DUMP_MODE_OUTPUT, DUMP_MODE_OUTPUT },
-        { CONF_DUMP_MODE_ALL, DUMP_MODE_INPUT | DUMP_MODE_OUTPUT | DUMP_MODE_WORKSPACE }
-    };
+        {CONF_DUMP_MODE_INPUT, DUMP_MODE_INPUT},
+        {CONF_DUMP_MODE_OUTPUT, DUMP_MODE_OUTPUT},
+        {CONF_DUMP_MODE_ALL, DUMP_MODE_INPUT | DUMP_MODE_OUTPUT | DUMP_MODE_WORKSPACE}};
 
     auto it = DUMP_MODE_MAP.find(dumpMode);
     if (it == DUMP_MODE_MAP.cend()) {
@@ -178,7 +172,7 @@ bool DumpSetting::InitDumpMode(const std::string &dumpMode)
     return true;
 }
 
-bool DumpSetting::InitDumpPath(const std::string &dumpPath)
+bool DumpSetting::InitDumpPath(const std::string& dumpPath)
 {
     if (dumpPath.empty()) {
         IDE_LOGE("Dump path is empty.");
@@ -190,7 +184,7 @@ bool DumpSetting::InitDumpPath(const std::string &dumpPath)
     return true;
 }
 
-void DumpSetting::InitDumpData(const std::string &dumpData)
+void DumpSetting::InitDumpData(const std::string& dumpData)
 {
     if (StrUtils::Trim(dumpData).compare(DUMP_STATS_DATA) == 0) {
         dumpData_ = DUMP_STATS_DATA;
@@ -199,7 +193,7 @@ void DumpSetting::InitDumpData(const std::string &dumpData)
     }
 }
 
-bool DumpSetting::InitDumpStatsItem(const std::vector<std::string> &dumpStatsItem)
+bool DumpSetting::InitDumpStatsItem(const std::vector<std::string>& dumpStatsItem)
 {
     const std::unordered_map<std::string, uint64_t> statsItemMap = {
         {"Max", DUMP_STATS_MAX},
@@ -208,15 +202,14 @@ bool DumpSetting::InitDumpStatsItem(const std::vector<std::string> &dumpStatsIte
         {"Nan", DUMP_STATS_NAN},
         {"Negative Inf", DUMP_STATS_NEG_INF},
         {"Positive Inf", DUMP_STATS_POS_INF},
-        {"L2norm", DUMP_STATS_L2NORM}
-    };
+        {"L2norm", DUMP_STATS_L2NORM}};
     if (dumpStatsItem.empty()) {
-        dumpStatsItem_ |= DUMP_STATS_MAX | DUMP_STATS_MIN | DUMP_STATS_AVG | DUMP_STATS_NAN | DUMP_STATS_NEG_INF |
-            DUMP_STATS_POS_INF;
+        dumpStatsItem_ |=
+            DUMP_STATS_MAX | DUMP_STATS_MIN | DUMP_STATS_AVG | DUMP_STATS_NAN | DUMP_STATS_NEG_INF | DUMP_STATS_POS_INF;
         IDE_LOGI("Dump stats set to default configuration[0x%llx].", dumpStatsItem_);
         return true;
     }
-    for (auto &str : dumpStatsItem) {
+    for (auto& str : dumpStatsItem) {
         auto it = statsItemMap.find(StrUtils::Trim(str));
         if (it != statsItemMap.cend()) {
             dumpStatsItem_ |= it->second;
@@ -225,7 +218,8 @@ bool DumpSetting::InitDumpStatsItem(const std::vector<std::string> &dumpStatsIte
             for (auto const& element : statsItemMap) {
                 keysVector.push_back(element.first);
             }
-            IDE_LOGE("Dump stats config[%s] is invalid, and expected %s.", str.c_str(),
+            IDE_LOGE(
+                "Dump stats config[%s] is invalid, and expected %s.", str.c_str(),
                 StrUtils::ToString(keysVector).c_str());
             return false;
         }
@@ -234,9 +228,6 @@ bool DumpSetting::InitDumpStatsItem(const std::vector<std::string> &dumpStatsIte
     return true;
 }
 
-void DumpSetting::InitDumpSwitch(uint64_t dumpSwitch)
-{
-    dumpSwitch_ = dumpSwitch;
-}
+void DumpSetting::InitDumpSwitch(uint64_t dumpSwitch) { dumpSwitch_ = dumpSwitch; }
 
-}  // namespace Adx
+} // namespace Adx

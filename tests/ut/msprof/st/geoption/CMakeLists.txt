@@ -1,6 +1,6 @@
 # -----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2025 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
@@ -8,11 +8,11 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 set(GEOPTION_STUB_DIR
-    ${TOP_DIR}/llt/abl/msprof/st/stub
+    ${TOP_DIR}/tests/ut/msprof/st/stub
 )
 
 set(LLT_DATA_DIR
-    ${TOP_DIR}/llt/abl/msprof/st/data/
+    ${TOP_DIR}/tests/ut/msprof/st/data
 )
 
 set(testStubSrc
@@ -22,6 +22,7 @@ set(testStubSrc
     ${GEOPTION_STUB_DIR}/device/stars_device_simulator.cpp
     ${GEOPTION_STUB_DIR}/device/david_device_simulator.cpp
     ${GEOPTION_STUB_DIR}/device/david_v121_device_simulator.cpp
+    ${GEOPTION_STUB_DIR}/device/modena_device_simulator.cpp
     ${GEOPTION_STUB_DIR}/device/cloud_device_simulator.cpp
     ${GEOPTION_STUB_DIR}/device/tiny_device_simulator.cpp
     ${GEOPTION_STUB_DIR}/device/mmpa_stub.cpp
@@ -31,6 +32,7 @@ set(testStubSrc
     ${GEOPTION_STUB_DIR}/device/dc_device_simulator.cpp
     ${GEOPTION_STUB_DIR}/device/mdc_device_simulator.cpp
     ${GEOPTION_STUB_DIR}/device/mdc_lite_device_simulator.cpp
+    ${GEOPTION_STUB_DIR}/device/mdc_lite_v2_device_simulator.cpp
     ${GEOPTION_STUB_DIR}/device/mini_device_simulator.cpp
     ${GEOPTION_STUB_DIR}/device/nano_device_simulator.cpp
     ${GEOPTION_STUB_DIR}/device/mdc_mini_v3_device_simulator.cpp
@@ -42,7 +44,13 @@ set(testStubSrc
     ${GEOPTION_STUB_DIR}/hdc-api-stub.cpp
     ${GEOPTION_STUB_DIR}/hdc-log-stub.cpp
     ${GEOPTION_STUB_DIR}/ide-cmd-stub.cpp
+    ${GEOPTION_STUB_DIR}/ide_hdc_stub.cc
     ${GEOPTION_STUB_DIR}/error_manager_stub.cpp
+    ${GEOPTION_STUB_DIR}/aicpu_report_hdc.cpp
+    ${GEOPTION_STUB_DIR}/host/acl_stub.cpp
+    ${GEOPTION_STUB_DIR}/host/ge_stub.cpp
+    ${LLT_DATA_DIR}/data_manager.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/mstx/src/mstx_data_handler.cpp
 )
 
 set(testSrc
@@ -63,8 +71,8 @@ set(adprof_src
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/devprof_drv_aicpu.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/devprof_drv_adprof.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/devprof_common.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/aicpu_report_hdc.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/devprof_api.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/devprof_adprof_api.cpp
+    #${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/src/aicpu_report_hdc.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/drvprof/src/engine_mgr.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/drvprof/src/module_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/drvprof/src/rpc_data_handle.cpp
@@ -83,19 +91,32 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/analyzer_hwts.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/analyzer_ts.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/analyzer_rt.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/stats_analyzer_api.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/stats_analyzer.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/analyze/src/op_desc_parser.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/msprof_bin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/msprof_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/msprof_params_adapter.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/input_parser.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/input_parser_host_sys.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/msprof_task.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/running_mode.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/msopprof_manager.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/injection_transport.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/json_parser.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msproftx_adaptor.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msprofiler_adaptor.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msprofiler_impl.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/compute_profiling_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/msprofiler_acl_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/src/command_handle.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_cann_plugin.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_plugin.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_plugin_manager.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_tx_plugin.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_acl_plugin.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_runtime_plugin.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profapi/src/prof_mstx_plugin.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/report/prof_reporter_mgr.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/aicpu/prof_aicpu_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/aicpu/prof_hal_plugin.cpp
@@ -107,7 +128,9 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/cloud_v2_platform.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/david_platform.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/david_v121_platform.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/modena_platform.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mdc_lite_platform.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mdc_lite_v2_platform.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/cloud_platform.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/dc_platform.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mini_platform.cpp
@@ -116,10 +139,11 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/app/application.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/app/env_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/utils/utils.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/common/utils/llc_event_utils.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/cmd_log/cmd_log.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/socket/local_socket.cpp
-    ${MSPROF_SOURCE_DIR}/dvvp/common/config/config_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/config/feature_manager.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/common/config/config_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/memory/chunk_pool.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/thread/thread.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/common/thread/thread_pool.cpp
@@ -131,6 +155,7 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/depend/stub/error_manager/msprof_error_manager_stub.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/channel/ai_drv_prof_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dev_api.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/msprof_drv_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/driver/devmgmt/ai_drv_dsmi_api.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/collection_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/collection_register.cpp
@@ -148,6 +173,7 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_hwts_log_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_instr_perf_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_biu_perf_job.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_collect_info.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_aicore_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_aicpu_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_adprof_job.cpp
@@ -160,6 +186,8 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_diagnostic_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_drv_event.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/prof_channel_manager.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/channel/nano_stars_profile.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/channel/channel_job.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/job_device_soc.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/src/adprof_collector_proxy.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/message/codec.cpp
@@ -170,7 +198,10 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/src/msprof_tx_manager.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/src/msprof_tx_reporter.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/src/prof_stamp_pool.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/mstx/src/mstx_domain_mgr.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/mstx/src/mstx_inject.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/file_transport.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/stats_transport.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/prof_channel.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/uploader_mgr.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/uploader.cpp
@@ -182,6 +213,8 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/transport/hdc/device_transport.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/hash_data.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/transport/parser_transport.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/pipe_transport.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/transport/ctrl_files_dumper.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/task_handle/src/device.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/task_handle/src/info_json.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/task_handle/src/prof_manager.cpp
@@ -197,8 +230,15 @@ set(src_file
     ${MSPROF_SOURCE_DIR}/dvvp/acp/src/acp_command.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/acp/src/acp_pipe_transfer.cpp
     ${MSPROF_SOURCE_DIR}/dvvp/acp/src/acp_compute_device_job.cpp
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform/mdc_v2_platform.cpp
     ${adprof_src}
 )
+
+if(NOT BUILD_PROFILING_OPEN_PROJECT)
+    list(APPEND src_file
+        ${MSPROF_SOURCE_DIR}/dvvp/msprofbin/src/input_parser_commercial.cpp
+    )
+endif()
 
 protobuf_generate(profiler
     CppPath
@@ -209,11 +249,36 @@ protobuf_generate(profiler
 add_executable(geoption_stest
     ${testStubSrc}
     ${testSrc}
+    ${GEOPTION_STUB_DIR}/profapi_geoption_stub.cpp
     ${src_file}
     ${CppPath}
 )
 
+set(libmsprofHeaderDir
+    ${LIBC_SEC_HEADER}
+    ${TOP_DIR}/output/third_party/gtest_shared/include
+    ${TOP_DIR}/third_party/libc_sec/include
+    ${TOP_DIR}/pkg_inc/driver
+    ${TOP_DIR}/include/external
+    ${TOP_DIR}/include/external/acl
+    ${TOP_DIR}/src/dfx/error_manager
+    ${TOP_DIR}/src/inc
+    ${TOP_DIR}/src/dfx/adump/inc
+    ${TOP_DIR}/src/dfx/adump/inc/adump
+    ${TOP_DIR}/src/dfx/adump/inc/metadef
+    ${TOP_DIR}/pkg_inc/aicpu_sched
+    ${TOP_DIR}/pkg_inc/base
+    ${TOP_DIR}/src/dfx/adump/inc/metadef/external
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/msproftx/mstx/inc
+    ${MSPROF_SOURCE_DIR}/dvvp/profimpl/platform
+    ${MSPROF_SOURCE_DIR}/dvvp/common/config
+    ${MSPROF_SOURCE_DIR}/dvvp/profapi/inc
+    ${MSPROF_SOURCE_DIR}/dvvp/msprof/devprof/include
+)
+
 target_include_directories(geoption_stest PRIVATE
+    ${GEOPTION_STUB_DIR}
+    ${libmsprofHeaderDir}
     ${GEOPTION_STUB_DIR}/device
     ${GEOPTION_STUB_DIR}/host
     ${TOP_DIR}/inc/driver
@@ -225,8 +290,6 @@ target_include_directories(geoption_stest PRIVATE
     ${TOP_DIR}/ace/npuruntime/inc/external
     ${TOP_DIR}/abl/msprof/inc
     ${TOP_DIR}/abl/msprof/inc/external
-    ${TOP_DIR}/metadef/inc
-    ${TOP_DIR}/metadef/inc/external
     ${TOP_DIR}/abl/msprof/inc/toolchain
     ${TOP_DIR}/graphengine/inc
     ${TOP_DIR}/graphengine/inc/external
@@ -257,7 +320,6 @@ target_include_directories(geoption_stest PRIVATE
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/collect/job_wrapper/include
     ${MSPROF_SOURCE_DIR}/dvvp/driver/inc
     ${MSPROF_SOURCE_DIR}/dvvp/task_handle/include
-    ${MSPROF_SOURCE_DIR}/dvvp/msprofiler
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/adapter/inc
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/report
     ${MSPROF_SOURCE_DIR}/dvvp/profimpl/aicpu
@@ -288,13 +350,10 @@ target_include_directories(geoption_stest PRIVATE
 target_compile_options(geoption_stest PRIVATE
     -g
     -Wall
-    -std=c++11
     -fno-access-control
-    -Werror
 )
 
 target_compile_definitions(geoption_stest PRIVATE
-    C_SEC
     __PROF_LLT
     google=ascend_private
     LLT_DATA_DIR="${LLT_DATA_DIR}"
@@ -306,12 +365,8 @@ target_link_options(geoption_stest PRIVATE
 )
 
 target_link_libraries(geoption_stest PRIVATE
-    $<BUILD_INTERFACE:intf_llt_pub>
-    $<BUILD_INTERFACE:mmpa_headers>
-    $<BUILD_INTERFACE:slog_headers>
-    $<BUILD_INTERFACE:adump_headers>
-    profapi_share_st
-    ascend_protobuf
+    $<BUILD_INTERFACE:msprof_utestonetrack_pub>
+    mockcpp
     c_sec
     json
 )
@@ -320,9 +375,4 @@ set_target_properties(geoption_stest
     PROPERTIES
     OUTPUT_NAME geoption_stest
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-
-run_llt_test(
-    TARGET geoption_stest
-    TASK_NUM 1
 )

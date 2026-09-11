@@ -11,6 +11,7 @@
 #include "prof_drv_event.h"
 #include "errno/error_code.h"
 #include "ai_drv_prof_api.h"
+#include "msprof_drv_api.h"
 #include "platform/platform.h"
 
 namespace Analysis {
@@ -26,7 +27,7 @@ ProfDrvEvent::ProfDrvEvent() {}
 
 ProfDrvEvent::~ProfDrvEvent() {}
 
-int32_t ProfDrvEvent::SubscribeEventThreadInit(struct TaskEventAttr *eventAttr) const
+int32_t ProfDrvEvent::SubscribeEventThreadInit(struct TaskEventAttr* eventAttr) const
 {
     OsalUserBlock userBlock;
     OsalThreadAttr threadAttr = {0, 0, 0, 0, 0, 0, 0};
@@ -34,8 +35,9 @@ int32_t ProfDrvEvent::SubscribeEventThreadInit(struct TaskEventAttr *eventAttr) 
     userBlock.pulArg = eventAttr;
     int32_t ret = OsalCreateTaskWithThreadAttr(&eventAttr->handle, &userBlock, &threadAttr);
     if (ret != OSAL_EN_OK) {
-        MSPROF_LOGE("Start task wait event thread for device %u failed, strerr : %s",
-            eventAttr->deviceId, strerror(OsalGetErrorCode()));
+        MSPROF_LOGE(
+            "Start task wait event thread for device %u failed, error message: %s", eventAttr->deviceId,
+            strerror(OsalGetErrorCode()));
         return PROFILING_FAILED;
     }
     eventAttr->isThreadStart = true;
@@ -43,20 +45,20 @@ int32_t ProfDrvEvent::SubscribeEventThreadInit(struct TaskEventAttr *eventAttr) 
     return PROFILING_SUCCESS;
 }
 
-void *ProfDrvEvent::EventThreadHandle(void *attr)
+void* ProfDrvEvent::EventThreadHandle(void* attr)
 {
     if (attr == nullptr) {
         MSPROF_LOGE("attr is nullptr");
         return nullptr;
     }
-    struct TaskEventAttr *eventAttr = static_cast<struct TaskEventAttr *>(attr);
+    struct TaskEventAttr* eventAttr = static_cast<struct TaskEventAttr*>(attr);
     MSPROF_EVENT("Start drv event thread, device id:%u, channel id:%d", eventAttr->deviceId, eventAttr->channelId);
 
-    if (QueryDevPid(eventAttr) != PROFILING_SUCCESS) {    // make sure aicpu bind pid before attach
+    if (QueryDevPid(eventAttr) != PROFILING_SUCCESS) { // make sure aicpu bind pid before attach
         MSPROF_LOGW("Unable to query device pid");
         return nullptr;
     }
-    drvError_t ret = halEschedAttachDevice(eventAttr->deviceId);              // attach process to device
+    drvError_t ret = MsprofDrvApi::instance()->halEschedAttachDevice(eventAttr->deviceId); // attach process to device
     if (ret != DRV_ERROR_NONE) {
         MSPROF_LOGE("Call halEschedAttachDevice failed, devId=%u, ret=%d", eventAttr->deviceId, ret);
         return nullptr;
@@ -73,16 +75,16 @@ void *ProfDrvEvent::EventThreadHandle(void *attr)
         }
         int32_t err = Platform::instance()->HalEschedCreateGrpEx(eventAttr->deviceId, &grpPara, &grpId);
         if (err != DRV_ERROR_NONE) {
-            (void)halEschedDettachDevice(eventAttr->deviceId);                    // dettach process from device
+            (void)MsprofDrvApi::instance()->halEschedDettachDevice(eventAttr->deviceId); // dettach from device
             MSPROF_LOGW("Called halEschedCreateGrpEx unsuccessfully. (devId=%u, ret=%d)\n", eventAttr->deviceId, err);
             return nullptr;
         }
         MSPROF_LOGI("create grp id:%u by name '%s'", grpId, eventAttr->grpName);
 
         uint64_t eventBitmap = (1ULL << static_cast<uint64_t>(EVENT_USR_START));
-        ret = halEschedSubscribeEvent(eventAttr->deviceId, grpId, 0, eventBitmap);
+        ret = MsprofDrvApi::instance()->halEschedSubscribeEvent(eventAttr->deviceId, grpId, 0, eventBitmap);
         if (ret != DRV_ERROR_NONE) {
-            (void)halEschedDettachDevice(eventAttr->deviceId);
+            (void)MsprofDrvApi::instance()->halEschedDettachDevice(eventAttr->deviceId);
             MSPROF_LOGE("Call halEschedSubscribeEvent failed, devId=%u, ret=%d", eventAttr->deviceId, ret);
             return nullptr;
         }
@@ -94,7 +96,7 @@ void *ProfDrvEvent::EventThreadHandle(void *attr)
     return nullptr;
 }
 
-int32_t ProfDrvEvent::QueryGroupId(uint32_t devId, uint32_t &grpId, const char *grpName)
+int32_t ProfDrvEvent::QueryGroupId(uint32_t devId, uint32_t& grpId, const char* grpName)
 {
     struct esched_query_gid_output gidOut = {0};
     struct esched_query_gid_input gidIn = {0, {0}};
@@ -116,7 +118,7 @@ int32_t ProfDrvEvent::QueryGroupId(uint32_t devId, uint32_t &grpId, const char *
     return PROFILING_FAILED;
 }
 
-int32_t ProfDrvEvent::QueryDevPid(const struct TaskEventAttr *eventAttr)
+int32_t ProfDrvEvent::QueryDevPid(const struct TaskEventAttr* eventAttr)
 {
     enum devdrv_process_type procType = DEVDRV_PROCESS_CPTYPE_MAX;
     if (eventAttr->channelId == PROF_CHANNEL_AICPU || eventAttr->channelId == PROF_CHANNEL_CUS_AICPU) {
@@ -132,46 +134,51 @@ int32_t ProfDrvEvent::QueryDevPid(const struct TaskEventAttr *eventAttr)
     drvError_t ret = DRV_ERROR_NOT_SUPPORT;
     int32_t i = 0;
     while (((i < waitCount) && (!eventAttr->isExit)) || eventAttr->isWaitDevPid) {
-        ret = halQueryDevpid(hostpidinfo, &devPid);
+        ret = MsprofDrvApi::instance()->halQueryDevpid(hostpidinfo, &devPid);
         if (ret == DRV_ERROR_NONE) {
-            MSPROF_LOGI("Query devPid succ, devId:%u, hostPid:%d, devPid:%d, isWaitDevPid:%d", eventAttr->deviceId,
-                hostPid, devPid, eventAttr->isWaitDevPid);
+            MSPROF_LOGI(
+                "Query devPid succ, devId:%u, hostPid:%d, devPid:%d, isWaitDevPid:%d", eventAttr->deviceId, hostPid,
+                devPid, eventAttr->isWaitDevPid);
             return PROFILING_SUCCESS;
         }
         MSPROF_LOGD("Query devPid failed, devId:%u, hostPid:%d, ret:%d.", eventAttr->deviceId, hostPid, ret);
         OsalSleep(waitTime);
-        i++;     
+        i++;
     }
     return PROFILING_FAILED;
 }
 
-void ProfDrvEvent::WaitEvent(struct TaskEventAttr *eventAttr, uint32_t grpId)
+void ProfDrvEvent::WaitEvent(struct TaskEventAttr* eventAttr, uint32_t grpId)
 {
     MSPROF_LOGI("Start wait drv event, device id:%u, channel id:%d", eventAttr->deviceId, eventAttr->channelId);
     event_info event{{EVENT_MAX_NUM, 0, 0, 0, 0, 0, 0}, {0, {0}}};
     bool onceFlag = true;
-    int32_t timeout = 1;  // first timeout need to check channel is valid
+    int32_t timeout = 1; // first timeout need to check channel is valid
     while (!eventAttr->isExit) {
-        drvError_t err = halEschedWaitEvent(eventAttr->deviceId, grpId, 0, timeout, &event);
+        drvError_t err = MsprofDrvApi::instance()->halEschedWaitEvent(eventAttr->deviceId, grpId, 0, timeout, &event);
         timeout = DRV_EVENT_TIMEOUT;
 
         if (err == DRV_ERROR_NONE) {
-            MSPROF_LOGI("Receive event, devId:%u, channelId:%d, eventId:%d",
-                eventAttr->deviceId, eventAttr->channelId, event.comm.event_id);
+            MSPROF_LOGI(
+                "Receive event, devId:%u, channelId:%d, eventId:%d", eventAttr->deviceId, eventAttr->channelId,
+                event.comm.event_id);
             if (event.comm.event_id != EVENT_USR_START) {
-                MSPROF_LOGE("Receive unexpected event, devId:%u, channelId:%d, eventId:%d",
-                    eventAttr->deviceId, eventAttr->channelId, event.comm.event_id);
+                MSPROF_LOGE(
+                    "Receive unexpected event, devId:%u, channelId:%d, eventId:%d", eventAttr->deviceId,
+                    eventAttr->channelId, event.comm.event_id);
                 return;
             }
             if (DrvChannelsMgr::instance()->GetAllChannels(eventAttr->deviceId) == PROFILING_SUCCESS &&
                 DrvChannelsMgr::instance()->ChannelIsValid(eventAttr->deviceId, eventAttr->channelId)) {
-                MSPROF_LOGI("Channel is valid, devId:%u, channelId:%d",
-                    eventAttr->deviceId, static_cast<int32_t>(eventAttr->channelId));
+                MSPROF_LOGI(
+                    "Channel is valid, devId:%u, channelId:%d", eventAttr->deviceId,
+                    static_cast<int32_t>(eventAttr->channelId));
                 eventAttr->isChannelValid = true;
                 (void)CollectionRegisterMgr::instance()->CollectionJobRun(eventAttr->deviceId, eventAttr->jobTag);
             } else {
-                MSPROF_LOGE("Receive event but channel is invalid, devId:%u, channel id:%d",
-                    eventAttr->deviceId, static_cast<int32_t>(eventAttr->channelId));
+                MSPROF_LOGE(
+                    "Receive event but channel is invalid, devId:%u, channel id:%d", eventAttr->deviceId,
+                    static_cast<int32_t>(eventAttr->channelId));
             }
             return;
         } else if ((err == DRV_ERROR_SCHED_WAIT_TIMEOUT) || (err == DRV_ERROR_NO_EVENT)) {
@@ -191,8 +198,9 @@ void ProfDrvEvent::WaitEvent(struct TaskEventAttr *eventAttr, uint32_t grpId)
             continue;
         }
 
-        MSPROF_LOGE("Wait event failed, device id:%u, channel id:%d, return:%d",
-            eventAttr->deviceId, eventAttr->channelId, err);
+        MSPROF_LOGE(
+            "Wait event failed, device id:%u, channel id:%d, return:%d", eventAttr->deviceId, eventAttr->channelId,
+            err);
         return;
     }
 }
@@ -200,11 +208,11 @@ void ProfDrvEvent::WaitEvent(struct TaskEventAttr *eventAttr, uint32_t grpId)
 void ProfDrvEvent::SubscribeEventThreadUninit(uint32_t devId) const
 {
     // dettach process from device
-    drvError_t ret = halEschedDettachDevice(devId);
+    drvError_t ret = MsprofDrvApi::instance()->halEschedDettachDevice(devId);
     if (ret != DRV_ERROR_NONE) {
         MSPROF_LOGW("call halEschedDettachDevice ret: %d", ret);
     }
 }
-}
-}
-}
+} // namespace JobWrapper
+} // namespace Dvvp
+} // namespace Analysis

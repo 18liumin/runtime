@@ -32,9 +32,10 @@ set(libalogHeaderDir
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../utils
     ${CMAKE_CURRENT_SOURCE_DIR}/../dlog_communication
     ${CMAKE_CURRENT_SOURCE_DIR}/../plog
+    ${TOOLAHCIN_LOG_DIR}/../../../include/dfx/base
     ${CMAKE_CURRENT_SOURCE_DIR}/../
-    ${TOOLAHCIN_LOG_DIR}/../../../include/driver
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../mmpa/inc/mmpa
+    ${TOOLAHCIN_LOG_DIR}/../../../pkg_inc/driver
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../pkg_inc/mmpa
     ${TOOLAHCIN_LOG_DIR}/inc/toolchain
 )
 
@@ -42,7 +43,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 11)
 
 add_library(slog
-    SHARED
+    SHARED EXCLUDE_FROM_ALL
         ${libalogSrcFiles})
 
 target_include_directories(slog
@@ -144,6 +145,7 @@ target_link_options(alog
     PRIVATE
         -Wl,-z,relro,-z,now,-z,noexecstack
         -Wl,--gc-sections
+        $<$<CONFIG:Release>:-s>
 )
 
 target_link_libraries(alog
@@ -162,6 +164,10 @@ set_target_properties(alog
     WINDOWS_EXPORT_ALL_SYMBOLS TRUE
     LIBRARY_OUTPUT_DIRECTORY alog
     OUTPUT_NAME $<IF:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>,libascendalog,ascendalog>
+)
+
+install(TARGETS alog
+    LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR} OPTIONAL
 )
 
 install(TARGETS alog
